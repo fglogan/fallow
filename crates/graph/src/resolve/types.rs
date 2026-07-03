@@ -5,6 +5,7 @@ use std::sync::Mutex;
 
 use oxc_resolver::Resolver;
 use rustc_hash::{FxHashMap, FxHashSet};
+use serde_json::Value;
 
 use plow_types::discover::FileId;
 
@@ -13,6 +14,8 @@ use plow_types::discover::FileId;
 pub enum ResolveResult {
     /// Resolved to a file within the project.
     InternalModule(FileId),
+    /// Resolved to a project file through a framework convention auto-import.
+    SyntheticAutoImport(FileId),
     /// Resolved to a workspace or self package source file while preserving
     /// dependency usage for package accounting.
     InternalPackageModule {
@@ -34,11 +37,17 @@ impl ResolveResult {
     #[must_use]
     pub const fn internal_file_id(&self) -> Option<FileId> {
         match self {
-            Self::InternalModule(file_id) | Self::InternalPackageModule { file_id, .. } => {
-                Some(*file_id)
-            }
+            Self::InternalModule(file_id)
+            | Self::SyntheticAutoImport(file_id)
+            | Self::InternalPackageModule { file_id, .. } => Some(*file_id),
             Self::ExternalFile(_) | Self::NpmPackage(_) | Self::Unresolvable(_) => None,
         }
+    }
+
+    /// Return whether this edge was synthesized from framework auto-import conventions.
+    #[must_use]
+    pub const fn is_synthetic_auto_import(&self) -> bool {
+        matches!(self, Self::SyntheticAutoImport(_))
     }
 
     /// Return the package name that should receive dependency usage credit.
@@ -48,7 +57,10 @@ impl ResolveResult {
             Self::InternalPackageModule { package_name, .. } | Self::NpmPackage(package_name) => {
                 Some(package_name)
             }
-            Self::InternalModule(_) | Self::ExternalFile(_) | Self::Unresolvable(_) => None,
+            Self::InternalModule(_)
+            | Self::SyntheticAutoImport(_)
+            | Self::ExternalFile(_)
+            | Self::Unresolvable(_) => None,
         }
     }
 }
@@ -145,8 +157,10 @@ pub struct ResolvedModule {
     pub resolved_dynamic_patterns: Vec<(plow_types::extract::DynamicImportPattern, Vec<FileId>)>,
     /// Static member accesses (e.g., `Status.Active`).
     pub member_accesses: Vec<plow_types::extract::MemberAccess>,
+    /// Typed semantic facts produced by extraction for cross-layer analysis.
+    pub semantic_facts: Box<[plow_types::extract::SemanticFact]>,
     /// Identifiers used as whole objects (Object.values, for..in, spread, etc.).
-    pub whole_object_uses: Vec<String>,
+    pub whole_object_uses: Box<[String]>,
     /// Whether this module uses `CommonJS` exports.
     pub has_cjs_exports: bool,
     /// Whether this module declares at least one Angular `@Component({
@@ -162,6 +176,9 @@ pub struct ResolvedModule {
     /// Namespace-import aliases re-exported through an object literal.
     /// See `plow_types::extract::NamespaceObjectAlias` for the shape.
     pub namespace_object_aliases: Vec<plow_types::extract::NamespaceObjectAlias>,
+    /// Exported free-function factories that provably return one class instance.
+    /// See `plow_types::extract::FactoryReturnExport` and issue #1441 (Part A).
+    pub exported_factory_returns: Box<[plow_types::extract::FactoryReturnExport]>,
 }
 
 impl Default for ResolvedModule {
@@ -175,13 +192,15 @@ impl Default for ResolvedModule {
             resolved_dynamic_imports: vec![],
             resolved_dynamic_patterns: vec![],
             member_accesses: vec![],
-            whole_object_uses: vec![],
+            semantic_facts: Box::default(),
+            whole_object_uses: Box::default(),
             has_cjs_exports: false,
             has_angular_component_template_url: false,
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
+            exported_factory_returns: Box::default(),
         }
     }
 }
@@ -259,6 +278,81 @@ pub(super) struct ResolveContext<'a> {
     /// warning per affected file. Shared across all parallel resolver
     /// threads via `Mutex`. Empty and unused when no tsconfig errors occur.
     pub tsconfig_warned: &'a Mutex<FxHashSet<String>>,
+    /// Per-analysis cache for local tsconfig discovery and JSON parsing.
+    /// Import resolution calls these fallbacks for every unresolved or
+    /// tsconfig-poisoned specifier, so keeping it session-local avoids
+    /// repeated filesystem work without risking stale data across runs.
+    pub tsconfig_cache: &'a TsconfigCache,
+    /// Per-analysis cache of `dunce::canonicalize` results keyed by resolved
+    /// path. Every import resolving to a `node_modules` / output-dir / symlinked
+    /// target is realpath'd during classification, and the same package path is
+    /// re-canonicalized for every file that imports the package. The result is a
+    /// pure function of the path's on-disk state (constant within a run), so the
+    /// cache is session-local for watch-mode safety.
+    pub canonicalize_cache: &'a CanonicalizeCache,
+}
+
+/// Session-local cache of `dunce::canonicalize` results keyed by input path.
+#[derive(Default)]
+pub(super) struct CanonicalizeCache {
+    map: Mutex<FxHashMap<PathBuf, Option<PathBuf>>>,
+}
+
+impl CanonicalizeCache {
+    /// Return the cached `dunce::canonicalize(path)` outcome, computing it on
+    /// first miss. `None` (a path that fails to canonicalize) is cached too so a
+    /// repeated probe of the same missing path does not re-issue the syscall.
+    pub fn get(&self, path: &Path) -> Option<PathBuf> {
+        if let Ok(cache) = self.map.lock()
+            && let Some(value) = cache.get(path)
+        {
+            return value.clone();
+        }
+        let value = dunce::canonicalize(path).ok();
+        if let Ok(mut cache) = self.map.lock() {
+            cache.insert(path.to_path_buf(), value.clone());
+        }
+        value
+    }
+}
+
+/// Session-local cache for tsconfig helper lookups used during import resolution.
+#[derive(Default)]
+pub(super) struct TsconfigCache {
+    json: Mutex<FxHashMap<PathBuf, Option<Value>>>,
+    chains: Mutex<FxHashMap<PathBuf, Vec<PathBuf>>>,
+}
+
+impl TsconfigCache {
+    /// Return a cached parsed tsconfig JSON value, loading it on first miss.
+    pub fn json(&self, path: &Path, load: impl FnOnce(&Path) -> Option<Value>) -> Option<Value> {
+        if let Ok(cache) = self.json.lock()
+            && let Some(value) = cache.get(path)
+        {
+            return value.clone();
+        }
+
+        let value = load(path);
+        if let Ok(mut cache) = self.json.lock() {
+            cache.insert(path.to_path_buf(), value.clone());
+        }
+        value
+    }
+
+    /// Return the cached tsconfig chain for a source file, if one exists.
+    pub fn chain(&self, from_file: &Path) -> Option<Vec<PathBuf>> {
+        self.chains
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(from_file).cloned())
+    }
+
+    /// Store the computed tsconfig chain for a source file.
+    pub fn store_chain(&self, from_file: &Path, chain: Vec<PathBuf>) {
+        if let Ok(mut cache) = self.chains.lock() {
+            cache.insert(from_file.to_path_buf(), chain);
+        }
+    }
 }
 
 /// Package manifest data used by source fallbacks.

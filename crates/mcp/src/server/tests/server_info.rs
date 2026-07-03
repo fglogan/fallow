@@ -44,9 +44,11 @@ fn all_tools_registered() {
     assert!(names.contains(&"get_blast_radius".to_string()));
     assert!(names.contains(&"get_importance".to_string()));
     assert!(names.contains(&"get_cleanup_candidates".to_string()));
+    assert!(names.contains(&"get_token_blast_radius".to_string()));
     assert!(names.contains(&"impact".to_string()));
     assert!(names.contains(&"impact_all".to_string()));
-    assert_eq!(tools.len(), 25);
+    assert!(names.contains(&"decision_surface".to_string()));
+    assert_eq!(tools.len(), 27);
 }
 
 #[test]
@@ -68,6 +70,7 @@ fn read_only_tools_have_annotations() {
         "trace_clone",
         "check_health",
         "audit",
+        "decision_surface",
         "plow_explain",
         "list_boundaries",
         "feature_flags",
@@ -76,6 +79,7 @@ fn read_only_tools_have_annotations() {
         "get_blast_radius",
         "get_importance",
         "get_cleanup_candidates",
+        "get_token_blast_radius",
         "impact",
         "impact_all",
     ];
@@ -144,6 +148,7 @@ fn open_world_hint_on_analysis_tools() {
         "trace_clone",
         "check_health",
         "audit",
+        "decision_surface",
         "list_boundaries",
         "feature_flags",
         "check_runtime_coverage",
@@ -231,6 +236,7 @@ fn server_instructions_mention_all_tools() {
     assert!(instructions.contains("trace_clone"));
     assert!(instructions.contains("check_health"));
     assert!(instructions.contains("audit"));
+    assert!(instructions.contains("decision_surface"));
     assert!(instructions.contains("plow_explain"));
     assert!(instructions.contains("list_boundaries"));
     assert!(instructions.contains("feature_flags"));
@@ -803,6 +809,62 @@ fn audit_schema_contains_expected_properties() {
 }
 
 #[test]
+fn decision_surface_schema_contains_expected_properties() {
+    let server = PlowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "decision_surface").unwrap();
+    let schema = serde_json::to_string(&tool.input_schema).unwrap();
+    for prop in [
+        "root",
+        "config",
+        "base",
+        "max_decisions",
+        "workspace",
+        "no_cache",
+        "threads",
+    ] {
+        assert!(
+            schema.contains(prop),
+            "decision_surface schema should contain property '{prop}'"
+        );
+    }
+}
+
+#[test]
+fn decision_surface_description_frames_solid_3_cap_and_anchoring() {
+    let server = PlowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "decision_surface").unwrap();
+    let desc = tool.description.as_deref().unwrap();
+    for expected in [
+        "decision-surface",
+        "signal_id",
+        "REJECTED",
+        "SOLID-3",
+        "coupling-boundary",
+        "public-api-contract",
+        "dependency",
+        "plow-ignore",
+        "exits 0",
+    ] {
+        assert!(
+            desc.contains(expected),
+            "decision_surface description should mention {expected}"
+        );
+    }
+}
+
+#[test]
+fn decision_surface_is_read_only_open_world() {
+    let server = PlowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "decision_surface").unwrap();
+    let ann = tool.annotations.as_ref().unwrap();
+    assert_eq!(ann.read_only_hint, Some(true));
+    assert_eq!(ann.open_world_hint, Some(true));
+}
+
+#[test]
 fn impact_schema_contains_root_and_omits_inert_flags() {
     let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
@@ -1159,8 +1221,7 @@ fn feature_flags_schema_contains_expected_properties() {
         "config",
         "production",
         "workspace",
-        "flag_type",
-        "confidence",
+        "top",
         "no_cache",
         "threads",
     ] {

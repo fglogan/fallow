@@ -8,8 +8,8 @@ def in_changed: . as $path | $changed | any(. == $path);
 
 # Filter dead-code (check) results and recalculate total_issues.
 # Dependency-level issues (unused_dependencies, unused_dev_dependencies, unused_optional_dependencies,
-# type_only_dependencies) are intentionally NOT filtered — they are project-wide concerns not
-# attributable to individual changed files. They are still included in total_issues.
+# type_only_dependencies, test_only_dependencies) are intentionally NOT filtered: they are
+# project-wide concerns not attributable to individual changed files. They are still counted in total_issues.
 def filter_check:
   (if .unused_files         then .unused_files         |= map(select(.path | in_changed))      else . end) |
   (if .unused_exports       then .unused_exports       |= map(select(.path | in_changed))      else . end) |
@@ -73,6 +73,33 @@ def filter_check:
   (if .dynamic_segment_name_conflicts then
     .dynamic_segment_name_conflicts |= map(select(.path | in_changed))
   else . end) |
+  (if .unused_server_actions then
+    .unused_server_actions |= map(select(.path | in_changed))
+  else . end) |
+  (if .unrendered_components then
+    .unrendered_components |= map(select(.path | in_changed))
+  else . end) |
+  (if .unused_component_props then
+    .unused_component_props |= map(select(.path | in_changed))
+  else . end) |
+  (if .unused_component_emits then
+    .unused_component_emits |= map(select(.path | in_changed))
+  else . end) |
+  (if .unused_component_inputs then
+    .unused_component_inputs |= map(select(.path | in_changed))
+  else . end) |
+  (if .unused_component_outputs then
+    .unused_component_outputs |= map(select(.path | in_changed))
+  else . end) |
+  (if .unused_svelte_events then
+    .unused_svelte_events |= map(select(.path | in_changed))
+  else . end) |
+  (if .unprovided_injects then
+    .unprovided_injects |= map(select(.path | in_changed))
+  else . end) |
+  (if .unused_load_data_keys then
+    .unused_load_data_keys |= map(select(.path | in_changed))
+  else . end) |
   # Recalculate total_issues from filtered arrays
   (if .total_issues != null then
     .total_issues = (
@@ -96,6 +123,7 @@ def filter_check:
       (.boundary_call_violations // [] | length) +
       (.policy_violations // [] | length) +
       (.type_only_dependencies // [] | length) +
+      (.test_only_dependencies // [] | length) +
       (.stale_suppressions // [] | length) +
       (.unused_catalog_entries // [] | length) +
       (.empty_catalog_groups // [] | length) +
@@ -106,7 +134,16 @@ def filter_check:
       (.mixed_client_server_barrels // [] | length) +
       (.misplaced_directives // [] | length) +
       (.route_collisions // [] | length) +
-      (.dynamic_segment_name_conflicts // [] | length)
+      (.dynamic_segment_name_conflicts // [] | length) +
+      (.unused_server_actions // [] | length) +
+      (.unrendered_components // [] | length) +
+      (.unused_component_props // [] | length) +
+      (.unused_component_emits // [] | length) +
+      (.unused_component_inputs // [] | length) +
+      (.unused_component_outputs // [] | length) +
+      (.unused_svelte_events // [] | length) +
+      (.unprovided_injects // [] | length) +
+      (.unused_load_data_keys // [] | length)
     )
   else . end);
 

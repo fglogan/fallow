@@ -9,8 +9,8 @@ use plow_types::discover::{DiscoveredFile, FileId};
 use crate::extract::{ImportInfo, ImportedName, parse_from_content};
 use crate::plugins::AggregatedPluginResult;
 use crate::resolve::{
-    ResolveResult, ResolvedImport, ResolvedModule, extract_package_name_from_node_modules_path,
-    resolve_all_imports,
+    ResolveAllImportsInput, ResolveResult, ResolvedImport, ResolvedModule, ResolverSession,
+    extract_package_name_from_node_modules_path, resolve_all_imports_with_session,
 };
 
 pub fn augment_external_style_package_usage(
@@ -169,10 +169,42 @@ fn is_storybook_static_dir_external_style(
     })
 }
 
+/// The project-level [`ResolveAllImportsInput`] fields shared by every
+/// per-stylesheet resolution: workspaces, active plugins, aliases, include
+/// paths, root, and conditions. `modules` / `files` default to empty and are
+/// overridden per call via functional-update syntax. The same value also seeds
+/// the reused [`ResolverSession`], so the session's project context always
+/// matches the per-call inputs.
+fn base_resolve_input<'a>(
+    config: &'a ResolvedConfig,
+    workspaces: &'a [WorkspaceInfo],
+    plugin_result: &'a AggregatedPluginResult,
+) -> ResolveAllImportsInput<'a> {
+    ResolveAllImportsInput {
+        modules: &[],
+        files: &[],
+        workspaces,
+        active_plugins: &plugin_result.active_plugins,
+        path_aliases: &plugin_result.path_aliases,
+        auto_imports: &[],
+        scss_include_paths: &plugin_result.scss_include_paths,
+        static_dir_mappings: &plugin_result.static_dir_mappings,
+        root: &config.root,
+        extra_conditions: &config.resolve.conditions,
+    }
+}
+
 struct ExternalStylePackageScanner<'a> {
     config: &'a ResolvedConfig,
     workspaces: &'a [WorkspaceInfo],
     plugin_result: &'a AggregatedPluginResult,
+    /// Resolver state built once for the project, reused for every per-stylesheet
+    /// resolution. The scanner resolves each node_modules stylesheet individually
+    /// (recursing through `@import` / `@use` chains), so rebuilding the resolver,
+    /// package manifests, and workspace canonicalization per file (the old
+    /// `resolve_all_imports` path) was redundant work proportional to the number
+    /// of external stylesheets.
+    session: ResolverSession,
     memo: FxHashMap<PathBuf, FxHashSet<String>>,
     visiting: FxHashSet<PathBuf>,
 }
@@ -183,10 +215,12 @@ impl<'a> ExternalStylePackageScanner<'a> {
         workspaces: &'a [WorkspaceInfo],
         plugin_result: &'a AggregatedPluginResult,
     ) -> Self {
+        let session = ResolverSession::new(&base_resolve_input(config, workspaces, plugin_result));
         Self {
             config,
             workspaces,
             plugin_result,
+            session,
             memo: FxHashMap::default(),
             visiting: FxHashSet::default(),
         }
@@ -206,80 +240,87 @@ impl<'a> ExternalStylePackageScanner<'a> {
             packages.insert(owner);
         }
 
-        if !is_trackable_external_style_path(&canonical) {
-            self.visiting.remove(&canonical);
-            self.memo.insert(canonical.clone(), packages.clone());
-            return packages;
-        }
-
-        let Ok(source) = std::fs::read_to_string(&canonical) else {
-            self.visiting.remove(&canonical);
-            self.memo.insert(canonical.clone(), packages.clone());
-            return packages;
-        };
-
-        let file = DiscoveredFile {
-            id: FileId(0),
-            path: canonical.clone(),
-            size_bytes: source.len() as u64,
-        };
-        let module = parse_from_content(FileId(0), &canonical, &source);
-        let resolved = resolve_all_imports(
-            &[module],
-            &[file],
-            self.workspaces,
-            &self.plugin_result.active_plugins,
-            &self.plugin_result.path_aliases,
-            &[],
-            &self.plugin_result.scss_include_paths,
-            &self.plugin_result.static_dir_mappings,
-            &self.config.root,
-            &self.config.resolve.conditions,
-        );
-
-        if let Some(resolved_module) = resolved.first() {
-            for import in resolved_module.all_resolved_imports() {
-                match &import.target {
-                    ResolveResult::NpmPackage(name) => {
-                        packages.insert(name.clone());
-                    }
-                    ResolveResult::ExternalFile(child) => {
-                        if let Some(owner) = extract_package_name_from_node_modules_path(child) {
-                            packages.insert(owner);
-                        }
-                        if is_trackable_external_style_path(child) {
-                            packages.extend(self.scan(child));
-                        }
-                    }
-                    ResolveResult::Unresolvable(_) => {
-                        let child =
-                            resolve_external_relative_style_import(&canonical, &import.info.source)
-                                .or_else(|| {
-                                    resolve_root_relative_style_import(
-                                        &self.config.root,
-                                        &import.info.source,
-                                    )
-                                });
-
-                        if let Some(child) = child {
-                            if let Some(owner) = extract_package_name_from_node_modules_path(&child)
-                            {
-                                packages.insert(owner);
-                            }
-                            if is_trackable_external_style_path(&child) {
-                                packages.extend(self.scan(&child));
-                            }
-                        }
-                    }
-                    ResolveResult::InternalModule(_)
-                    | ResolveResult::InternalPackageModule { .. } => {}
-                }
-            }
+        if is_trackable_external_style_path(&canonical)
+            && let Ok(source) = std::fs::read_to_string(&canonical)
+        {
+            self.scan_style_imports(&canonical, &source, &mut packages);
         }
 
         self.visiting.remove(&canonical);
         self.memo.insert(canonical.clone(), packages.clone());
         packages
+    }
+
+    /// Parse `source` for `canonical` and fold every resolvable import's owning
+    /// package (recursing through trackable style children) into `packages`.
+    fn scan_style_imports(
+        &mut self,
+        canonical: &Path,
+        source: &str,
+        packages: &mut FxHashSet<String>,
+    ) {
+        let file = DiscoveredFile {
+            id: FileId(0),
+            path: canonical.to_path_buf(),
+            size_bytes: source.len() as u64,
+        };
+        let module = parse_from_content(FileId(0), canonical, source);
+        let resolved = resolve_all_imports_with_session(
+            &ResolveAllImportsInput {
+                modules: &[module],
+                files: &[file],
+                ..base_resolve_input(self.config, self.workspaces, self.plugin_result)
+            },
+            &self.session,
+        );
+
+        let Some(resolved_module) = resolved.first() else {
+            return;
+        };
+        for import in resolved_module.all_resolved_imports() {
+            self.scan_import_target(canonical, import, packages);
+        }
+    }
+
+    /// Resolve one import's target into owning package names, recursing through
+    /// trackable external style children.
+    fn scan_import_target(
+        &mut self,
+        canonical: &Path,
+        import: &ResolvedImport,
+        packages: &mut FxHashSet<String>,
+    ) {
+        match &import.target {
+            ResolveResult::NpmPackage(name) => {
+                packages.insert(name.clone());
+            }
+            ResolveResult::ExternalFile(child) => {
+                self.absorb_style_child(child, packages);
+            }
+            ResolveResult::Unresolvable(_) => {
+                let child = resolve_external_relative_style_import(canonical, &import.info.source)
+                    .or_else(|| {
+                        resolve_root_relative_style_import(&self.config.root, &import.info.source)
+                    });
+                if let Some(child) = child {
+                    self.absorb_style_child(&child, packages);
+                }
+            }
+            ResolveResult::InternalModule(_)
+            | ResolveResult::SyntheticAutoImport(_)
+            | ResolveResult::InternalPackageModule { .. } => {}
+        }
+    }
+
+    /// Record `child`'s owning package and recurse into it when it is a
+    /// trackable external style file.
+    fn absorb_style_child(&mut self, child: &Path, packages: &mut FxHashSet<String>) {
+        if let Some(owner) = extract_package_name_from_node_modules_path(child) {
+            packages.insert(owner);
+        }
+        if is_trackable_external_style_path(child) {
+            packages.extend(self.scan(child));
+        }
     }
 }
 

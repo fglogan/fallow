@@ -21,11 +21,11 @@ use super::predicates::{
 /// Vite/Parcel-style projects and their referenced assets are tracked via edges.
 ///
 /// Barrel files (index.ts that only re-export) are excluded when their re-export
-/// sources are reachable — they serve an organizational purpose even if consumers
+/// sources are reachable , they serve an organizational purpose even if consumers
 /// import directly from the source files rather than through the barrel.
 #[deprecated(
     since = "2.76.0",
-    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/plow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_api::run_dead_code for typed output; serialize with plow_api::serialize_dead_code_programmatic_json for JSON output. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn find_unused_files(
     graph: &ModuleGraph,
@@ -126,13 +126,15 @@ mod tests {
                 resolved_dynamic_imports: vec![],
                 resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
-                whole_object_uses: vec![],
+                semantic_facts: Box::default(),
+                whole_object_uses: Box::default(),
                 has_cjs_exports: false,
                 has_angular_component_template_url: false,
                 unused_import_bindings: FxHashSet::default(),
                 type_referenced_import_bindings: vec![],
                 value_referenced_import_bindings: vec![],
                 namespace_object_aliases: vec![],
+                exported_factory_returns: Box::default(),
             })
             .collect();
 
@@ -174,6 +176,7 @@ mod tests {
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span: Span::new(0, 10),
             references: vec![SymbolReference {
                 from_file: FileId(2),
@@ -198,6 +201,7 @@ mod tests {
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span: Span::new(0, 10),
             references: vec![SymbolReference {
                 from_file: FileId(0),
@@ -284,13 +288,15 @@ mod tests {
                 resolved_dynamic_imports: vec![],
                 resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
-                whole_object_uses: vec![],
+                semantic_facts: Box::default(),
+                whole_object_uses: Box::default(),
                 has_cjs_exports: false,
                 has_angular_component_template_url: false,
                 unused_import_bindings: FxHashSet::default(),
                 type_referenced_import_bindings: vec![],
                 value_referenced_import_bindings: vec![],
                 namespace_object_aliases: vec![],
+                exported_factory_returns: Box::default(),
             })
             .collect();
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);

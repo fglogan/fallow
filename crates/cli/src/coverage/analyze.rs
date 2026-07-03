@@ -6,8 +6,8 @@ use std::process::{Command, ExitCode};
 use std::time::Instant;
 
 use plow_config::OutputFormat;
-use plow_core::git_env::clear_ambient_git_env;
 use plow_cov_protocol::function_identity_id as protocol_function_identity_id;
+use plow_engine::clear_ambient_git_env;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::coverage::RunContext;
@@ -16,13 +16,14 @@ use crate::coverage::cloud_client::{
     CloudTrackingState, fetch_runtime_context,
 };
 use crate::error::emit_error;
-use crate::health::{HealthOptions, SortBy};
-use crate::health_types::{
-    RuntimeCoverageAction, RuntimeCoverageCaptureQuality, RuntimeCoverageConfidence,
-    RuntimeCoverageDataSource, RuntimeCoverageEvidence, RuntimeCoverageFinding,
-    RuntimeCoverageHotPath, RuntimeCoverageMessage, RuntimeCoverageReport,
-    RuntimeCoverageReportVerdict, RuntimeCoverageRiskBand, RuntimeCoverageSchemaVersion,
-    RuntimeCoverageSummary, RuntimeCoverageVerdict,
+use crate::health::HealthOptions;
+use plow_output::{
+    RUNTIME_STALE_AFTER_DAYS, RuntimeCoverageAction, RuntimeCoverageCaptureQuality,
+    RuntimeCoverageConfidence, RuntimeCoverageDataSource, RuntimeCoverageEvidence,
+    RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageMessage,
+    RuntimeCoverageProvenance, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
+    RuntimeCoverageRiskBand, RuntimeCoverageSchemaVersion, RuntimeCoverageSummary,
+    RuntimeCoverageVerdict,
 };
 
 const RUNTIME_COVERAGE_SCHEMA_VERSION: &str = "1";
@@ -145,18 +146,35 @@ fn run_local(path: &Path, args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode 
         Ok(options) => options,
         Err(code) => return code,
     };
-    let result = match crate::health::execute_health(&HealthOptions {
+    let options = local_health_options(args, ctx, runtime_coverage);
+    let result = match crate::health::execute_health(&options) {
+        Ok(result) => result,
+        Err(code) => return code,
+    };
+    let Some(report) = result.report.runtime_coverage else {
+        return emit_error("runtime coverage report was not produced", 2, ctx.output);
+    };
+    print_runtime_report(&report, ctx, result.elapsed, args)
+}
+
+/// Build the `HealthOptions` for a local `coverage analyze` run: complexity,
+/// hotspot, and gating features are off so the run focuses on the supplied
+/// runtime-coverage artifact.
+fn local_health_options<'a>(
+    args: &AnalyzeArgs,
+    ctx: &RunContext<'a>,
+    runtime_coverage: plow_engine::RuntimeCoverageOptions,
+) -> HealthOptions<'a> {
+    HealthOptions {
         root: ctx.root,
         config_path: ctx.config_path,
         output: ctx.output,
         no_cache: ctx.no_cache,
         threads: ctx.threads,
         quiet: ctx.quiet,
-        max_cyclomatic: None,
-        max_cognitive: None,
-        max_crap: None,
+        thresholds: plow_engine::HealthThresholdOverrides::default(),
         top: args.top,
-        sort: SortBy::Cyclomatic,
+        sort: plow_engine::HealthSort::Cyclomatic,
         production: args.production,
         production_override: Some(args.production),
         changed_since: None,
@@ -167,7 +185,6 @@ fn run_local(path: &Path, args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode 
         baseline: None,
         save_baseline: None,
         complexity: false,
-        complexity_breakdown: false,
         file_scores: false,
         coverage_gaps: false,
         config_activates_coverage_gaps: false,
@@ -175,35 +192,26 @@ fn run_local(path: &Path, args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode 
         ownership: false,
         ownership_emails: None,
         targets: false,
+        css: false,
         force_full: false,
         score_only_output: false,
         enforce_coverage_gap_gate: false,
         effort: None,
         score: false,
-        min_score: None,
+        gates: plow_engine::HealthGateOptions::default(),
         since: None,
         min_commits: None,
         explain: ctx.explain,
         summary: false,
         save_snapshot: None,
         trend: false,
-        group_by: None,
-        coverage: None,
-        coverage_root: None,
+        coverage_inputs: plow_engine::HealthCoverageInputs::default(),
         performance: false,
-        min_severity: None,
-        report_only: false,
         runtime_coverage: Some(runtime_coverage),
-        // coverage analyze focuses on runtime data, not churn hotspots.
         churn_file: None,
-    }) {
-        Ok(result) => result,
-        Err(code) => return code,
-    };
-    let Some(report) = result.report.runtime_coverage else {
-        return emit_error("runtime coverage report was not produced", 2, ctx.output);
-    };
-    print_runtime_report(&report, ctx, result.elapsed, args)
+        complexity_breakdown: false,
+        group_by: None,
+    }
 }
 
 fn run_cloud(args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode {
@@ -317,6 +325,20 @@ fn take_last_two_segments(path: &str) -> Option<String> {
 }
 
 fn emit_cloud_error(err: &CloudError, output: OutputFormat) -> ExitCode {
+    match err {
+        CloudError::Auth(_) | CloudError::TierRequired(_) => {
+            crate::telemetry::note_failure_reason(crate::telemetry::FailureReason::Auth);
+        }
+        CloudError::Network(_) | CloudError::Server(_) => {
+            crate::telemetry::note_failure_reason(crate::telemetry::FailureReason::Network);
+        }
+        CloudError::Validation(_) => {
+            crate::telemetry::note_failure_reason(crate::telemetry::FailureReason::Validation);
+        }
+        CloudError::NotFound(_) => {
+            crate::telemetry::note_failure_reason(crate::telemetry::FailureReason::Config);
+        }
+    }
     emit_error(err.message(), err.exit_code(), output)
 }
 
@@ -360,36 +382,40 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
     let config = crate::load_config_for_analysis(
         ctx.root,
         ctx.config_path,
-        ctx.output,
-        ctx.no_cache,
-        ctx.threads,
-        Some(production),
-        ctx.quiet,
+        crate::ConfigLoadOptions {
+            output: ctx.output,
+            no_cache: ctx.no_cache,
+            threads: ctx.threads,
+            production_override: Some(production),
+            quiet: ctx.quiet,
+        },
         plow_config::ProductionAnalysis::Health,
     )?;
-    let files = plow_core::discover::discover_files_with_plugin_scopes(&config);
-    let cache = if config.no_cache {
-        None
-    } else {
-        plow_core::cache::CacheStore::load(
-            &config.cache_dir,
-            config.cache_config_hash,
-            plow_core::resolve_cache_max_size_bytes(&config),
-        )
-    };
-    let parse_result = plow_core::extract::parse_all_files(&files, cache.as_ref(), true);
-    #[expect(
-        deprecated,
-        reason = "ADR-008 deprecates plow_core::analyze_with_parse_result externally; the CLI still uses the workspace path dependency"
-    )]
-    let analysis_output = plow_core::analyze_with_parse_result(&config, &parse_result.modules)
+    let session = plow_engine::AnalysisSession::from_resolved_config(config);
+    let analysis_output = session
+        .analyze_dead_code_with_artifacts(true, true)
         .map_err(|err| emit_error(&format!("analysis failed: {err}"), 2, ctx.output))?;
+    let Some(modules) = analysis_output.modules.as_deref() else {
+        return Err(emit_error(
+            "analysis failed: engine did not retain parsed modules",
+            2,
+            ctx.output,
+        ));
+    };
+    let Some(files) = analysis_output.files.as_deref() else {
+        return Err(emit_error(
+            "analysis failed: engine did not retain discovered files",
+            2,
+            ctx.output,
+        ));
+    };
     let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
     let codeowners =
-        crate::codeowners::CodeOwners::load(&config.root, config.codeowners.as_deref()).ok();
+        crate::codeowners::CodeOwners::load(session.root(), session.config().codeowners.as_deref())
+            .ok();
     Ok(build_index_from_analysis(
-        &config.root,
-        &parse_result.modules,
+        session.root(),
+        modules,
         &analysis_output,
         &file_paths,
         codeowners.as_ref(),
@@ -399,30 +425,11 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
 fn build_index_from_analysis(
     root: &Path,
     modules: &[plow_types::extract::ModuleInfo],
-    analysis_output: &plow_core::AnalysisOutput,
+    analysis_output: &plow_engine::DeadCodeAnalysisArtifacts,
     file_paths: &FxHashMap<plow_types::discover::FileId, &PathBuf>,
     codeowners: Option<&crate::codeowners::CodeOwners>,
 ) -> StaticIndex {
-    let unused_files: FxHashSet<PathBuf> = analysis_output
-        .results
-        .unused_files
-        .iter()
-        .map(|file| file.file.path.clone())
-        .collect();
-    let mut unused_export_names: FxHashMap<PathBuf, FxHashSet<String>> = FxHashMap::default();
-    let mut unused_export_lines: FxHashMap<PathBuf, FxHashSet<u32>> = FxHashMap::default();
-    for finding in &analysis_output.results.unused_exports {
-        let export = &finding.export;
-        unused_export_names
-            .entry(export.path.clone())
-            .or_default()
-            .insert(export.export_name.clone());
-        unused_export_lines
-            .entry(export.path.clone())
-            .or_default()
-            .insert(export.line);
-    }
-
+    let unused = UnusedStaticSets::from_analysis(analysis_output);
     let mut out = StaticIndex::default();
     let graph = analysis_output.graph.as_ref();
     for module in modules {
@@ -430,46 +437,109 @@ fn build_index_from_analysis(
             continue;
         };
         let rel = normalize_runtime_path(path.strip_prefix(root).unwrap_or(path));
-        let caller_count = graph
-            .and_then(|g| g.reverse_deps.get(module.file_id.0 as usize))
-            .map_or(0_usize, Vec::len);
+        let caller_count = graph.map_or(0_usize, |g| g.direct_importer_count(module.file_id));
         let caller_count = u32::try_from(caller_count).unwrap_or(u32::MAX);
         let owner_count = codeowners.map(|co| co.owner_count_of(Path::new(&rel)).unwrap_or(0));
         for function in &module.complexity {
-            let end_line = function.line.saturating_add(function.line_count);
-            let static_used = !unused_files.contains(path.as_path())
-                && !unused_export_names
-                    .get(*path)
-                    .is_some_and(|names| names.contains(function.name.as_str()))
-                && !unused_export_lines
-                    .get(*path)
-                    .is_some_and(|lines| lines.contains(&function.line));
-            let stable_id = function_identity_id(&rel, &function.name, function.line);
-            let info = StaticFunctionInfo {
-                path: PathBuf::from(&rel),
-                name: function.name.clone(),
-                start_line: function.line,
-                end_line,
-                static_used,
-                test_covered: false,
-                cyclomatic: u32::from(function.cyclomatic),
+            let info = static_function_info(
+                function,
+                path.as_path(),
+                &rel,
+                &unused,
                 caller_count,
                 owner_count,
-                stable_id: stable_id.clone(),
-                source_hash: function.source_hash.clone(),
-            };
-            out.by_key.insert(
-                (rel.clone(), function.name.clone(), function.line),
-                info.clone(),
             );
-            out.by_stable_id.insert(stable_id, info.clone());
-            out.by_path_name
-                .entry((rel.clone(), function.name.clone()))
-                .or_default()
-                .push(info);
+            index_static_function(&mut out, &rel, info);
         }
     }
     out
+}
+
+/// Per-file sets of statically-unused files and exports, used to flag whether a
+/// function is reachable in the static graph.
+struct UnusedStaticSets {
+    files: FxHashSet<PathBuf>,
+    export_names: FxHashMap<PathBuf, FxHashSet<String>>,
+    export_lines: FxHashMap<PathBuf, FxHashSet<u32>>,
+}
+
+impl UnusedStaticSets {
+    fn from_analysis(analysis_output: &plow_engine::DeadCodeAnalysisArtifacts) -> Self {
+        let files: FxHashSet<PathBuf> = analysis_output
+            .results
+            .unused_files
+            .iter()
+            .map(|file| file.file.path.clone())
+            .collect();
+        let mut export_names: FxHashMap<PathBuf, FxHashSet<String>> = FxHashMap::default();
+        let mut export_lines: FxHashMap<PathBuf, FxHashSet<u32>> = FxHashMap::default();
+        for finding in &analysis_output.results.unused_exports {
+            let export = &finding.export;
+            export_names
+                .entry(export.path.clone())
+                .or_default()
+                .insert(export.export_name.clone());
+            export_lines
+                .entry(export.path.clone())
+                .or_default()
+                .insert(export.line);
+        }
+        Self {
+            files,
+            export_names,
+            export_lines,
+        }
+    }
+
+    fn function_is_used(&self, path: &Path, name: &str, line: u32) -> bool {
+        !self.files.contains(path)
+            && !self
+                .export_names
+                .get(path)
+                .is_some_and(|names| names.contains(name))
+            && !self
+                .export_lines
+                .get(path)
+                .is_some_and(|lines| lines.contains(&line))
+    }
+}
+
+/// Build a `StaticFunctionInfo` for one extracted function.
+fn static_function_info(
+    function: &plow_types::extract::FunctionComplexity,
+    path: &Path,
+    rel: &str,
+    unused: &UnusedStaticSets,
+    caller_count: u32,
+    owner_count: Option<u32>,
+) -> StaticFunctionInfo {
+    StaticFunctionInfo {
+        path: PathBuf::from(rel),
+        name: function.name.clone(),
+        start_line: function.line,
+        end_line: function.line.saturating_add(function.line_count),
+        static_used: unused.function_is_used(path, function.name.as_str(), function.line),
+        test_covered: false,
+        cyclomatic: u32::from(function.cyclomatic),
+        caller_count,
+        owner_count,
+        stable_id: function_identity_id(rel, &function.name, function.line),
+        source_hash: function.source_hash.clone(),
+    }
+}
+
+/// Insert a function's static info into all three lookup tiers of the index.
+fn index_static_function(out: &mut StaticIndex, rel: &str, info: StaticFunctionInfo) {
+    out.by_key.insert(
+        (rel.to_string(), info.name.clone(), info.start_line),
+        info.clone(),
+    );
+    out.by_stable_id
+        .insert(info.stable_id.clone(), info.clone());
+    out.by_path_name
+        .entry((rel.to_string(), info.name.clone()))
+        .or_default()
+        .push(info);
 }
 
 fn merge_cloud_snapshot(
@@ -503,6 +573,38 @@ fn merge_cloud_snapshot(
 
     let warnings = cloud_warnings(snapshot, unmatched_cloud_functions);
 
+    // #316 / #319 (cloud-join surface): same trust-output shape as the local
+    // path. The cloud snapshot's own actionable/freshness pass-through is #328
+    // territory, so freshness is left unknown here; the gate (no tracked
+    // functions => non-actionable) and origin-unknown default still hold.
+    let denominator = snapshot.summary.functions_tracked + snapshot.summary.functions_untracked;
+    let untracked_ratio = if denominator == 0 {
+        0.0
+    } else {
+        snapshot.summary.functions_untracked as f64 / denominator as f64
+    };
+    let actionable = snapshot.summary.functions_tracked > 0;
+    let (actionability_reason, actionability_verdict) = if actionable {
+        (None, None)
+    } else {
+        (
+            Some(
+                "No functions were tracked at runtime in this capture, so there is no usable runtime evidence to act on. Treat all functions as do-not-act; this is NOT cold."
+                    .to_owned(),
+            ),
+            Some("insufficient_evidence".to_owned()),
+        )
+    };
+    let provenance = RuntimeCoverageProvenance {
+        data_source: RuntimeCoverageDataSource::Cloud,
+        is_production: "unknown".to_owned(),
+        freshness_days: None,
+        untracked_ratio,
+        unresolved_ratio: 0.0,
+        stale: false,
+        stale_after_days: RUNTIME_STALE_AFTER_DAYS,
+    };
+
     RuntimeCoverageReport {
         schema_version: RuntimeCoverageSchemaVersion::V1,
         verdict: if findings.is_empty() {
@@ -530,17 +632,18 @@ fn merge_cloud_snapshot(
         importance,
         watermark: None,
         warnings,
+        actionable,
+        actionability_reason,
+        actionability_verdict,
+        provenance,
     }
 }
 
 struct CloudMergeEntries {
     findings: Vec<RuntimeCoverageFinding>,
     hot_paths: Vec<RuntimeCoverageHotPath>,
-    synthesized_blast_radius: Vec<crate::health_types::RuntimeCoverageBlastRadiusEntry>,
-    synthesized_importance: Vec<(
-        crate::health_types::RuntimeCoverageImportanceEntry,
-        Option<u32>,
-    )>,
+    synthesized_blast_radius: Vec<plow_output::RuntimeCoverageBlastRadiusEntry>,
+    synthesized_importance: Vec<(plow_output::RuntimeCoverageImportanceEntry, Option<u32>)>,
     unmatched_cloud_functions: usize,
 }
 
@@ -595,57 +698,50 @@ fn collect_called_cloud_function(
 
 fn cloud_blast_radius_entries(
     snapshot: &CloudRuntimeContext,
-    synthesized: Vec<crate::health_types::RuntimeCoverageBlastRadiusEntry>,
-) -> Vec<crate::health_types::RuntimeCoverageBlastRadiusEntry> {
+    synthesized: Vec<plow_output::RuntimeCoverageBlastRadiusEntry>,
+) -> Vec<plow_output::RuntimeCoverageBlastRadiusEntry> {
     if snapshot.blast_radius.is_empty() {
         return synthesized;
     }
     snapshot
         .blast_radius
         .iter()
-        .map(
-            |entry| crate::health_types::RuntimeCoverageBlastRadiusEntry {
-                id: entry.id.clone(),
-                stable_id: entry.stable_id.clone(),
-                file: PathBuf::from(&entry.file),
-                function: entry.function.clone(),
-                line: entry.line,
-                caller_count: entry.caller_count,
-                caller_count_weighted_by_traffic: entry.caller_count_weighted_by_traffic,
-                deploys_touched: entry.deploys_touched,
-                risk_band: map_cloud_risk_band(entry.risk_band),
-            },
-        )
+        .map(|entry| plow_output::RuntimeCoverageBlastRadiusEntry {
+            id: entry.id.clone(),
+            stable_id: entry.stable_id.clone(),
+            file: PathBuf::from(&entry.file),
+            function: entry.function.clone(),
+            line: entry.line,
+            caller_count: entry.caller_count.unwrap_or(0),
+            caller_count_weighted_by_traffic: entry.caller_count_weighted_by_traffic.unwrap_or(0),
+            deploys_touched: entry.deploys_touched,
+            risk_band: map_cloud_risk_band(entry.risk_band),
+        })
         .collect()
 }
 
 fn cloud_importance_entries(
     snapshot: &CloudRuntimeContext,
-    synthesized: Vec<(
-        crate::health_types::RuntimeCoverageImportanceEntry,
-        Option<u32>,
-    )>,
-) -> Vec<crate::health_types::RuntimeCoverageImportanceEntry> {
+    synthesized: Vec<(plow_output::RuntimeCoverageImportanceEntry, Option<u32>)>,
+) -> Vec<plow_output::RuntimeCoverageImportanceEntry> {
     if snapshot.importance.is_empty() {
         return rank_importance(synthesized);
     }
     snapshot
         .importance
         .iter()
-        .map(
-            |entry| crate::health_types::RuntimeCoverageImportanceEntry {
-                id: entry.id.clone(),
-                stable_id: entry.stable_id.clone(),
-                file: PathBuf::from(&entry.file),
-                function: entry.function.clone(),
-                line: entry.line,
-                invocations: entry.invocations,
-                cyclomatic: entry.cyclomatic,
-                owner_count: entry.owner_count,
-                importance_score: entry.importance_score,
-                reason: entry.reason.clone(),
-            },
-        )
+        .map(|entry| plow_output::RuntimeCoverageImportanceEntry {
+            id: entry.id.clone(),
+            stable_id: entry.stable_id.clone(),
+            file: PathBuf::from(&entry.file),
+            function: entry.function.clone(),
+            line: entry.line,
+            invocations: entry.invocations,
+            cyclomatic: entry.cyclomatic.unwrap_or(0),
+            owner_count: entry.owner_count.unwrap_or(0),
+            importance_score: entry.importance_score,
+            reason: entry.reason.clone(),
+        })
         .collect()
 }
 
@@ -667,9 +763,9 @@ fn cloud_blast_radius(
     local: &StaticFunctionInfo,
     invocations: u64,
     function: &CloudRuntimeFunction,
-) -> crate::health_types::RuntimeCoverageBlastRadiusEntry {
+) -> plow_output::RuntimeCoverageBlastRadiusEntry {
     let weighted = invocations.saturating_mul(u64::from(local.caller_count));
-    crate::health_types::RuntimeCoverageBlastRadiusEntry {
+    plow_output::RuntimeCoverageBlastRadiusEntry {
         id: stable_runtime_id("blast", &local.path, &local.name, local.start_line),
         stable_id: Some(local.stable_id.clone()),
         file: local.path.clone(),
@@ -685,13 +781,10 @@ fn cloud_blast_radius(
 fn cloud_importance(
     local: &StaticFunctionInfo,
     invocations: u64,
-) -> (
-    crate::health_types::RuntimeCoverageImportanceEntry,
-    Option<u32>,
-) {
+) -> (plow_output::RuntimeCoverageImportanceEntry, Option<u32>) {
     let owner_count = local.owner_count.unwrap_or(0);
     (
-        crate::health_types::RuntimeCoverageImportanceEntry {
+        plow_output::RuntimeCoverageImportanceEntry {
             id: stable_runtime_id("importance", &local.path, &local.name, local.start_line),
             stable_id: Some(local.stable_id.clone()),
             file: local.path.clone(),
@@ -737,15 +830,16 @@ fn cloud_finding(
             deployments_observed: function.deployments_observed,
         },
         actions: runtime_actions(verdict),
+        // The cloud-join path (analyze --cloud) does not carry the window
+        // trace_count + thresholds here, so it omits the #321 discriminator
+        // block; that surface's discriminator contract is #328 territory.
+        discriminators: None,
     }
 }
 
 fn rank_importance(
-    entries: Vec<(
-        crate::health_types::RuntimeCoverageImportanceEntry,
-        Option<u32>,
-    )>,
-) -> Vec<crate::health_types::RuntimeCoverageImportanceEntry> {
+    entries: Vec<(plow_output::RuntimeCoverageImportanceEntry, Option<u32>)>,
+) -> Vec<plow_output::RuntimeCoverageImportanceEntry> {
     let max_log = entries
         .iter()
         .map(|(entry, _)| (entry.invocations as f64).ln_1p())
@@ -1094,7 +1188,7 @@ fn print_runtime_report(
     args: &AnalyzeArgs,
 ) -> ExitCode {
     match ctx.output {
-        OutputFormat::Human => print_runtime_human(report, elapsed, args),
+        OutputFormat::Human => print_runtime_human(report, elapsed, args, ctx.root),
         _ => print_runtime_json(report, elapsed, ctx.explain),
     }
 }
@@ -1114,43 +1208,101 @@ fn print_runtime_json(
     elapsed: std::time::Duration,
     explain: bool,
 ) -> ExitCode {
-    use crate::output_envelope::{
-        CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion, PlowOutput, serialize_root_output,
-    };
-    use plow_types::envelope::{ElapsedMs, ToolVersion};
-
     debug_assert_eq!(
         RUNTIME_COVERAGE_SCHEMA_VERSION, "1",
         "the schema-version enum has one variant serialized as \"1\"; bump CoverageAnalyzeSchemaVersion if the constant moves"
     );
 
-    let envelope = CoverageAnalyzeOutput {
-        schema_version: CoverageAnalyzeSchemaVersion::V1,
-        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
-        runtime_coverage: report.clone(),
-        meta: None,
-    };
-    let mut output = match serialize_root_output(PlowOutput::CoverageAnalyze(envelope)) {
+    let envelope =
+        plow_output::build_coverage_analyze_output(report, elapsed, env!("CARGO_PKG_VERSION"));
+    let output = match plow_output::serialize_coverage_analyze_json_output(
+        envelope,
+        crate::output_runtime::current_root_envelope_mode(),
+        explain.then(crate::explain::coverage_analyze_meta),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+    ) {
         Ok(value) => value,
         Err(err) => {
             eprintln!("Error: failed to serialize runtime coverage report: {err}");
             return ExitCode::from(2);
         }
     };
-    if explain && let Some(map) = output.as_object_mut() {
-        map.insert("_meta".to_owned(), crate::explain::coverage_analyze_meta());
-    }
-    crate::output_envelope::attach_telemetry_meta(&mut output);
     crate::report::emit_json(&output, "runtime coverage JSON")
 }
 
 const HUMAN_DEFAULT_DISPLAY_LIMIT: usize = 10;
 
+/// Build-output directories where bundlers emit `*.map` files, checked in order
+/// so the upload nudge can name the dir the user most likely needs.
+const SOURCE_MAP_BUILD_DIRS: &[&str] = &["dist", ".next", "out", "build"];
+
+/// Max recursion depth for the build-dir source-map scan: deep enough to reach
+/// `.next/static/chunks` / `dist/assets` without walking an entire tree.
+const SOURCE_MAP_SCAN_MAX_DEPTH: usize = 6;
+
+/// First build directory under `root` that contains at least one `.map` file, or
+/// `None`. A bounded, early-returning scan used only to name `--dir` in the
+/// upload nudge, never an exhaustive walk.
+fn find_local_source_map_dir(root: &Path) -> Option<&'static str> {
+    SOURCE_MAP_BUILD_DIRS.iter().copied().find(|dir| {
+        let candidate = root.join(dir);
+        candidate.is_dir() && dir_contains_source_map(&candidate, SOURCE_MAP_SCAN_MAX_DEPTH)
+    })
+}
+
+/// Whether `dir` (or a subdirectory within `depth` levels) holds a `.map` file.
+/// Skips `node_modules` and stops at the first hit.
+fn dir_contains_source_map(dir: &Path, depth: usize) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
+            if depth > 0
+                && path.file_name().is_none_or(|name| name != "node_modules")
+                && dir_contains_source_map(&path, depth - 1)
+            {
+                return true;
+            }
+        } else if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("map"))
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Copy-paste upload hint for the human report. Returned only when the cloud
+/// reported `coverage_unresolved` (runtime positions could not map to source)
+/// AND the project has built source maps on disk, so the hint can name the exact
+/// `--dir`. Re-running the upload fixes both the never-uploaded and the stale-SHA
+/// cases (it uploads maps for the current commit), so one hint covers both. The
+/// hint is human-only: JSON consumers already get the structured
+/// `coverage_unresolved` warning in `report.warnings`.
+fn source_map_upload_hint(warnings: &[RuntimeCoverageMessage], root: &Path) -> Option<String> {
+    if !warnings
+        .iter()
+        .any(|warning| warning.code.as_str() == "coverage_unresolved")
+    {
+        return None;
+    }
+    let dir = find_local_source_map_dir(root)?;
+    Some(format!(
+        "Hint: found source maps under {dir}/ that may not be uploaded for this commit.\n  Run `plow coverage upload-source-maps --dir {dir}` so runtime coverage attributes to your source files."
+    ))
+}
+
 fn print_runtime_human(
     report: &RuntimeCoverageReport,
     elapsed: std::time::Duration,
     args: &AnalyzeArgs,
+    root: &Path,
 ) -> ExitCode {
     let display_limit = args.top.unwrap_or(HUMAN_DEFAULT_DISPLAY_LIMIT);
     println!("Runtime coverage: {}", report.verdict);
@@ -1179,47 +1331,66 @@ fn print_runtime_human(
             finding.verdict.human_label(),
         );
     }
-    if args.blast_radius && !report.blast_radius.is_empty() {
-        println!("  blast radius:");
-        for entry in report.blast_radius.iter().take(display_limit) {
-            println!(
-                "  {}:{} {} ({} callers, weighted {}, {})",
-                entry.file.display(),
-                entry.line,
-                entry.function,
-                entry.caller_count,
-                entry.caller_count_weighted_by_traffic,
-                entry.risk_band,
-            );
-        }
+    if args.blast_radius {
+        print_runtime_blast_radius(report, display_limit);
     }
-    if args.importance && !report.importance.is_empty() {
-        println!("  importance:");
-        for entry in report.importance.iter().take(display_limit) {
-            println!(
-                "  {}:{} {} ({:.1}, {} invocations, cyclomatic {}, owners {}) - {}",
-                entry.file.display(),
-                entry.line,
-                entry.function,
-                entry.importance_score,
-                entry.invocations,
-                entry.cyclomatic,
-                entry.owner_count,
-                entry.reason,
-            );
-        }
+    if args.importance {
+        print_runtime_importance(report, display_limit);
     }
     for warning in &report.warnings {
         println!("  warning [{}]: {}", warning.code, warning.message);
+    }
+    if let Some(hint) = source_map_upload_hint(&report.warnings, root) {
+        println!("{hint}");
     }
     eprintln!("runtime coverage analyzed in {:.2}s", elapsed.as_secs_f64());
     ExitCode::SUCCESS
 }
 
+/// Print the human-format blast-radius section, capped at `display_limit`.
+fn print_runtime_blast_radius(report: &RuntimeCoverageReport, display_limit: usize) {
+    if report.blast_radius.is_empty() {
+        return;
+    }
+    println!("  blast radius:");
+    for entry in report.blast_radius.iter().take(display_limit) {
+        println!(
+            "  {}:{} {} ({} callers, weighted {}, {})",
+            entry.file.display(),
+            entry.line,
+            entry.function,
+            entry.caller_count,
+            entry.caller_count_weighted_by_traffic,
+            entry.risk_band,
+        );
+    }
+}
+
+/// Print the human-format importance section, capped at `display_limit`.
+fn print_runtime_importance(report: &RuntimeCoverageReport, display_limit: usize) {
+    if report.importance.is_empty() {
+        return;
+    }
+    println!("  importance:");
+    for entry in report.importance.iter().take(display_limit) {
+        println!(
+            "  {}:{} {} ({:.1}, {} invocations, cyclomatic {}, owners {}) - {}",
+            entry.file.display(),
+            entry.line,
+            entry.function,
+            entry.importance_score,
+            entry.invocations,
+            entry.cyclomatic,
+            entry.owner_count,
+            entry.reason,
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::health_types::{RuntimeCoverageBlastRadiusEntry, RuntimeCoverageImportanceEntry};
+    use plow_output::{RuntimeCoverageBlastRadiusEntry, RuntimeCoverageImportanceEntry};
 
     #[test]
     fn api_key_alone_does_not_enable_cloud_source() {
@@ -1770,6 +1941,10 @@ mod tests {
             ],
             watermark: None,
             warnings: vec![],
+            actionable: true,
+            actionability_reason: None,
+            actionability_verdict: None,
+            provenance: plow_output::RuntimeCoverageProvenance::default(),
         };
         apply_top_limit(&mut report, Some(1));
         assert_eq!(report.findings.len(), 1);
@@ -1889,6 +2064,7 @@ mod tests {
                 deployments_observed: 0,
             },
             actions: vec![],
+            discriminators: None,
         }
     }
 
@@ -1991,5 +2167,54 @@ mod tests {
             importance_score: 1.0,
             reason: "Low traffic, low complexity, single owner".to_owned(),
         }
+    }
+
+    fn unresolved_warning() -> Vec<RuntimeCoverageMessage> {
+        vec![RuntimeCoverageMessage {
+            code: "coverage_unresolved".to_owned(),
+            message: "100% of runtime functions with attempted source resolution could not be mapped to source. No source maps were uploaded for this commit.".to_owned(),
+        }]
+    }
+
+    #[test]
+    fn upload_hint_absent_without_coverage_unresolved_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("dist")).unwrap();
+        std::fs::write(dir.path().join("dist").join("app.js.map"), "{}").unwrap();
+        // A different warning code must not trigger the hint even with local maps.
+        let warnings = vec![RuntimeCoverageMessage {
+            code: "no_runtime_data".to_owned(),
+            message: "no data".to_owned(),
+        }];
+        assert!(source_map_upload_hint(&warnings, dir.path()).is_none());
+    }
+
+    #[test]
+    fn upload_hint_names_the_build_dir_holding_maps() {
+        let dir = tempfile::tempdir().unwrap();
+        let chunks = dir.path().join(".next").join("static").join("chunks");
+        std::fs::create_dir_all(&chunks).unwrap();
+        std::fs::write(chunks.join("main.js.map"), "{}").unwrap();
+        let hint = source_map_upload_hint(&unresolved_warning(), dir.path()).expect("hint");
+        assert!(
+            hint.contains("plow coverage upload-source-maps --dir .next"),
+            "{hint}"
+        );
+    }
+
+    #[test]
+    fn upload_hint_absent_when_unresolved_but_no_local_maps() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(source_map_upload_hint(&unresolved_warning(), dir.path()).is_none());
+    }
+
+    #[test]
+    fn source_map_scan_skips_node_modules() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("dist").join("node_modules").join("pkg");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("vendor.js.map"), "{}").unwrap();
+        // The only .map lives under node_modules, which the scan skips.
+        assert!(source_map_upload_hint(&unresolved_warning(), dir.path()).is_none());
     }
 }

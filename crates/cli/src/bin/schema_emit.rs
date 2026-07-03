@@ -25,49 +25,55 @@ use std::process::ExitCode;
 use schemars::generate::SchemaSettings;
 use serde_json::{Map, Value};
 
-use plow_cli::health_types::{
-    ComplexityViolation, ContributorEntry, ContributorIdentifierFormat, CoverageGapSummary,
-    CoverageGaps, CoverageModel, CoverageTier, ExceededThreshold, FileHealthScore, FindingSeverity,
-    HealthActionsMeta, HealthScore, HealthScorePenalties, HealthSummary, HealthTrend, HotspotEntry,
-    HotspotFinding, HotspotSummary, LargeFunctionEntry, OwnershipMetrics, RecommendationCategory,
-    RefactoringTarget, RefactoringTargetFinding, RiskProfile, RuntimeCoverageReport,
-    TargetThresholds, TrendCount, UntestedExport, UntestedExportFinding, UntestedFile,
-    UntestedFileFinding, VitalSigns, VitalSignsCounts,
-};
-use plow_cli::impact::{
-    ContainmentEvent, CrossRepoImpactReport, CrossRepoImpactSchemaVersion, CrossRepoProjectEntry,
-    CrossRepoTotals, EnabledSource, ImpactCounts, ImpactReport, ImpactReportSchemaVersion,
-    ImpactTrendDirection, ResolutionEvent, TrendSummary,
-};
-use plow_cli::output_dupes::{
-    AttributedCloneGroupFinding, CloneFamilyAction, CloneFamilyActionType, CloneFamilyFinding,
-    CloneGroupAction, CloneGroupActionType, CloneGroupFinding, DupesReportPayload,
-};
-use plow_cli::output_envelope::{
-    AuditCommand, AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
-    BoundariesListing, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CodeClimateIssue,
-    CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation, CodeClimateOutput,
-    CodeClimateSeverity, CombinedOutput, CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion,
-    CoverageSetupFileToEdit, CoverageSetupFramework, CoverageSetupMember, CoverageSetupOutput,
-    CoverageSetupPackageManager, CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion,
-    CoverageSetupSnippet, DupesOutput, ExplainOutput, GitHubReviewComment, GitHubReviewSide,
-    GitLabReviewComment, GitLabReviewPosition, GitLabReviewPositionType, GroupByMode, HealthOutput,
-    ListBoundariesOutput, PlowOutput, ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent,
-    ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewEnvelopeSummary,
-    ReviewProvider, ReviewReconcileOutput, ReviewReconcileSchema, WorkspaceInfo, WorkspacesOutput,
-};
-use plow_cli::report::dupes_grouping::{
-    AttributedCloneGroup, AttributedInstance, DuplicationGroup,
-};
-use plow_cli::security::{
-    SecurityGate, SecurityGateMode, SecurityGateVerdict, SecurityOutput,
-    SecurityReachabilityCounts, SecurityRuntimeStateCounts, SecuritySchemaVersion,
-    SecuritySeverityCounts, SecuritySummary, SecuritySummaryOutput,
-    SecurityUnresolvedCalleeDiagnostics, SecurityUnresolvedCalleeReasonCount,
-    SecurityUnresolvedCalleeSample, SecurityUnresolvedCalleeTopFile,
+use plow_api::{
+    AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, AuditOutput,
+    BoundariesListLogicalGroup, BoundariesListing, CloneFamilyFinding, CloneGroupFinding,
+    CombinedOutput, DupesReportPayload, DuplicationGroup, ListBoundariesOutput, PlowOutput,
+    SecurityGate, SecurityGateMode, SecurityOutput, SecuritySummaryOutput, WorkspacesOutput,
 };
 use plow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus};
-use plow_core::duplicates::{
+use plow_output::{
+    AcceptedJudgment, AgentSchema, AuditCommand, BoundariesListRule, BoundariesListZone,
+    ChangeAnchor, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, ComplexityViolation,
+    ConfidenceFlag, ContainmentEvent, ContributorEntry, ContributorIdentifierFormat,
+    CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion, CoverageGapSummary, CoverageGaps,
+    CoverageModel, CoverageSetupFileToEdit, CoverageSetupFramework, CoverageSetupMember,
+    CoverageSetupOutput, CoverageSetupPackageManager, CoverageSetupRuntimeTarget,
+    CoverageSetupSchemaVersion, CoverageSetupSnippet, CoverageTier, CrossRepoImpactReport,
+    CrossRepoImpactSchemaVersion, CrossRepoProjectEntry, CrossRepoTotals, Decision, DecisionAction,
+    DecisionActionType, DecisionCategory, DecisionSurface, DecisionSurfaceOutput,
+    DecisionSurfaceSchemaVersion, DecisionWithActions, DiffTriage, DirectionUnit, DupesOutput,
+    EnabledSource, ExceededThreshold, ExplainOutput, FileHealthScore, FindingSeverity, FocusLabel,
+    FocusMap, FocusScore, FocusUnit, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment,
+    GitLabReviewPosition, GitLabReviewPositionType, GraphFacts, GroupByMode, HealthActionsMeta,
+    HealthGroup, HealthOutput, HealthReport, HealthScore, HealthScorePenalties, HealthSummary,
+    HealthTrend, HotspotEntry, HotspotFinding, HotspotSummary, ImpactCounts, ImpactReport,
+    ImpactReportSchemaVersion, ImpactTrendDirection, InspectEvidence, InspectEvidenceScope,
+    InspectEvidenceSection, InspectFileIdentity, InspectIdentity, InspectOutput,
+    InspectSectionStatus, InspectSymbolIdentity, InspectTargetDescriptor, LargeFunctionEntry,
+    OwnershipMetrics, RecommendationCategory, RefactoringTarget, RefactoringTargetFinding,
+    RejectedJudgment, ResolutionEvent, ReviewBriefSchemaVersion, ReviewCheckConclusion,
+    ReviewComment, ReviewDirection, ReviewEffort, ReviewEnvelopeEvent, ReviewEnvelopeMeta,
+    ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewProvider,
+    ReviewReconcileOutput, ReviewReconcileSchema, RiskClass, RiskProfile, RuntimeCoverageReport,
+    SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,
+    SecurityBlindSpotsSchemaVersion, SecurityBlindSpotsSummary, SecurityGateVerdict,
+    SecurityReachabilityCounts, SecurityRuntimeStateCounts, SecuritySchemaVersion,
+    SecuritySeverityCounts, SecuritySummary, SecuritySurvivor, SecuritySurvivorsOutput,
+    SecuritySurvivorsSchemaVersion, SecuritySurvivorsSummary, SecurityUnresolvedCalleeDiagnostics,
+    SecurityUnresolvedCalleeReasonCount, SecurityUnresolvedCalleeSample,
+    SecurityUnresolvedCalleeTopFile, SecurityVerifierVerdict, SecurityVerifierVerdictStatus,
+    StandardReviewBriefOutput as ReviewBriefOutput, StandardWalkthroughGuide as WalkthroughGuide,
+    TargetThresholds, TrendCount, TrendSummary, TruncationNote, UntestedExport,
+    UntestedExportFinding, UntestedFile, UntestedFileFinding, VitalSigns, VitalSignsCounts,
+    WalkthroughValidation, WorkspaceInfo,
+};
+use plow_output::{
+    CloneFamilyAction, CloneFamilyActionType, CloneGroupAction, CloneGroupActionType,
+    CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
+    CodeClimateOutput, CodeClimateSeverity,
+};
+use plow_types::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
     RefactoringKind, RefactoringSuggestion,
 };
@@ -293,12 +299,47 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "CodeClimateIssue",
     "CodeClimateOutput",
     "CombinedOutput",
+    "ReviewBriefOutput",
+    "ReviewBriefSchemaVersion",
+    "RiskClass",
+    "ReviewEffort",
+    "DiffTriage",
+    "GraphFacts",
+    "FocusLabel",
+    "ConfidenceFlag",
+    "FocusScore",
+    "FocusUnit",
+    "FocusMap",
+    "Decision",
+    "DecisionAction",
+    "DecisionActionType",
+    "DecisionCategory",
+    "DecisionSurface",
+    "DecisionSurfaceOutput",
+    "DecisionSurfaceSchemaVersion",
+    "DecisionWithActions",
+    "TruncationNote",
+    "AcceptedJudgment",
+    "AgentSchema",
+    "ChangeAnchor",
+    "DirectionUnit",
+    "RejectedJudgment",
+    "ReviewDirection",
+    "WalkthroughGuide",
+    "WalkthroughValidation",
     "CoverageSetupFileToEdit",
     "CoverageSetupMember",
     "CoverageSetupOutput",
     "CoverageSetupSnippet",
     "DupesOutput",
     "ExplainOutput",
+    "InspectEvidence",
+    "InspectEvidenceSection",
+    "InspectFileIdentity",
+    "InspectIdentity",
+    "InspectOutput",
+    "InspectSymbolIdentity",
+    "InspectTargetDescriptor",
     "GitHubReviewComment",
     "GitLabReviewComment",
     "GitLabReviewPosition",
@@ -307,6 +348,8 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "ReviewEnvelopeOutput",
     "ReviewEnvelopeSummary",
     "ReviewReconcileOutput",
+    "InspectEvidenceScope",
+    "InspectSectionStatus",
     "PlowOutput",
     "BoundariesListLogicalGroup",
     "BoundariesListRule",
@@ -355,6 +398,17 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "SecuritySeverityCounts",
     "SecurityReachabilityCounts",
     "SecurityRuntimeStateCounts",
+    "SecuritySurvivorsOutput",
+    "SecuritySurvivorsSchemaVersion",
+    "SecuritySurvivorsSummary",
+    "SecuritySurvivor",
+    "SecurityVerifierVerdict",
+    "SecurityVerifierVerdictStatus",
+    "SecurityBlindSpotsOutput",
+    "SecurityBlindSpotsSchemaVersion",
+    "SecurityBlindSpotsSummary",
+    "SecurityBlindSpotGroup",
+    "SecurityBlindSpotFile",
     "SecuritySchemaVersion",
     "SecurityGate",
     "SecurityGateMode",
@@ -428,6 +482,8 @@ fn derived_definitions() -> Map<String, Value> {
     register_health_definitions(&mut generator);
     register_meta_definitions(&mut generator);
     register_per_command_envelope_definitions(&mut generator);
+    register_audit_brief_definitions(&mut generator);
+    register_walkthrough_definitions(&mut generator);
     register_impact_definitions(&mut generator);
     register_security_definitions(&mut generator);
     let _ = generator.subschema_for::<PlowOutput>();
@@ -585,6 +641,43 @@ fn register_meta_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<TelemetryMeta>();
 }
 
+/// Register the `plow audit --brief --format json` envelope.
+fn register_audit_brief_definitions(generator: &mut schemars::SchemaGenerator) {
+    let _ = generator.subschema_for::<ReviewBriefSchemaVersion>();
+    let _ = generator.subschema_for::<RiskClass>();
+    let _ = generator.subschema_for::<ReviewEffort>();
+    let _ = generator.subschema_for::<DiffTriage>();
+    let _ = generator.subschema_for::<GraphFacts>();
+    let _ = generator.subschema_for::<FocusLabel>();
+    let _ = generator.subschema_for::<ConfidenceFlag>();
+    let _ = generator.subschema_for::<FocusScore>();
+    let _ = generator.subschema_for::<FocusUnit>();
+    let _ = generator.subschema_for::<FocusMap>();
+    let _ = generator.subschema_for::<ReviewBriefOutput>();
+    let _ = generator.subschema_for::<DecisionCategory>();
+    let _ = generator.subschema_for::<Decision>();
+    let _ = generator.subschema_for::<DecisionAction>();
+    let _ = generator.subschema_for::<DecisionActionType>();
+    let _ = generator.subschema_for::<DecisionWithActions>();
+    let _ = generator.subschema_for::<TruncationNote>();
+    let _ = generator.subschema_for::<DecisionSurface>();
+    let _ = generator.subschema_for::<DecisionSurfaceSchemaVersion>();
+    let _ = generator.subschema_for::<DecisionSurfaceOutput>();
+}
+
+/// Register the `plow review --walkthrough-guide` /
+/// `--walkthrough-file` envelopes (the agent-contract loop).
+fn register_walkthrough_definitions(generator: &mut schemars::SchemaGenerator) {
+    let _ = generator.subschema_for::<DirectionUnit>();
+    let _ = generator.subschema_for::<ReviewDirection>();
+    let _ = generator.subschema_for::<ChangeAnchor>();
+    let _ = generator.subschema_for::<AgentSchema>();
+    let _ = generator.subschema_for::<WalkthroughGuide>();
+    let _ = generator.subschema_for::<AcceptedJudgment>();
+    let _ = generator.subschema_for::<RejectedJudgment>();
+    let _ = generator.subschema_for::<WalkthroughValidation>();
+}
+
 fn register_impact_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<ImpactCounts>();
     let _ = generator.subschema_for::<EnabledSource>();
@@ -639,6 +732,17 @@ fn register_security_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<SecuritySeverityCounts>();
     let _ = generator.subschema_for::<SecurityReachabilityCounts>();
     let _ = generator.subschema_for::<SecurityRuntimeStateCounts>();
+    let _ = generator.subschema_for::<SecuritySurvivorsOutput>();
+    let _ = generator.subschema_for::<SecuritySurvivorsSchemaVersion>();
+    let _ = generator.subschema_for::<SecuritySurvivorsSummary>();
+    let _ = generator.subschema_for::<SecuritySurvivor>();
+    let _ = generator.subschema_for::<SecurityVerifierVerdict>();
+    let _ = generator.subschema_for::<SecurityVerifierVerdictStatus>();
+    let _ = generator.subschema_for::<SecurityBlindSpotsOutput>();
+    let _ = generator.subschema_for::<SecurityBlindSpotsSchemaVersion>();
+    let _ = generator.subschema_for::<SecurityBlindSpotsSummary>();
+    let _ = generator.subschema_for::<SecurityBlindSpotGroup>();
+    let _ = generator.subschema_for::<SecurityBlindSpotFile>();
 }
 
 fn register_health_action_definitions(generator: &mut schemars::SchemaGenerator) {
@@ -673,12 +777,26 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     let _ = generator.subschema_for::<CheckOutput>();
     let _ = generator.subschema_for::<CheckGroupedOutput>();
     let _ = generator.subschema_for::<CheckGroupedEntry>();
-    let _ = generator.subschema_for::<DupesOutput>();
-    let _ = generator.subschema_for::<HealthOutput>();
-    let _ = generator.subschema_for::<plow_cli::health_types::HealthGroup>();
-    let _ = generator.subschema_for::<plow_cli::health_types::HealthReport>();
+    let _ = generator.subschema_for::<DupesOutput<DupesReportPayload, DuplicationGroup>>();
+    let _ = generator.subschema_for::<HealthOutput<HealthReport, HealthGroup>>();
+    let _ = generator.subschema_for::<HealthGroup>();
+    let _ = generator.subschema_for::<HealthReport>();
     let _ = generator.subschema_for::<GroupByMode>();
     let _ = generator.subschema_for::<ExplainOutput>();
+    let _ = generator.subschema_for::<InspectOutput>();
+    let _ = generator.subschema_for::<InspectTargetDescriptor>();
+    let _ = generator.subschema_for::<InspectIdentity>();
+    let _ = generator.subschema_for::<InspectFileIdentity>();
+    let _ = generator.subschema_for::<InspectSymbolIdentity>();
+    let _ = generator.subschema_for::<InspectEvidence>();
+    let _ = generator.subschema_for::<InspectEvidenceSection>();
+    let _ = generator.subschema_for::<InspectSectionStatus>();
+    let _ = generator.subschema_for::<InspectEvidenceScope>();
+    // Symbol-level call chain (`plow trace`, `PlowOutput::Trace`).
+    let _ = generator.subschema_for::<plow_types::trace_chain::SymbolChainTrace>();
+    let _ = generator.subschema_for::<plow_types::trace_chain::ChainHop>();
+    let _ = generator.subschema_for::<plow_types::trace_chain::UnresolvedCallee>();
+    let _ = generator.subschema_for::<plow_types::trace_chain::UnresolvedReason>();
     let _ = generator.subschema_for::<CodeClimateOutput>();
     let _ = generator.subschema_for::<CodeClimateIssue>();
     let _ = generator.subschema_for::<CodeClimateIssueKind>();
@@ -777,6 +895,11 @@ const PLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
         "`plow explain <issue-type> --format json`. Required `id`, `name`,\n`rationale`, `example`, `how_to_fix`, `docs`; no `schema_version`.",
     ),
     (
+        "inspect_target",
+        &["InspectOutput"],
+        "`plow inspect --format json`. Required `target`, `identity`,\n`evidence`, and `warnings`; no `schema_version`.",
+    ),
+    (
         "review-envelope",
         &["ReviewEnvelopeOutput"],
         "`plow --format review-github` / `--format review-gitlab`. Required\n`body`, `comments`, `meta`; no `schema_version`.",
@@ -829,6 +952,16 @@ const PLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
         "`plow security --format json`. Full mode requires `security_findings`,\n`unresolved_edge_files`, and `unresolved_callee_sites`; summary mode requires\n`summary` and omits per-finding arrays.",
     ),
     (
+        "security-survivors",
+        &["SecuritySurvivorsOutput"],
+        "`plow security survivors --format json`. Required `survivors` and\n`needs_human_review`, keyed by `finding_id`.",
+    ),
+    (
+        "security-blind-spots",
+        &["SecurityBlindSpotsOutput"],
+        "`plow security blind-spots --format json`. Required `summary` and\ngrouped unresolved-callee diagnostics.",
+    ),
+    (
         "dead-code",
         &["CheckOutput"],
         "`plow dead-code --format json`.\nRequired `total_issues` plus `summary: CheckSummary`.",
@@ -837,6 +970,21 @@ const PLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
         "combined",
         &["CombinedOutput"],
         "Bare `plow --format json` (combined dead-code + dupes + health).\nRequired `schema_version`, `version`, and `elapsed_ms`, with optional\n`check`, `dupes`, and `health` subreports.",
+    ),
+    (
+        "audit-brief",
+        &["ReviewBriefOutput"],
+        "`plow audit --brief --format json` (alias `plow review`). Required\n`schema_version`, `version`, `command: \"audit-brief\"`, `triage`, and\n`graph_facts`. Independently versioned via `ReviewBriefSchemaVersion`;\nalways emitted with exit 0.",
+    ),
+    (
+        "review-walkthrough-guide",
+        &["WalkthroughGuide"],
+        "`plow review --walkthrough-guide --format json`. The digest +\nschema the agent fetches: brief + decision surface, review direction, the\ngraph-snapshot pin, and the embedded agent schema. Graph-derived only\n(injection-resistant). Always exit 0.",
+    ),
+    (
+        "review-walkthrough-validation",
+        &["WalkthroughValidation"],
+        "`plow review --walkthrough-file --format json`. Post-validation\nof an agent's judgment JSON against the live graph: `accepted` (anchored,\nframing fenced), `rejected` (unanchored), and a `stale` flag. The verifier\nis the graph, not a second model. Always exit 0.",
     ),
 ];
 
@@ -914,11 +1062,10 @@ fn rewrite_document_root_one_of(document: &mut Value) -> Result<(), String> {
             "Schemas for the JSON output of plow commands. Object-shaped \
              envelopes covered by the `PlowOutput` contract carry a top-level \
              `kind` discriminator (for example `dead-code`, `dead-code-grouped`, \
-             `health`, `dupes`, `combined`, `audit`, `explain`, `impact`, \
-             `security`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, \
+             `health`, `dupes`, `combined`, `audit`, `explain`, `inspect_target`, \
+             `impact`, `security`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, \
              `review-envelope`, and `review-reconcile`). Consumers should branch on `kind` instead of \
-             probing for unique field presence. `--legacy-envelope` removes \
-             only the document-root `kind` for one compatibility cycle. \
+             probing for unique field presence. \
              `CodeClimateOutput` is a bare JSON array (per the Code Climate / \
              GitLab Code Quality spec) and stays a sibling root branch \
              discriminated by checking whether the document root is an array."
@@ -1167,8 +1314,15 @@ mod drift_tests {
             ("ImpactCrossRepo", "CrossRepoImpactReport"),
             ("Security", "SecurityOutput"),
             ("SecuritySummary", "SecuritySummaryOutput"),
+            ("SecuritySurvivors", "SecuritySurvivorsOutput"),
+            ("SecurityBlindSpots", "SecurityBlindSpotsOutput"),
             ("Check", "CheckOutput"),
             ("Combined", "CombinedOutput"),
+            ("FeatureFlags", "FeatureFlagsOutput"),
+            ("AuditBrief", "ReviewBriefOutput"),
+            ("DecisionSurface", "DecisionSurfaceOutput"),
+            ("WalkthroughGuide", "WalkthroughGuide"),
+            ("WalkthroughValidation", "WalkthroughValidation"),
         ];
 
         #[expect(
@@ -1179,6 +1333,8 @@ mod drift_tests {
             match value {
                 PlowOutput::Audit(_) => "Audit",
                 PlowOutput::Explain(_) => "Explain",
+                PlowOutput::Inspect(_) => "Inspect",
+                PlowOutput::Trace(_) => "Trace",
                 PlowOutput::ReviewEnvelope(_) => "ReviewEnvelope",
                 PlowOutput::ReviewReconcile(_) => "ReviewReconcile",
                 PlowOutput::CoverageSetup(_) => "CoverageSetup",
@@ -1192,8 +1348,15 @@ mod drift_tests {
                 PlowOutput::ImpactCrossRepo(_) => "ImpactCrossRepo",
                 PlowOutput::SecuritySummary(_) => "SecuritySummary",
                 PlowOutput::Security(_) => "Security",
+                PlowOutput::SecuritySurvivors(_) => "SecuritySurvivors",
+                PlowOutput::SecurityBlindSpots(_) => "SecurityBlindSpots",
                 PlowOutput::Check(_) => "Check",
                 PlowOutput::Combined(_) => "Combined",
+                PlowOutput::FeatureFlags(_) => "FeatureFlags",
+                PlowOutput::AuditBrief(_) => "AuditBrief",
+                PlowOutput::DecisionSurface(_) => "DecisionSurface",
+                PlowOutput::WalkthroughGuide(_) => "WalkthroughGuide",
+                PlowOutput::WalkthroughValidation(_) => "WalkthroughValidation",
             }
         }
 

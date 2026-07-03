@@ -25,12 +25,14 @@ use tempfile::TempDir;
 use url::Url;
 
 use crate::error::emit_error;
-use crate::health::RuntimeCoverageOptions;
 use crate::health::scoring::IstanbulCoverage;
-use crate::health_types::{
-    RuntimeCoverageAction, RuntimeCoverageConfidence, RuntimeCoverageDataSource,
-    RuntimeCoverageEvidence, RuntimeCoverageFinding, RuntimeCoverageHotPath,
-    RuntimeCoverageMessage, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
+use crate::license::verifying_key;
+use plow_engine::RuntimeCoverageOptions;
+use plow_output::{
+    RUNTIME_STALE_AFTER_DAYS, RuntimeCoverageAction, RuntimeCoverageConfidence,
+    RuntimeCoverageDataSource, RuntimeCoverageDiscriminators, RuntimeCoverageEvidence,
+    RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageMessage,
+    RuntimeCoverageProvenance, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
     RuntimeCoverageRiskBand, RuntimeCoverageSchemaVersion, RuntimeCoverageSummary,
     RuntimeCoverageVerdict, RuntimeCoverageWatermark,
 };
@@ -42,7 +44,6 @@ fn function_identity_id(file: &str, name: &str, start_line: u32) -> String {
         None => stable_id,
     }
 }
-use crate::license::verifying_key;
 
 /// Ed25519 public key used to verify the plow-cov sidecar binary at every
 /// spawn. Intentionally SEPARATE from the license-signing pubkey at
@@ -55,7 +56,7 @@ use crate::license::verifying_key;
 /// misidentifies it as the license pubkey.
 ///
 /// Must match the `ED25519_BINARY_SIGNING_PUBLIC_KEY` repository variable on
-/// `fglogan/genesis-plow-cloud` byte-for-byte; the `binary-signing-parity.yml`
+/// `plow-rs/plow-cloud` byte-for-byte; the `binary-signing-parity.yml`
 /// workflow on plow-cloud asserts this daily. If you rotate the key, update
 /// both sides in the same release cycle per the procedure in ADR 008.
 #[cfg(not(feature = "test-sidecar-key"))]
@@ -250,7 +251,7 @@ pub fn prepare_options(
 pub(super) struct RuntimeCoverageAnalysisInput<'a> {
     pub root: &'a Path,
     pub modules: &'a [plow_types::extract::ModuleInfo],
-    pub analysis_output: &'a plow_core::AnalysisOutput,
+    pub analysis_output: &'a plow_engine::DeadCodeAnalysisArtifacts,
     pub istanbul_coverage: Option<&'a IstanbulCoverage>,
     pub file_paths: &'a FxHashMap<plow_types::discover::FileId, &'a PathBuf>,
     pub ignore_set: &'a GlobSet,
@@ -276,7 +277,22 @@ pub(super) fn analyze(
     let (request, locations) =
         build_request(options, input, &static_signals, prepared_sources.sources);
     let response = run_sidecar(&sidecar, &request, input.quiet, input.output)?;
-    let mut report = convert_response(response, &locations, options.watermark);
+    // Resolve the verdict thresholds with the SAME defaults the sidecar applies
+    // when they are unset, so the discriminator block (#321) reports the values
+    // that actually produced the verdicts.
+    let min_observation_volume = options
+        .min_observation_volume
+        .unwrap_or(MIN_OBSERVATION_VOLUME_DEFAULT);
+    let low_traffic_threshold = options
+        .low_traffic_threshold
+        .unwrap_or(LOW_TRAFFIC_THRESHOLD_DEFAULT);
+    let mut report = convert_response(
+        response,
+        &locations,
+        options.watermark,
+        min_observation_volume,
+        low_traffic_threshold,
+    );
     apply_top_limit(&mut report, input.top);
     Ok(report)
 }
@@ -612,6 +628,18 @@ fn resolve_sidecar_via_command(
         return None;
     }
     let stdout = String::from_utf8(output.stdout).ok()?;
+    resolve_sidecar_from_output(root, &stdout, output_kind)
+}
+
+/// Resolve a sidecar path from a package-manager command's captured stdout.
+/// Split out from [`resolve_sidecar_via_command`] so the path-resolution
+/// branches stay testable without spawning a subprocess (the spawn-based tests
+/// flaked under the instrumented coverage CI run).
+fn resolve_sidecar_from_output(
+    root: &Path,
+    stdout: &str,
+    output_kind: PackageManagerOutput,
+) -> Option<PathBuf> {
     let candidate = stdout
         .lines()
         .rev()
@@ -769,6 +797,18 @@ fn build_request(
         Some([only]) => only.as_path(),
         _ => input.root,
     };
+    let (files, locations) = build_static_files(input, static_signals);
+    (
+        assemble_request(options, project_root, coverage_sources, files),
+        locations,
+    )
+}
+
+/// Build the per-module `StaticFile` list and the ambiguous-line location map.
+fn build_static_files(
+    input: &RuntimeCoverageAnalysisInput<'_>,
+    static_signals: &StaticSignalIndex,
+) -> (Vec<StaticFile>, FunctionLocations) {
     let mut files = Vec::new();
     let mut locations = FxHashMap::default();
     let graph = input.analysis_output.graph.as_ref();
@@ -777,58 +817,33 @@ fn build_request(
         let Some(&path) = input.file_paths.get(&module.file_id) else {
             continue;
         };
+        let relative = path.strip_prefix(input.root).unwrap_or(path);
+        if !module_is_eligible(input, module, path, relative) {
+            continue;
+        }
         let canonical_path = input
             .istanbul_coverage
             .map(|_| dunce::canonicalize(path).unwrap_or_else(|_| path.clone()));
-        let relative = path.strip_prefix(input.root).unwrap_or(path);
-        let caller_count = graph
-            .and_then(|g| g.reverse_deps.get(module.file_id.0 as usize))
-            .map_or(0_usize, Vec::len);
+        let caller_count = graph.map_or(0_usize, |g| g.direct_importer_count(module.file_id));
         let caller_count = u32::try_from(caller_count).unwrap_or(u32::MAX);
         let owner_count = codeowners
             .as_ref()
             .map(|co| co.owner_count_of(relative).unwrap_or(0));
-        if input.ignore_set.is_match(relative) {
-            continue;
-        }
-        if let Some(changed) = input.changed_files
-            && !changed.contains(path.as_path())
-        {
-            continue;
-        }
-        if let Some(ws) = input.ws_roots
-            && !ws.iter().any(|r| path.starts_with(r))
-        {
-            continue;
-        }
-        if module.complexity.is_empty() {
-            continue;
-        }
         let relative_posix = relative.to_string_lossy().replace('\\', "/");
         let functions = module
             .complexity
             .iter()
             .map(|function| {
                 mark_ambiguous_function_line(&mut locations, path, &function.name, function.line);
-                let static_used = function_static_used(path, function, static_signals);
-                let test_covered = function_test_covered(
-                    path,
-                    canonical_path.as_deref(),
+                build_static_function(&BuildStaticFunctionInput {
                     function,
+                    path,
+                    canonical_path: canonical_path.as_deref(),
                     static_signals,
-                    input.istanbul_coverage,
-                );
-                static_function(StaticFunctionInput {
+                    istanbul_coverage: input.istanbul_coverage,
                     relative_posix: &relative_posix,
-                    name: &function.name,
-                    start_line: function.line,
-                    end_line: function.line.saturating_add(function.line_count),
-                    cyclomatic: u32::from(function.cyclomatic),
-                    static_used,
-                    test_covered,
                     caller_count,
                     owner_count,
-                    source_hash: function.source_hash.clone(),
                 })
             })
             .collect();
@@ -837,34 +852,103 @@ fn build_request(
             functions,
         });
     }
-    (
-        Request {
-            protocol_version: PROTOCOL_VERSION.to_owned(),
-            license: plow_cov_protocol::License {
-                jwt: options.license_jwt.clone(),
-            },
-            project_root: project_root.to_string_lossy().into_owned(),
-            coverage_sources,
-            static_findings: StaticFindings { files },
-            options: plow_cov_protocol::Options {
-                include_hot_paths: true,
-                min_invocations_for_hot: Some(options.min_invocations_hot),
-                min_observation_volume: options.min_observation_volume,
-                low_traffic_threshold: options.low_traffic_threshold,
-                trace_count: None,
-                period_days: None,
-                deployments_seen: None,
-                window_seconds: None,
-                instances_observed: None,
-            },
+    (files, locations)
+}
+
+/// Whether a module should contribute functions to the request.
+fn module_is_eligible(
+    input: &RuntimeCoverageAnalysisInput<'_>,
+    module: &plow_types::extract::ModuleInfo,
+    path: &Path,
+    relative: &Path,
+) -> bool {
+    if input.ignore_set.is_match(relative) {
+        return false;
+    }
+    if let Some(changed) = input.changed_files
+        && !changed.contains(path)
+    {
+        return false;
+    }
+    if let Some(ws) = input.ws_roots
+        && !ws.iter().any(|r| path.starts_with(r))
+    {
+        return false;
+    }
+    !module.complexity.is_empty()
+}
+
+/// Per-function inputs threaded from `build_static_files` into `static_function`.
+struct BuildStaticFunctionInput<'a> {
+    function: &'a plow_types::extract::FunctionComplexity,
+    path: &'a Path,
+    canonical_path: Option<&'a Path>,
+    static_signals: &'a StaticSignalIndex,
+    istanbul_coverage: Option<&'a IstanbulCoverage>,
+    relative_posix: &'a str,
+    caller_count: u32,
+    owner_count: Option<u32>,
+}
+
+/// Derive a `StaticFunction` from one parsed function plus static signals.
+fn build_static_function(input: &BuildStaticFunctionInput<'_>) -> StaticFunction {
+    let static_used = function_static_used(input.path, input.function, input.static_signals);
+    let test_covered = function_test_covered(
+        input.path,
+        input.canonical_path,
+        input.function,
+        input.static_signals,
+        input.istanbul_coverage,
+    );
+    static_function(StaticFunctionInput {
+        relative_posix: input.relative_posix,
+        name: &input.function.name,
+        start_line: input.function.line,
+        end_line: input
+            .function
+            .line
+            .saturating_add(input.function.line_count),
+        cyclomatic: u32::from(input.function.cyclomatic),
+        static_used,
+        test_covered,
+        caller_count: input.caller_count,
+        owner_count: input.owner_count,
+        source_hash: input.function.source_hash.clone(),
+    })
+}
+
+/// Assemble the protocol `Request` envelope around the built static files.
+fn assemble_request(
+    options: &RuntimeCoverageOptions,
+    project_root: &Path,
+    coverage_sources: Vec<CoverageSource>,
+    files: Vec<StaticFile>,
+) -> Request {
+    Request {
+        protocol_version: PROTOCOL_VERSION.to_owned(),
+        license: plow_cov_protocol::License {
+            jwt: options.license_jwt.clone(),
         },
-        locations,
-    )
+        project_root: project_root.to_string_lossy().into_owned(),
+        coverage_sources,
+        static_findings: StaticFindings { files },
+        options: plow_cov_protocol::Options {
+            include_hot_paths: true,
+            min_invocations_for_hot: Some(options.min_invocations_hot),
+            min_observation_volume: options.min_observation_volume,
+            low_traffic_threshold: options.low_traffic_threshold,
+            trace_count: None,
+            period_days: None,
+            deployments_seen: None,
+            window_seconds: None,
+            instances_observed: None,
+        },
+    }
 }
 
 fn build_static_signal_index(
     modules: &[plow_types::extract::ModuleInfo],
-    analysis_output: &plow_core::AnalysisOutput,
+    analysis_output: &plow_engine::DeadCodeAnalysisArtifacts,
     file_paths: &FxHashMap<plow_types::discover::FileId, &PathBuf>,
 ) -> Result<StaticSignalIndex, String> {
     let graph = analysis_output
@@ -872,7 +956,32 @@ fn build_static_signal_index(
         .as_ref()
         .ok_or_else(|| "analysis graph not available for runtime coverage".to_owned())?;
     let mut index = StaticSignalIndex::default();
+    index_dead_code_signals(&mut index, analysis_output);
 
+    let module_by_id: FxHashMap<_, _> = modules
+        .iter()
+        .map(|module| (module.file_id, module))
+        .collect();
+    for export in plow_engine::module_value_exports(graph) {
+        let Some(&path) = file_paths.get(&export.file_id) else {
+            continue;
+        };
+        index_graph_value_export(
+            &mut index,
+            &export,
+            module_by_id.get(&export.file_id).copied(),
+            path,
+        );
+    }
+
+    Ok(index)
+}
+
+/// Seed the signal index with unused-file and unused-export dead-code signals.
+fn index_dead_code_signals(
+    index: &mut StaticSignalIndex,
+    analysis_output: &plow_engine::DeadCodeAnalysisArtifacts,
+) {
     for file in &analysis_output.results.unused_files {
         index.unused_files.insert(file.file.path.clone());
     }
@@ -888,61 +997,43 @@ fn build_static_signal_index(
             .or_default()
             .insert(export.export.line);
     }
+}
 
-    let module_by_id: FxHashMap<_, _> = modules
-        .iter()
-        .map(|module| (module.file_id, module))
-        .collect();
-    for node in &graph.modules {
-        let Some(&path) = file_paths.get(&node.file_id) else {
-            continue;
-        };
-        let module = module_by_id.get(&node.file_id);
-        for export in &node.exports {
-            if export.is_type_only {
-                continue;
-            }
+/// Index one graph value export, including test-referenced state.
+fn index_graph_value_export(
+    index: &mut StaticSignalIndex,
+    export: &plow_engine::ModuleValueExport,
+    module: Option<&plow_types::extract::ModuleInfo>,
+    path: &Path,
+) {
+    index
+        .exported_names
+        .entry(path.to_path_buf())
+        .or_default()
+        .insert(export.name.clone());
 
+    if let Some(module) = module {
+        let (line, _) =
+            plow_types::extract::byte_offset_to_line_col(&module.line_offsets, export.span_start);
+        index
+            .exported_lines
+            .entry(path.to_path_buf())
+            .or_default()
+            .insert(line);
+
+        if export.test_referenced {
             index
-                .exported_names
-                .entry(path.clone())
+                .test_referenced_export_names
+                .entry(path.to_path_buf())
                 .or_default()
-                .insert(export.name.to_string());
-
-            if let Some(module) = module {
-                let (line, _) = plow_types::extract::byte_offset_to_line_col(
-                    &module.line_offsets,
-                    export.span.start,
-                );
-                index
-                    .exported_lines
-                    .entry(path.clone())
-                    .or_default()
-                    .insert(line);
-
-                let has_test_ref = export.references.iter().any(|reference| {
-                    graph
-                        .modules
-                        .get(reference.from_file.0 as usize)
-                        .is_some_and(plow_core::graph::ModuleNode::is_test_reachable)
-                });
-                if has_test_ref {
-                    index
-                        .test_referenced_export_names
-                        .entry(path.clone())
-                        .or_default()
-                        .insert(export.name.to_string());
-                    index
-                        .test_referenced_export_lines
-                        .entry(path.clone())
-                        .or_default()
-                        .insert(line);
-                }
-            }
+                .insert(export.name.clone());
+            index
+                .test_referenced_export_lines
+                .entry(path.to_path_buf())
+                .or_default()
+                .insert(line);
         }
     }
-
-    Ok(index)
 }
 
 fn function_static_used(
@@ -1119,11 +1210,35 @@ fn preprocess_v8_coverage_file(
         return Ok(None);
     };
 
+    let (remapped_files, residual_scripts) = remap_dump_scripts(dump.result, &cache);
+
+    if remapped_files.is_empty() {
+        return Ok(None);
+    }
+
+    let temp_root = ensure_temp_dir(temp_dir)?;
+    let remapped_path = temp_root.join(format!("coverage-remapped-{index}.json"));
+    write_istanbul_coverage_file(&remapped_path, &remapped_files)?;
+
+    let residual_path = write_residual_coverage(temp_root, index, residual_scripts)?;
+
+    Ok(Some((remapped_path, residual_path)))
+}
+
+/// Split V8 scripts into source-map-remapped Istanbul functions and the
+/// residual scripts that had no usable source map.
+fn remap_dump_scripts(
+    scripts: Vec<plow_v8_coverage::ScriptCoverage>,
+    cache: &BTreeMap<String, SourceMapCacheEntry>,
+) -> (
+    BTreeMap<PathBuf, BTreeMap<RemappedFnKey, AccumulatedFunction>>,
+    Vec<plow_v8_coverage::ScriptCoverage>,
+) {
     let mut remapped_files: BTreeMap<PathBuf, BTreeMap<RemappedFnKey, AccumulatedFunction>> =
         BTreeMap::new();
     let mut residual_scripts = Vec::new();
 
-    for script in dump.result {
+    for script in scripts {
         let Some(entry) = cache.get(&script.url) else {
             residual_scripts.push(script);
             continue;
@@ -1138,41 +1253,39 @@ fn preprocess_v8_coverage_file(
         }
     }
 
-    if remapped_files.is_empty() {
+    (remapped_files, residual_scripts)
+}
+
+/// Write the residual (non-remapped) V8 scripts to a temp file, if any.
+fn write_residual_coverage(
+    temp_root: &Path,
+    index: usize,
+    residual_scripts: Vec<plow_v8_coverage::ScriptCoverage>,
+) -> Result<Option<PathBuf>, String> {
+    if residual_scripts.is_empty() {
         return Ok(None);
     }
-
-    let temp_root = ensure_temp_dir(temp_dir)?;
-    let remapped_path = temp_root.join(format!("coverage-remapped-{index}.json"));
-    write_istanbul_coverage_file(&remapped_path, &remapped_files)?;
-
-    let residual_path = if residual_scripts.is_empty() {
-        None
-    } else {
-        let residual_path = temp_root.join(format!("coverage-residual-{index}.json"));
-        let residual_dump = V8CoverageDump {
-            result: residual_scripts,
-            source_map_cache: None,
-        };
-        fs::write(
-            &residual_path,
-            serde_json::to_vec(&residual_dump).map_err(|err| {
-                format!(
-                    "failed to serialize residual v8 coverage {}: {err}",
-                    residual_path.display()
-                )
-            })?,
-        )
-        .map_err(|err| {
+    let residual_path = temp_root.join(format!("coverage-residual-{index}.json"));
+    let residual_dump = V8CoverageDump {
+        result: residual_scripts,
+        source_map_cache: None,
+    };
+    fs::write(
+        &residual_path,
+        serde_json::to_vec(&residual_dump).map_err(|err| {
             format!(
-                "failed to write residual v8 coverage {}: {err}",
+                "failed to serialize residual v8 coverage {}: {err}",
                 residual_path.display()
             )
-        })?;
-        Some(residual_path)
-    };
-
-    Ok(Some((remapped_path, residual_path)))
+        })?,
+    )
+    .map_err(|err| {
+        format!(
+            "failed to write residual v8 coverage {}: {err}",
+            residual_path.display()
+        )
+    })?;
+    Ok(Some(residual_path))
 }
 
 fn parse_source_map_cache(dump: &V8CoverageDump) -> Option<BTreeMap<String, SourceMapCacheEntry>> {
@@ -1617,21 +1730,8 @@ fn run_sidecar(
         )
     })?;
 
-    if let Some(mut stdin) = child.take_stdin() {
-        if let Err(err) = serde_json::to_writer(&mut stdin, request) {
-            return Err(emit_error(
-                &format!("failed to serialize sidecar request: {err}"),
-                4,
-                output,
-            ));
-        }
-        if let Err(err) = stdin.flush() {
-            return Err(emit_error(
-                &format!("failed to flush sidecar request: {err}"),
-                4,
-                output,
-            ));
-        }
+    if let Some(stdin) = child.take_stdin() {
+        write_sidecar_request(stdin, request, output)?;
     }
 
     let output_data = child
@@ -1643,43 +1743,7 @@ fn run_sidecar(
         eprint!("{stderr}");
     }
 
-    match output_data.status.code() {
-        Some(0) => {}
-        Some(4) => {
-            return Err(emit_error(
-                &stderr_message(&output_data.stderr, "sidecar protocol mismatch"),
-                4,
-                output,
-            ));
-        }
-        Some(5) => {
-            return Err(emit_error(
-                &stderr_message(
-                    &output_data.stderr,
-                    "failed to parse runtime coverage input",
-                ),
-                5,
-                output,
-            ));
-        }
-        Some(6) => {
-            return Err(emit_error(
-                &stderr_message(&output_data.stderr, "sidecar internal error"),
-                6,
-                output,
-            ));
-        }
-        Some(code) => {
-            return Err(emit_error(
-                &stderr_message(&output_data.stderr, "sidecar execution failed"),
-                u8::try_from(code).unwrap_or(4),
-                output,
-            ));
-        }
-        None => {
-            return Err(emit_error("sidecar terminated by signal", 4, output));
-        }
-    }
+    check_sidecar_exit_status(&output_data, output)?;
 
     let response: Response = serde_json::from_slice(&output_data.stdout).map_err(|err| {
         emit_error(
@@ -1689,6 +1753,70 @@ fn run_sidecar(
         )
     })?;
 
+    check_response_protocol(&response, output)?;
+
+    Ok(response)
+}
+
+/// Serialize and flush the protocol request onto the sidecar's stdin.
+fn write_sidecar_request(
+    mut stdin: impl Write,
+    request: &Request,
+    output: OutputFormat,
+) -> Result<(), ExitCode> {
+    if let Err(err) = serde_json::to_writer(&mut stdin, request) {
+        return Err(emit_error(
+            &format!("failed to serialize sidecar request: {err}"),
+            4,
+            output,
+        ));
+    }
+    if let Err(err) = stdin.flush() {
+        return Err(emit_error(
+            &format!("failed to flush sidecar request: {err}"),
+            4,
+            output,
+        ));
+    }
+    Ok(())
+}
+
+/// Map the sidecar's exit code onto plow's exit-code ladder.
+fn check_sidecar_exit_status(
+    output_data: &std::process::Output,
+    output: OutputFormat,
+) -> Result<(), ExitCode> {
+    match output_data.status.code() {
+        Some(0) => Ok(()),
+        Some(4) => Err(emit_error(
+            &stderr_message(&output_data.stderr, "sidecar protocol mismatch"),
+            4,
+            output,
+        )),
+        Some(5) => Err(emit_error(
+            &stderr_message(
+                &output_data.stderr,
+                "failed to parse runtime coverage input",
+            ),
+            5,
+            output,
+        )),
+        Some(6) => Err(emit_error(
+            &stderr_message(&output_data.stderr, "sidecar internal error"),
+            6,
+            output,
+        )),
+        Some(code) => Err(emit_error(
+            &stderr_message(&output_data.stderr, "sidecar execution failed"),
+            u8::try_from(code).unwrap_or(4),
+            output,
+        )),
+        None => Err(emit_error("sidecar terminated by signal", 4, output)),
+    }
+}
+
+/// Reject responses whose protocol major version does not match this build.
+fn check_response_protocol(response: &Response, output: OutputFormat) -> Result<(), ExitCode> {
     let supported_major = PROTOCOL_VERSION.split('.').next().unwrap_or("0");
     let response_major = response.protocol_version.split('.').next().unwrap_or("0");
     if response_major != supported_major {
@@ -1705,8 +1833,7 @@ fn run_sidecar(
         };
         return Err(emit_error(&message, 4, output));
     }
-
-    Ok(response)
+    Ok(())
 }
 
 fn stderr_message(stderr: &[u8], fallback: &str) -> String {
@@ -1722,8 +1849,15 @@ fn convert_response(
     response: Response,
     _locations: &FunctionLocations,
     watermark: Option<RuntimeCoverageWatermark>,
+    min_observation_volume: u32,
+    low_traffic_threshold: f64,
 ) -> RuntimeCoverageReport {
-    let findings = map_runtime_findings(response.findings);
+    let findings = map_runtime_findings(
+        response.findings,
+        response.summary.trace_count,
+        min_observation_volume,
+        low_traffic_threshold,
+    );
     let hot_paths = map_runtime_hot_paths(response.hot_paths);
     let blast_radius = map_runtime_blast_radius(response.blast_radius);
     let importance = map_runtime_importance(response.importance);
@@ -1733,6 +1867,40 @@ fn convert_response(
         coverage_percent
     } else {
         0.0
+    };
+
+    // #316 / #319: mirror the cloud runtime-context trust-output contract on the
+    // local report. A capture with no tracked functions carries no usable
+    // runtime evidence, so it is non-actionable (insufficient_evidence) rather
+    // than read as cold. A local capture is fresh (age 0) and origin-unknown.
+    let functions_tracked = response.summary.functions_tracked;
+    let functions_untracked = response.summary.functions_untracked;
+    let denominator = functions_tracked + functions_untracked;
+    let untracked_ratio = if denominator == 0 {
+        0.0
+    } else {
+        functions_untracked as f64 / denominator as f64
+    };
+    let actionable = functions_tracked > 0;
+    let (actionability_reason, actionability_verdict) = if actionable {
+        (None, None)
+    } else {
+        (
+            Some(
+                "No functions were tracked at runtime in this capture, so there is no usable runtime evidence to act on. Treat all functions as do-not-act; this is NOT cold."
+                    .to_owned(),
+            ),
+            Some("insufficient_evidence".to_owned()),
+        )
+    };
+    let provenance = RuntimeCoverageProvenance {
+        data_source: RuntimeCoverageDataSource::Local,
+        is_production: "unknown".to_owned(),
+        freshness_days: Some(0),
+        untracked_ratio,
+        unresolved_ratio: 0.0,
+        stale: false,
+        stale_after_days: RUNTIME_STALE_AFTER_DAYS,
     };
 
     RuntimeCoverageReport {
@@ -1769,10 +1937,43 @@ fn convert_response(
                 message: warning.message,
             })
             .collect(),
+        actionable,
+        actionability_reason,
+        actionability_verdict,
+        provenance,
     }
 }
 
-fn map_runtime_findings(findings: Vec<ProtocolFinding>) -> Vec<RuntimeCoverageFinding> {
+/// Confidence-table defaults the sidecar (`plow-cov`) applies when the
+/// corresponding option is unset. Kept in sync with
+/// `plow-cov/src/analysis.rs` (`MIN_OBSERVATION_VOLUME_DEFAULT`,
+/// `LOW_TRAFFIC_THRESHOLD_DEFAULT`); the sidecar lives in a separate repo so the
+/// values are mirrored here, not imported. They are resolved CLI-side only to
+/// report them in the discriminator block (#321); the sidecar still owns the
+/// verdict computation.
+const MIN_OBSERVATION_VOLUME_DEFAULT: u32 = 5_000;
+const LOW_TRAFFIC_THRESHOLD_DEFAULT: f64 = 0.001;
+
+/// Three-state runtime tracking label from the protocol evidence + invocation
+/// count: `untracked` when V8 never saw the function, else `called` /
+/// `never_called` by whether it was invoked.
+fn tracking_state_label(v8_tracking: &str, invocations: Option<u64>) -> &'static str {
+    if v8_tracking == "untracked" {
+        "untracked"
+    } else if invocations.is_some_and(|count| count > 0) {
+        "called"
+    } else {
+        "never_called"
+    }
+}
+
+fn map_runtime_findings(
+    findings: Vec<ProtocolFinding>,
+    trace_count: u64,
+    min_observation_volume: u32,
+    low_traffic_threshold: f64,
+) -> Vec<RuntimeCoverageFinding> {
+    let meets_observation_volume = trace_count >= u64::from(min_observation_volume);
     let mut findings = findings
         .into_iter()
         .filter_map(|finding| {
@@ -1783,6 +1984,24 @@ fn map_runtime_findings(findings: Vec<ProtocolFinding>) -> Vec<RuntimeCoverageFi
             let (stable_id, source_hash) = finding.identity.map_or((None, None), |identity| {
                 (Some(identity.stable_id), identity.source_hash)
             });
+            let discriminators = RuntimeCoverageDiscriminators {
+                tracking_state: tracking_state_label(
+                    &finding.evidence.v8_tracking,
+                    finding.invocations,
+                )
+                .to_owned(),
+                invocation_ratio: finding.invocations.map(|invocations| {
+                    if trace_count == 0 {
+                        0.0
+                    } else {
+                        invocations as f64 / trace_count as f64
+                    }
+                }),
+                low_traffic_threshold,
+                trace_count,
+                min_observation_volume,
+                meets_observation_volume,
+            };
             Some(RuntimeCoverageFinding {
                 id: finding.id,
                 stable_id,
@@ -1803,6 +2022,7 @@ fn map_runtime_findings(findings: Vec<ProtocolFinding>) -> Vec<RuntimeCoverageFi
                         auto_fixable: action.auto_fixable,
                     })
                     .collect(),
+                discriminators: Some(discriminators),
             })
         })
         .collect::<Vec<_>>();
@@ -1842,22 +2062,20 @@ fn map_runtime_hot_paths(entries: Vec<ProtocolHotPath>) -> Vec<RuntimeCoverageHo
 
 fn map_runtime_blast_radius(
     entries: Vec<ProtocolBlastRadiusEntry>,
-) -> Vec<crate::health_types::RuntimeCoverageBlastRadiusEntry> {
+) -> Vec<plow_output::RuntimeCoverageBlastRadiusEntry> {
     let mut blast_radius = entries
         .into_iter()
-        .map(
-            |entry| crate::health_types::RuntimeCoverageBlastRadiusEntry {
-                id: entry.id,
-                stable_id: entry.identity.map(|identity| identity.stable_id),
-                file: PathBuf::from(entry.file),
-                function: entry.function,
-                line: entry.line,
-                caller_count: entry.caller_count,
-                caller_count_weighted_by_traffic: entry.caller_count_weighted_by_traffic,
-                deploys_touched: entry.deploys_touched,
-                risk_band: map_risk_band(entry.risk_band),
-            },
-        )
+        .map(|entry| plow_output::RuntimeCoverageBlastRadiusEntry {
+            id: entry.id,
+            stable_id: entry.identity.map(|identity| identity.stable_id),
+            file: PathBuf::from(entry.file),
+            function: entry.function,
+            line: entry.line,
+            caller_count: entry.caller_count,
+            caller_count_weighted_by_traffic: entry.caller_count_weighted_by_traffic,
+            deploys_touched: entry.deploys_touched,
+            risk_band: map_risk_band(entry.risk_band),
+        })
         .collect::<Vec<_>>();
     blast_radius.sort_by(|left, right| {
         risk_band_rank(right.risk_band)
@@ -1876,23 +2094,21 @@ fn map_runtime_blast_radius(
 
 fn map_runtime_importance(
     entries: Vec<ProtocolImportanceEntry>,
-) -> Vec<crate::health_types::RuntimeCoverageImportanceEntry> {
+) -> Vec<plow_output::RuntimeCoverageImportanceEntry> {
     let mut importance = entries
         .into_iter()
-        .map(
-            |entry| crate::health_types::RuntimeCoverageImportanceEntry {
-                id: entry.id,
-                stable_id: entry.identity.map(|identity| identity.stable_id),
-                file: PathBuf::from(entry.file),
-                function: entry.function,
-                line: entry.line,
-                invocations: entry.invocations,
-                cyclomatic: entry.cyclomatic,
-                owner_count: entry.owner_count,
-                importance_score: entry.importance_score,
-                reason: entry.reason,
-            },
-        )
+        .map(|entry| plow_output::RuntimeCoverageImportanceEntry {
+            id: entry.id,
+            stable_id: entry.identity.map(|identity| identity.stable_id),
+            file: PathBuf::from(entry.file),
+            function: entry.function,
+            line: entry.line,
+            invocations: entry.invocations,
+            cyclomatic: entry.cyclomatic,
+            owner_count: entry.owner_count,
+            importance_score: entry.importance_score,
+            reason: entry.reason,
+        })
         .collect::<Vec<_>>();
     importance.sort_by(|left, right| {
         right
@@ -1982,10 +2198,8 @@ fn map_watermark(watermark: &Watermark) -> RuntimeCoverageWatermark {
     }
 }
 
-fn map_capture_quality(
-    quality: &CaptureQuality,
-) -> crate::health_types::RuntimeCoverageCaptureQuality {
-    crate::health_types::RuntimeCoverageCaptureQuality {
+fn map_capture_quality(quality: &CaptureQuality) -> plow_output::RuntimeCoverageCaptureQuality {
+    plow_output::RuntimeCoverageCaptureQuality {
         window_seconds: quality.window_seconds,
         instances_observed: quality.instances_observed,
         lazy_parse_warning: quality.lazy_parse_warning,
@@ -2006,10 +2220,6 @@ const fn verdict_rank(verdict: RuntimeCoverageVerdict) -> u8 {
 }
 
 #[cfg(test)]
-#[expect(
-    deprecated,
-    reason = "ADR-008 deprecates plow_core::analyze_with_parse_result externally; tests exercise the workspace path dependency"
-)]
 mod tests {
     use super::{
         AccumulatedFunction, BINARY_SIGNING_VERIFY_KEY, PackageManagerOutput, RemappedFnKey,
@@ -2017,10 +2227,10 @@ mod tests {
         build_request, build_static_signal_index, convert_response, discover_sidecar,
         function_identity_id, looks_like_istanbul, merge_remapped_functions,
         path_binary_candidates, prepare_coverage_sources, resolve_original_source_path,
-        resolve_sidecar_via_command, sidecar_binary_name, static_function,
-        verify_sidecar_signature, write_istanbul_coverage_file,
+        resolve_sidecar_from_output, resolve_sidecar_via_command, sidecar_binary_name,
+        static_function, tracking_state_label, verify_sidecar_signature,
+        write_istanbul_coverage_file,
     };
-    use crate::health::RuntimeCoverageOptions;
     use globset::{Glob, GlobSetBuilder};
     use oxc_coverage_instrument::{Location, Position};
     use plow_config::{OutputFormat, PlowConfig};
@@ -2028,6 +2238,7 @@ mod tests {
         Confidence, CoverageSource, DiagnosticMessage, Evidence, Finding, FunctionIdentity,
         HotPath, IdentityResolution, PROTOCOL_VERSION, ReportVerdict, Response, Summary, Verdict,
     };
+    use plow_engine::RuntimeCoverageOptions;
     use rustc_hash::{FxHashMap, FxHashSet};
     use std::collections::BTreeMap;
     use std::path::Path;
@@ -2035,9 +2246,9 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
     use url::Url;
 
-    fn empty_analysis_output() -> plow_core::AnalysisOutput {
-        plow_core::AnalysisOutput {
-            results: plow_core::results::AnalysisResults::default(),
+    fn empty_analysis_output() -> plow_engine::DeadCodeAnalysisArtifacts {
+        plow_engine::DeadCodeAnalysisArtifacts {
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: None,
             modules: None,
@@ -2240,6 +2451,36 @@ mod tests {
         assert!(matches!(
             &sources[1],
             CoverageSource::Istanbul { path } if path.ends_with("coverage-final.json")
+        ));
+
+        std::fs::remove_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
+    }
+
+    #[test]
+    fn coverage_directory_ignores_non_json_files_and_sorts_sources() {
+        let root = make_temp_dir("coverage-source-sort");
+        std::fs::create_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to create temp dir: {err}"));
+        std::fs::write(root.join("notes.txt"), "not coverage")
+            .unwrap_or_else(|err| panic!("failed to write notes.txt: {err}"));
+        std::fs::write(root.join("z-v8.json"), "{\"result\":[]}")
+            .unwrap_or_else(|err| panic!("failed to write z-v8.json: {err}"));
+        std::fs::write(root.join("a-istanbul.json"), "{}")
+            .unwrap_or_else(|err| panic!("failed to write a-istanbul.json: {err}"));
+
+        let prepared = prepare_coverage_sources(&root)
+            .unwrap_or_else(|err| panic!("failed to collect coverage sources: {err}"));
+        let sources = prepared.sources;
+
+        assert_eq!(sources.len(), 2);
+        assert!(matches!(
+            &sources[0],
+            CoverageSource::Istanbul { path } if path.ends_with("a-istanbul.json")
+        ));
+        assert!(matches!(
+            &sources[1],
+            CoverageSource::V8 { path } if path.ends_with("z-v8.json")
         ));
 
         std::fs::remove_dir_all(&root)
@@ -2452,6 +2693,24 @@ mod tests {
     }
 
     #[test]
+    fn scoped_platform_sidecar_ignores_unusable_package_dirs() {
+        let root = make_temp_dir("sidecar-scoped-ignore");
+        let scoped = root.join("node_modules").join("@plow-cli");
+        std::fs::create_dir_all(scoped.join("plow-cov-darwin-arm64"))
+            .unwrap_or_else(|err| panic!("failed to create scoped package: {err}"));
+        std::fs::create_dir_all(scoped.join("not-plow-cov"))
+            .unwrap_or_else(|err| panic!("failed to create unrelated package: {err}"));
+
+        assert_eq!(
+            super::find_scoped_platform_sidecar(&scoped, sidecar_binary_name()),
+            None
+        );
+
+        std::fs::remove_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
+    }
+
+    #[test]
     fn detects_package_manager_from_field_before_lockfiles() {
         let root = make_temp_dir("sidecar-package-manager-field");
         std::fs::create_dir_all(&root)
@@ -2564,24 +2823,14 @@ mod tests {
     #[test]
     fn resolves_yarn_sidecar_without_node_modules_bin() {
         let root = make_temp_dir("sidecar-yarn");
-        let command_dir = root.join("commands");
         let unplugged_dir = root
             .join(".yarn")
             .join("unplugged")
             .join("plow-cov")
             .join("node_modules")
             .join(".bin");
-        std::fs::create_dir_all(&command_dir)
-            .unwrap_or_else(|err| panic!("failed to create {}: {err}", command_dir.display()));
         std::fs::create_dir_all(&unplugged_dir)
             .unwrap_or_else(|err| panic!("failed to create {}: {err}", unplugged_dir.display()));
-        std::fs::write(
-            root.join("package.json"),
-            r#"{"name":"demo","packageManager":"yarn@4.1.0"}"#,
-        )
-        .unwrap_or_else(|err| panic!("failed to write package.json: {err}"));
-        std::fs::write(root.join("yarn.lock"), "")
-            .unwrap_or_else(|err| panic!("failed to write yarn.lock: {err}"));
 
         let sidecar = if cfg!(windows) {
             unplugged_dir.join("plow-cov.cmd")
@@ -2591,20 +2840,13 @@ mod tests {
         std::fs::write(&sidecar, "")
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", sidecar.display()));
 
-        let yarn = if cfg!(windows) {
-            command_dir.join("yarn.cmd")
-        } else {
-            command_dir.join("yarn")
-        };
-        write_fake_yarn_bin_command(&yarn, &sidecar);
-
-        let resolved = resolve_sidecar_via_command(
-            &root,
-            yarn.as_os_str(),
-            &["bin", "plow-cov"],
-            PackageManagerOutput::BinaryPath,
-        )
-        .unwrap_or_else(|| panic!("failed to resolve yarn-local sidecar"));
+        // `yarn bin plow-cov` prints the absolute sidecar path on its last
+        // line. Parse that output directly instead of spawning yarn, which
+        // flaked under the instrumented coverage run.
+        let stdout = format!("{}\n", sidecar.display());
+        let resolved =
+            resolve_sidecar_from_output(&root, &stdout, PackageManagerOutput::BinaryPath)
+                .unwrap_or_else(|| panic!("failed to resolve yarn-local sidecar"));
 
         assert_eq!(resolved, sidecar);
 
@@ -2615,10 +2857,7 @@ mod tests {
     #[test]
     fn resolves_npm_sidecar_from_node_modules_root() {
         let root = make_temp_dir("sidecar-npm");
-        let command_dir = root.join("commands");
         let bin_dir = root.join("custom-node_modules").join(".bin");
-        std::fs::create_dir_all(&command_dir)
-            .unwrap_or_else(|err| panic!("failed to create {}: {err}", command_dir.display()));
         std::fs::create_dir_all(&bin_dir)
             .unwrap_or_else(|err| panic!("failed to create {}: {err}", bin_dir.display()));
 
@@ -2630,22 +2869,89 @@ mod tests {
         std::fs::write(&sidecar, "")
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", sidecar.display()));
 
-        let npm = if cfg!(windows) {
-            command_dir.join("npm.cmd")
-        } else {
-            command_dir.join("npm")
-        };
-        write_fake_npm_root_command(&npm, &root.join("custom-node_modules"));
+        // `npm root` prints the node_modules dir; NodeModulesDir resolution
+        // appends `.bin` plus the sidecar name. Parse the printed dir directly
+        // instead of spawning npm.
+        let stdout = format!("{}\n", root.join("custom-node_modules").display());
+        let resolved =
+            resolve_sidecar_from_output(&root, &stdout, PackageManagerOutput::NodeModulesDir)
+                .unwrap_or_else(|| panic!("failed to resolve npm-local sidecar"));
+
+        assert_eq!(resolved, sidecar);
+
+        std::fs::remove_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
+    }
+
+    #[test]
+    fn package_manager_sidecar_resolution_ignores_missing_commands() {
+        let root = make_temp_dir("sidecar-missing-command");
+        std::fs::create_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", root.display()));
 
         let resolved = resolve_sidecar_via_command(
             &root,
-            npm.as_os_str(),
-            &["root"],
-            PackageManagerOutput::NodeModulesDir,
-        )
-        .unwrap_or_else(|| panic!("failed to resolve npm-local sidecar"));
+            std::ffi::OsStr::new("definitely-not-plow-cov-manager"),
+            &["bin"],
+            PackageManagerOutput::BinDir,
+        );
 
-        assert_eq!(resolved, sidecar);
+        assert_eq!(resolved, None);
+
+        std::fs::remove_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
+    }
+
+    #[test]
+    fn parse_source_map_cache_rejects_missing_or_malformed_cache() {
+        let missing = plow_v8_coverage::V8CoverageDump {
+            result: Vec::new(),
+            source_map_cache: None,
+        };
+        assert!(super::parse_source_map_cache(&missing).is_none());
+
+        let malformed = plow_v8_coverage::V8CoverageDump {
+            result: Vec::new(),
+            source_map_cache: Some(serde_json::json!("not a cache object")),
+        };
+        assert!(super::parse_source_map_cache(&malformed).is_none());
+    }
+
+    #[test]
+    fn ensure_temp_dir_reuses_existing_directory() {
+        let mut temp_dir = None;
+        let first = super::ensure_temp_dir(&mut temp_dir)
+            .unwrap_or_else(|err| panic!("failed to create tempdir: {err}"))
+            .to_path_buf();
+        let second = super::ensure_temp_dir(&mut temp_dir)
+            .unwrap_or_else(|err| panic!("failed to reuse tempdir: {err}"))
+            .to_path_buf();
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn generated_source_for_script_reads_file_urls_only() {
+        let root = make_temp_dir("coverage-generated-source");
+        std::fs::create_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", root.display()));
+        let source = root.join("bundle.js");
+        std::fs::write(&source, "function alpha() {}\n")
+            .unwrap_or_else(|err| panic!("failed to write {}: {err}", source.display()));
+        let source_url = file_url(&source);
+        let script = script_coverage_with_url(&source_url);
+
+        assert_eq!(
+            super::generated_source_for_script(&script),
+            Some("function alpha() {}\n".to_owned())
+        );
+
+        let remote = script_coverage_with_url("https://cdn.example.com/bundle.js");
+        assert_eq!(super::generated_source_for_script(&remote), None);
+
+        let missing_url = file_url(&root.join("missing.js"));
+        let missing = script_coverage_with_url(&missing_url);
+        assert_eq!(super::generated_source_for_script(&missing), None);
 
         std::fs::remove_dir_all(&root)
             .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
@@ -2751,7 +3057,7 @@ mod tests {
             errors: vec![],
             warnings: vec![],
         };
-        let report = convert_response(response, &FxHashMap::default(), None);
+        let report = convert_response(response, &FxHashMap::default(), None, 5_000, 0.001);
         assert_eq!(report.findings[0].stable_id, Some(identity.stable_id));
     }
 
@@ -2779,7 +3085,7 @@ mod tests {
             errors: vec![],
             warnings: vec![],
         };
-        let report = convert_response(response, &FxHashMap::default(), None);
+        let report = convert_response(response, &FxHashMap::default(), None, 5_000, 0.001);
         assert_eq!(report.findings[0].stable_id, None);
     }
 
@@ -2815,17 +3121,107 @@ mod tests {
             },
             &locations,
             None,
+            5_000,
+            0.001,
         );
 
         assert_eq!(report.findings[0].id, "plow:prod:abc12345");
         assert_eq!(report.findings[0].line, 8);
         assert_eq!(
             report.findings[0].verdict,
-            crate::health_types::RuntimeCoverageVerdict::ReviewRequired,
+            plow_output::RuntimeCoverageVerdict::ReviewRequired,
         );
         assert_eq!(report.findings[0].evidence.static_status, "used");
         assert_eq!(report.hot_paths[0].id, "plow:hot:def67890");
         assert_eq!(report.hot_paths[0].percentile, 50);
+
+        // #321: the merge pipeline emits a discriminator block that reproduces
+        // the verdict. proto_finding is tracked with 0 invocations => the
+        // three-state signal is never_called; ratio is 0/512; trace_count 512 is
+        // below the 5000 floor so the confidence cap is visible.
+        let discriminators = report.findings[0]
+            .discriminators
+            .as_ref()
+            .expect("merge-pipeline findings carry discriminators");
+        assert_eq!(discriminators.tracking_state, "never_called");
+        assert_eq!(discriminators.invocation_ratio, Some(0.0));
+        assert_eq!(discriminators.trace_count, 512);
+        assert!((discriminators.low_traffic_threshold - 0.001).abs() < f64::EPSILON);
+        assert_eq!(discriminators.min_observation_volume, 5_000);
+        assert!(!discriminators.meets_observation_volume);
+
+        // #316 / #319: tracked functions present => actionable, with a local,
+        // origin-unknown, fresh provenance mirroring the cloud contract.
+        assert!(report.actionable);
+        assert_eq!(report.actionability_reason, None);
+        assert_eq!(report.actionability_verdict, None);
+        assert_eq!(
+            report.provenance.data_source,
+            plow_output::RuntimeCoverageDataSource::Local,
+        );
+        assert_eq!(report.provenance.is_production, "unknown");
+        assert_eq!(report.provenance.freshness_days, Some(0));
+        assert!(!report.provenance.stale);
+        assert_eq!(report.provenance.stale_after_days, 14);
+    }
+
+    #[test]
+    fn convert_response_with_no_tracked_functions_is_non_actionable() {
+        let report = convert_response(
+            Response {
+                protocol_version: "0.2.0".to_owned(),
+                verdict: ReportVerdict::Clean,
+                summary: Summary {
+                    functions_tracked: 0,
+                    functions_hit: 0,
+                    functions_unhit: 0,
+                    functions_untracked: 2,
+                    coverage_percent: 0.0,
+                    trace_count: 0,
+                    period_days: 0,
+                    deployments_seen: 0,
+                    capture_quality: None,
+                },
+                findings: vec![],
+                hot_paths: vec![],
+                blast_radius: vec![],
+                importance: vec![],
+                watermark: None,
+                errors: vec![],
+                warnings: vec![],
+            },
+            &FxHashMap::default(),
+            None,
+            5_000,
+            0.001,
+        );
+
+        // #316: no tracked functions => no usable runtime evidence => the report
+        // is non-actionable with a first-class insufficient_evidence verdict,
+        // never read as cold. #319: untracked_ratio reflects the thin capture.
+        assert!(!report.actionable);
+        assert_eq!(
+            report.actionability_verdict.as_deref(),
+            Some("insufficient_evidence"),
+        );
+        assert!(
+            report
+                .actionability_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("NOT cold")),
+        );
+        assert!((report.provenance.untracked_ratio - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn tracking_state_label_maps_three_states() {
+        // untracked wins regardless of invocation count.
+        assert_eq!(tracking_state_label("untracked", None), "untracked");
+        assert_eq!(tracking_state_label("untracked", Some(9)), "untracked");
+        // tracked + invoked => called; tracked + zero => never_called.
+        assert_eq!(tracking_state_label("tracked", Some(3)), "called");
+        assert_eq!(tracking_state_label("tracked", Some(0)), "never_called");
+        assert_eq!(tracking_state_label("tracked", None), "never_called");
     }
 
     #[test]
@@ -2871,6 +3267,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+    )]
     fn build_request_joins_dead_code_and_direct_test_signals() {
         let root = make_temp_dir("coverage-static-signals");
         let src_dir = root.join("src");
@@ -2899,13 +3299,15 @@ mod tests {
         )
         .unwrap_or_else(|err| panic!("failed to write app.test.ts: {err}"));
 
-        let config =
-            PlowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None);
-        let files = plow_core::discover::discover_files(&config);
-        let parse_result = plow_core::extract::parse_all_files(&files, None, true);
-        let modules = parse_result.modules;
+        let parsed = plow_engine::AnalysisSession::from_resolved_config(
+            PlowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None),
+        )
+        .into_parsed_parts(true);
+        let config = parsed.config;
+        let files = parsed.files;
+        let modules = parsed.modules;
         let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
-        let analysis_output = plow_core::analyze_with_parse_result(&config, &modules)
+        let analysis_output = plow_engine::analyze_with_parse_result(&config, &modules)
             .unwrap_or_else(|err| panic!("failed to analyze temp project: {err}"));
         let static_signals = build_static_signal_index(&modules, &analysis_output, &file_paths)
             .unwrap_or_else(|err| panic!("failed to build static signal index: {err}"));
@@ -3030,11 +3432,12 @@ mod tests {
         )
         .unwrap_or_else(|err| panic!("failed to write other.ts: {err}"));
 
-        let config =
-            PlowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None);
-        let files = plow_core::discover::discover_files(&config);
-        let parse_result = plow_core::extract::parse_all_files(&files, None, true);
-        let modules = parse_result.modules;
+        let parsed = plow_engine::AnalysisSession::from_resolved_config(
+            PlowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None),
+        )
+        .into_parsed_parts(true);
+        let files = parsed.files;
+        let modules = parsed.modules;
         let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
         let analysis_output = empty_analysis_output();
         let mut changed_files = FxHashSet::default();
@@ -3609,39 +4012,13 @@ mod tests {
         }
     }
 
-    fn write_fake_yarn_bin_command(path: &Path, sidecar: &Path) {
-        if cfg!(windows) {
-            std::fs::write(
-                path,
-                format!(
-                    "@echo off\r\nif \"%1\"==\"bin\" if \"%2\"==\"plow-cov\" (\r\n  echo {}\r\n  exit /b 0\r\n)\r\nexit /b 1\r\n",
-                    sidecar.display()
-                ),
-            )
-            .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
-            return;
-        }
-
-        std::fs::write(
-            path,
-            format!(
-                "#!/bin/sh\nif [ \"$1\" = \"bin\" ] && [ \"$2\" = \"plow-cov\" ]; then\n  printf '%s\\n' '{}'\n  exit 0\nfi\nexit 1\n",
-                sidecar.display()
-            ),
-        )
-        .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-
-            let mut permissions = std::fs::metadata(path)
-                .unwrap_or_else(|err| panic!("failed to stat {}: {err}", path.display()))
-                .permissions();
-            permissions.set_mode(0o755);
-            std::fs::set_permissions(path, permissions)
-                .unwrap_or_else(|err| panic!("failed to chmod {}: {err}", path.display()));
-        }
+    fn script_coverage_with_url(url: &str) -> plow_v8_coverage::ScriptCoverage {
+        serde_json::from_value(serde_json::json!({
+            "scriptId": "1",
+            "url": url,
+            "functions": []
+        }))
+        .expect("valid script coverage")
     }
 
     fn write_bun_store_sidecar(store: &Path, version: &str) -> PathBuf {
@@ -3666,41 +4043,6 @@ mod tests {
         std::fs::write(&binary, "")
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", binary.display()));
         binary
-    }
-
-    fn write_fake_npm_root_command(path: &Path, node_modules_dir: &Path) {
-        if cfg!(windows) {
-            std::fs::write(
-                path,
-                format!(
-                    "@echo off\r\nif \"%1\"==\"root\" (\r\n  echo {}\r\n  exit /b 0\r\n)\r\nexit /b 1\r\n",
-                    node_modules_dir.display()
-                ),
-            )
-            .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
-            return;
-        }
-
-        std::fs::write(
-            path,
-            format!(
-                "#!/bin/sh\nif [ \"$1\" = \"root\" ]; then\n  printf '%s\\n' '{}'\n  exit 0\nfi\nexit 1\n",
-                node_modules_dir.display()
-            ),
-        )
-        .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-
-            let mut permissions = std::fs::metadata(path)
-                .unwrap_or_else(|err| panic!("failed to stat {}: {err}", path.display()))
-                .permissions();
-            permissions.set_mode(0o755);
-            std::fs::set_permissions(path, permissions)
-                .unwrap_or_else(|err| panic!("failed to chmod {}: {err}", path.display()));
-        }
     }
 
     #[test]
@@ -3777,6 +4119,61 @@ mod tests {
     }
 
     #[test]
+    fn sidecar_missing_message_uses_detected_package_manager_guidance() {
+        for (name, package_json, lockfile, hint, install) in [
+            (
+                "npm",
+                r#"{"name":"p","packageManager":"npm@10.0.0"}"#,
+                "package-lock.json",
+                "`npm root` + `.bin/plow-cov`",
+                "npm install --save-dev @plow-cli/plow-cov",
+            ),
+            (
+                "pnpm",
+                r#"{"name":"p","packageManager":"pnpm@9.0.0"}"#,
+                "pnpm-lock.yaml",
+                "`pnpm bin`",
+                "pnpm add -D @plow-cli/plow-cov",
+            ),
+            (
+                "yarn",
+                r#"{"name":"p","packageManager":"yarn@4.0.0"}"#,
+                "yarn.lock",
+                "`yarn bin plow-cov`",
+                "yarn add -D @plow-cli/plow-cov",
+            ),
+            (
+                "bun",
+                r#"{"name":"p","packageManager":"bun@1.2.0"}"#,
+                "bun.lock",
+                "`bun pm bin`",
+                "bun add -d @plow-cli/plow-cov",
+            ),
+        ] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            std::fs::write(dir.path().join("package.json"), package_json)
+                .unwrap_or_else(|err| panic!("failed to write package.json for {name}: {err}"));
+            std::fs::write(dir.path().join(lockfile), "")
+                .unwrap_or_else(|err| panic!("failed to write {lockfile}: {err}"));
+
+            let message = super::sidecar_missing_message(Some(dir.path()));
+
+            assert!(
+                message.contains("node_modules/.bin/plow-cov"),
+                "{name} message should list project-local bin path: {message}"
+            );
+            assert!(
+                message.contains(hint),
+                "{name} message should include lookup hint {hint}: {message}"
+            );
+            assert!(
+                message.contains(install),
+                "{name} message should include install command {install}: {message}"
+            );
+        }
+    }
+
+    #[test]
     fn detect_package_manager_prefers_package_json_field() {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(
@@ -3813,22 +4210,31 @@ mod tests {
 
     #[test]
     fn package_manager_install_commands_match_detected_tool() {
-        assert_eq!(
-            super::LocalPackageManager::Npm.install_command(),
-            "npm install --save-dev @plow-cli/plow-cov"
-        );
-        assert_eq!(
-            super::LocalPackageManager::Pnpm.install_command(),
-            "pnpm add -D @plow-cli/plow-cov"
-        );
-        assert_eq!(
-            super::LocalPackageManager::Yarn.install_command(),
-            "yarn add -D @plow-cli/plow-cov"
-        );
-        assert_eq!(
-            super::LocalPackageManager::Bun.install_command(),
-            "bun add -d @plow-cli/plow-cov"
-        );
+        for (manager, install, hint) in [
+            (
+                super::LocalPackageManager::Npm,
+                "npm install --save-dev @plow-cli/plow-cov",
+                "`npm root` + `.bin/plow-cov`",
+            ),
+            (
+                super::LocalPackageManager::Pnpm,
+                "pnpm add -D @plow-cli/plow-cov",
+                "`pnpm bin`",
+            ),
+            (
+                super::LocalPackageManager::Yarn,
+                "yarn add -D @plow-cli/plow-cov",
+                "`yarn bin plow-cov`",
+            ),
+            (
+                super::LocalPackageManager::Bun,
+                "bun add -d @plow-cli/plow-cov",
+                "`bun pm bin`",
+            ),
+        ] {
+            assert_eq!(manager.install_command(), install);
+            assert_eq!(manager.lookup_hint(), hint);
+        }
     }
 
     #[test]
@@ -3843,6 +4249,33 @@ mod tests {
         assert_eq!(super::utf16_source_offset_to_byte_offset(s, 2), None);
         // Past the end is unmappable.
         assert_eq!(super::utf16_source_offset_to_byte_offset(s, 5), None);
+
+        let ascii = "alpha\nbeta";
+        for (utf16_offset, byte_offset) in [(0, 0), (5, 5), (6, 6), (10, 10)] {
+            assert_eq!(
+                super::utf16_source_offset_to_byte_offset(ascii, utf16_offset),
+                Some(byte_offset)
+            );
+        }
+        assert_eq!(super::utf16_source_offset_to_byte_offset(ascii, 11), None);
+
+        assert_eq!(super::utf16_source_offset_to_byte_offset("", 0), Some(0));
+        assert_eq!(super::utf16_source_offset_to_byte_offset("", 1), None);
+        assert_eq!(super::utf16_source_offset_to_byte_offset("å", 0), Some(0));
+        assert_eq!(super::utf16_source_offset_to_byte_offset("å", 1), Some(2));
+        assert_eq!(super::utf16_source_offset_to_byte_offset("å", 2), None);
+        assert_eq!(
+            super::utf16_source_offset_to_byte_offset("a😀b\nc", 4),
+            Some(6)
+        );
+        assert_eq!(
+            super::utf16_source_offset_to_byte_offset("a😀b\nc", 5),
+            Some(7)
+        );
+        assert_eq!(
+            super::utf16_source_offset_to_byte_offset("a😀b\nc", 6),
+            Some(8)
+        );
     }
 
     #[test]

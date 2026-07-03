@@ -73,57 +73,57 @@ fn reconcile_review(
         }
     };
     let current = envelope_fingerprints(&envelope);
-    let state = match provider {
-        CiProvider::Github => match load_github_state(target, opts) {
-            Ok(state) => Some(state),
-            Err(e) if opts.dry_run => {
-                let plan = ReconcilePlan::without_provider(&current, e);
-                return emit_reconcile_result(
-                    provider,
-                    target,
-                    &envelope,
-                    opts,
-                    &plan,
-                    &ApplyResult::default(),
-                );
-            }
-            Err(e) => return emit_error(&e, crate::api::NETWORK_EXIT_CODE, output),
-        },
-        CiProvider::Gitlab => match load_gitlab_state(target, opts) {
-            Ok(state) => Some(state),
-            Err(e) if opts.dry_run => {
-                let plan = ReconcilePlan::without_provider(&current, e);
-                return emit_reconcile_result(
-                    provider,
-                    target,
-                    &envelope,
-                    opts,
-                    &plan,
-                    &ApplyResult::default(),
-                );
-            }
-            Err(e) => return emit_error(&e, crate::api::NETWORK_EXIT_CODE, output),
-        },
-    };
-    let Some(state) = state else {
-        return emit_error(
-            "internal error: provider state was not loaded for review reconciliation",
-            2,
-            output,
-        );
+    let state = match load_provider_state(provider, target, opts) {
+        Ok(state) => state,
+        Err(e) if opts.dry_run => {
+            let plan = ReconcilePlan::without_provider(&current, e);
+            return emit_reconcile_result(
+                provider,
+                target,
+                &envelope,
+                opts,
+                &plan,
+                &ApplyResult::default(),
+            );
+        }
+        Err(e) => return emit_error(&e, crate::api::NETWORK_EXIT_CODE, output),
     };
     let plan = PlannedReconcile::new(&current, &state);
 
     let applied = if opts.dry_run {
         ApplyResult::default()
     } else {
-        match provider {
-            CiProvider::Github => apply_github_reconcile(&plan, target, opts),
-            CiProvider::Gitlab => apply_gitlab_reconcile(&plan, target, opts),
-        }
+        apply_provider_reconcile(provider, &plan, target, opts)
     };
 
     emit_reconcile_result(provider, target, &envelope, opts, &plan.plan, &applied)
+}
+
+/// Load existing provider review state (comments + threads/discussions) for the
+/// reconcile plan, dispatching to the GitHub or GitLab loader.
+fn load_provider_state(
+    provider: CiProvider,
+    target: Option<&str>,
+    opts: ReconcileOptions<'_>,
+) -> Result<ProviderState, String> {
+    match provider {
+        CiProvider::Github => load_github_state(target, opts),
+        CiProvider::Gitlab => load_gitlab_state(target, opts),
+    }
+}
+
+/// Apply the reconcile plan against the live provider, dispatching to the
+/// GitHub or GitLab applier.
+fn apply_provider_reconcile(
+    provider: CiProvider,
+    plan: &PlannedReconcile<'_>,
+    target: Option<&str>,
+    opts: ReconcileOptions<'_>,
+) -> ApplyResult {
+    match provider {
+        CiProvider::Github => apply_github_reconcile(plan, target, opts),
+        CiProvider::Gitlab => apply_gitlab_reconcile(plan, target, opts),
+    }
 }
 
 #[expect(
@@ -138,11 +138,11 @@ fn emit_reconcile_result(
     plan: &ReconcilePlan,
     applied: &ApplyResult,
 ) -> ExitCode {
-    let envelope_struct = crate::output_envelope::ReviewReconcileOutput {
-        schema: crate::output_envelope::ReviewReconcileSchema::V1,
+    let envelope_struct = plow_output::ReviewReconcileOutput {
+        schema: plow_output::ReviewReconcileSchema::V1,
         provider: match provider {
-            CiProvider::Github => crate::output_envelope::ReviewProvider::Github,
-            CiProvider::Gitlab => crate::output_envelope::ReviewProvider::Gitlab,
+            CiProvider::Github => plow_output::ReviewProvider::Github,
+            CiProvider::Gitlab => plow_output::ReviewProvider::Gitlab,
         },
         target: target.map(str::to_owned),
         dry_run: opts.dry_run,
@@ -161,8 +161,10 @@ fn emit_reconcile_result(
         failed_fingerprints: applied.failed_fingerprints.iter().cloned().collect(),
         unapplied_fingerprints: applied.unapplied_fingerprints.iter().cloned().collect(),
     };
-    match crate::output_envelope::serialize_root_output(
-        crate::output_envelope::PlowOutput::ReviewReconcile(envelope_struct),
+    match plow_output::serialize_review_reconcile_json_output(
+        envelope_struct,
+        crate::output_runtime::current_root_envelope_mode(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     ) {
         Ok(value) => crate::report::emit_json(&value, "review reconcile"),
         Err(e) => emit_error(
@@ -353,23 +355,7 @@ fn load_github_state(
     Ok(state)
 }
 
-fn load_github_review_threads(
-    state: &mut ProviderState,
-    agent: &ureq::Agent,
-    repo: &str,
-    pr: &str,
-    token: &str,
-    api: &str,
-) -> Result<(), String> {
-    let (owner, name) = repo
-        .split_once('/')
-        .ok_or_else(|| format!("GitHub repo must be owner/name, got '{repo}'"))?;
-    let number = pr
-        .parse::<u64>()
-        .map_err(|_| format!("GitHub PR must be numeric, got '{pr}'"))?;
-    let mut cursor: Option<String> = None;
-    for _ in 0..100 {
-        let query = r"
+const GITHUB_REVIEW_THREADS_QUERY: &str = r"
 query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
   repository(owner:$owner, name:$name) {
     pullRequest(number:$number) {
@@ -386,8 +372,25 @@ query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
     }
   }
 }";
+
+fn load_github_review_threads(
+    state: &mut ProviderState,
+    agent: &ureq::Agent,
+    repo: &str,
+    pr: &str,
+    token: &str,
+    api: &str,
+) -> Result<(), String> {
+    let (owner, name) = repo
+        .split_once('/')
+        .ok_or_else(|| format!("GitHub repo must be owner/name, got '{repo}'"))?;
+    let number = pr
+        .parse::<u64>()
+        .map_err(|_| format!("GitHub PR must be numeric, got '{pr}'"))?;
+    let mut cursor: Option<String> = None;
+    for _ in 0..100 {
         let payload = serde_json::json!({
-            "query": query,
+            "query": GITHUB_REVIEW_THREADS_QUERY,
             "variables": {
                 "owner": owner,
                 "name": name,
@@ -406,32 +409,7 @@ query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
             .and_then(Value::as_array)
             .ok_or_else(|| "GitHub reviewThreads response did not contain nodes".to_owned())?;
         for thread in threads {
-            if thread
-                .get("isResolved")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
-                continue;
-            }
-            let Some(thread_id) = thread.get("id").and_then(Value::as_str) else {
-                continue;
-            };
-            let comments = thread
-                .pointer("/comments/nodes")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten();
-            for comment in comments {
-                let body = comment.get("body").and_then(Value::as_str).unwrap_or("");
-                if let Some(fingerprint) = extract_plow_fingerprint(body) {
-                    state.fingerprints.insert(fingerprint.clone());
-                    state
-                        .github_threads_by_fingerprint
-                        .entry(fingerprint)
-                        .or_default()
-                        .push(thread_id.to_owned());
-                }
-            }
+            collect_github_thread_fingerprints(state, thread);
         }
         let page_info = value
             .pointer("/data/repository/pullRequest/reviewThreads/pageInfo")
@@ -449,6 +427,37 @@ query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
             .map(str::to_owned);
     }
     Ok(())
+}
+
+/// Record plow fingerprints found in an unresolved GitHub review thread's
+/// comment bodies, mapping each to the thread id for later resolution.
+fn collect_github_thread_fingerprints(state: &mut ProviderState, thread: &Value) {
+    if thread
+        .get("isResolved")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let Some(thread_id) = thread.get("id").and_then(Value::as_str) else {
+        return;
+    };
+    let comments = thread
+        .pointer("/comments/nodes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten();
+    for comment in comments {
+        let body = comment.get("body").and_then(Value::as_str).unwrap_or("");
+        if let Some(fingerprint) = extract_plow_fingerprint(body) {
+            state.fingerprints.insert(fingerprint.clone());
+            state
+                .github_threads_by_fingerprint
+                .entry(fingerprint)
+                .or_default()
+                .push(thread_id.to_owned());
+        }
+    }
 }
 
 fn apply_github_reconcile(
@@ -497,20 +506,65 @@ fn apply_github_reconcile(
         return result;
     }
 
+    run_github_operations(
+        &operations,
+        GithubConnection {
+            agent: &agent,
+            repo: &repo,
+            pr,
+            token: &token,
+            api,
+        },
+        &mut result,
+    );
+    result
+}
+
+/// Apply each staged GitHub operation in order, recording a failure (with the
+/// not-yet-applied suffix) and stopping at the first error.
+/// The GitHub PR connection context (agent + repo/PR coordinates + auth)
+/// shared by every staged operation, bundled so the operation runner takes one
+/// parameter instead of five.
+#[derive(Clone, Copy)]
+struct GithubConnection<'a> {
+    agent: &'a ureq::Agent,
+    repo: &'a str,
+    pr: &'a str,
+    token: &'a str,
+    api: &'a str,
+}
+
+fn run_github_operations(
+    operations: &[GithubApplyOperation],
+    conn: GithubConnection<'_>,
+    result: &mut ApplyResult,
+) {
+    let GithubConnection {
+        agent,
+        repo,
+        pr,
+        token,
+        api,
+    } = conn;
     for (index, operation) in operations.iter().enumerate() {
-        if let Err(failure) =
-            apply_github_operation(operation, &agent, &repo, pr, &token, api, &mut result)
-        {
+        if let Err(failure) = apply_github_operation(&mut GithubOperationInput {
+            operation,
+            agent,
+            repo,
+            pr,
+            token,
+            api,
+            result,
+        }) {
             result.record_failure(
                 failure,
                 operations[index..]
                     .iter()
                     .map(GithubApplyOperation::fingerprint_owned),
             );
-            return result;
+            return;
         }
     }
-    result
 }
 
 #[derive(Debug)]
@@ -645,30 +699,35 @@ fn preflight_github_operations(
     Ok(())
 }
 
-fn apply_github_operation(
-    operation: &GithubApplyOperation,
-    agent: &ureq::Agent,
-    repo: &str,
-    pr: &str,
-    token: &str,
-    api: &str,
-    result: &mut ApplyResult,
-) -> Result<(), ApplyFailure> {
-    match operation {
+struct GithubOperationInput<'a> {
+    operation: &'a GithubApplyOperation,
+    agent: &'a ureq::Agent,
+    repo: &'a str,
+    pr: &'a str,
+    token: &'a str,
+    api: &'a str,
+    result: &'a mut ApplyResult,
+}
+
+fn apply_github_operation(input: &mut GithubOperationInput<'_>) -> Result<(), ApplyFailure> {
+    match input.operation {
         GithubApplyOperation::Reply {
             fingerprint,
             comment_id,
             body,
         } => {
             let payload = serde_json::json!({ "body": body });
-            let url = format!("{api}/repos/{repo}/pulls/{pr}/comments/{comment_id}/replies");
-            github_post_json(agent, &url, token, &payload).map_err(|err| {
+            let url = format!(
+                "{}/repos/{}/pulls/{}/comments/{comment_id}/replies",
+                input.api, input.repo, input.pr
+            );
+            github_post_json(input.agent, &url, input.token, &payload).map_err(|err| {
                 ApplyFailure::new(
                     fingerprint.clone(),
                     format!("GitHub failed to post resolution reply for {fingerprint}: {err}"),
                 )
             })?;
-            result.resolution_comments_posted += 1;
+            input.result.resolution_comments_posted += 1;
         }
         GithubApplyOperation::ResolveThread {
             fingerprint,
@@ -678,20 +737,25 @@ fn apply_github_operation(
                 "query": "mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{id isResolved}}}",
                 "variables": { "threadId": thread_id },
             });
-            let value = github_post_json(agent, &format!("{api}/graphql"), token, &payload)
-                .map_err(|err| {
-                    ApplyFailure::new(
-                        fingerprint.clone(),
-                        format!("GitHub failed to resolve review thread {thread_id}: {err}"),
-                    )
-                })?;
+            let value = github_post_json(
+                input.agent,
+                &format!("{}/graphql", input.api),
+                input.token,
+                &payload,
+            )
+            .map_err(|err| {
+                ApplyFailure::new(
+                    fingerprint.clone(),
+                    format!("GitHub failed to resolve review thread {thread_id}: {err}"),
+                )
+            })?;
             if value.get("errors").is_some() {
                 return Err(ApplyFailure::new(
                     fingerprint.clone(),
                     format!("GitHub resolveReviewThread failed for {fingerprint}: {value}"),
                 ));
             }
-            result.threads_resolved += 1;
+            input.result.threads_resolved += 1;
         }
     }
     Ok(())
@@ -731,36 +795,42 @@ fn load_gitlab_state(
             break;
         }
         for discussion in discussions {
-            let Some(discussion_id) = discussion.get("id").and_then(Value::as_str) else {
-                continue;
-            };
-            let notes = discussion
-                .get("notes")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten();
-            for note in notes {
-                let body = note.get("body").and_then(Value::as_str).unwrap_or("");
-                if let Some(fingerprint) = extract_plow_fingerprint(body) {
-                    state.fingerprints.insert(fingerprint.clone());
-                    state
-                        .gitlab_discussions_by_fingerprint
-                        .entry(fingerprint)
-                        .or_default()
-                        .push(discussion_id.to_owned());
-                }
-                if is_gitlab_bot_note(note)
-                    && let Some(fingerprint) = extract_marker(body, "plow-resolved-fingerprint:")
-                {
-                    state.gitlab_resolved_markers.insert(fingerprint);
-                }
-            }
+            collect_gitlab_discussion_fingerprints(&mut state, discussion);
         }
         if discussions.len() < 100 {
             break;
         }
     }
     Ok(state)
+}
+
+/// Record plow fingerprints and resolved markers found in a GitLab
+/// discussion's note bodies, mapping each fingerprint to the discussion id.
+fn collect_gitlab_discussion_fingerprints(state: &mut ProviderState, discussion: &Value) {
+    let Some(discussion_id) = discussion.get("id").and_then(Value::as_str) else {
+        return;
+    };
+    let notes = discussion
+        .get("notes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten();
+    for note in notes {
+        let body = note.get("body").and_then(Value::as_str).unwrap_or("");
+        if let Some(fingerprint) = extract_plow_fingerprint(body) {
+            state.fingerprints.insert(fingerprint.clone());
+            state
+                .gitlab_discussions_by_fingerprint
+                .entry(fingerprint)
+                .or_default()
+                .push(discussion_id.to_owned());
+        }
+        if is_gitlab_bot_note(note)
+            && let Some(fingerprint) = extract_marker(body, "plow-resolved-fingerprint:")
+        {
+            state.gitlab_resolved_markers.insert(fingerprint);
+        }
+    }
 }
 
 fn apply_gitlab_reconcile(
@@ -810,26 +880,65 @@ fn apply_gitlab_reconcile(
         return result;
     }
 
-    for (index, operation) in operations.iter().enumerate() {
-        if let Err(failure) = apply_gitlab_operation(
-            operation,
-            &agent,
-            &encoded_project,
+    run_gitlab_operations(
+        &operations,
+        GitlabConnection {
+            agent: &agent,
+            encoded_project: &encoded_project,
             mr,
-            &token,
-            &api,
-            &mut result,
-        ) {
+            token: &token,
+            api: &api,
+        },
+        &mut result,
+    );
+    result
+}
+
+/// The GitLab MR connection context (agent + project/MR coordinates + auth)
+/// shared by every staged operation, bundled so the operation runner takes one
+/// parameter instead of five.
+#[derive(Clone, Copy)]
+struct GitlabConnection<'a> {
+    agent: &'a ureq::Agent,
+    encoded_project: &'a str,
+    mr: &'a str,
+    token: &'a str,
+    api: &'a str,
+}
+
+/// Apply each staged GitLab operation in order, recording a failure (with the
+/// not-yet-applied suffix) and stopping at the first error.
+fn run_gitlab_operations(
+    operations: &[GitlabApplyOperation],
+    conn: GitlabConnection<'_>,
+    result: &mut ApplyResult,
+) {
+    let GitlabConnection {
+        agent,
+        encoded_project,
+        mr,
+        token,
+        api,
+    } = conn;
+    for (index, operation) in operations.iter().enumerate() {
+        if let Err(failure) = apply_gitlab_operation(&mut GitlabOperationInput {
+            operation,
+            agent,
+            encoded_project,
+            mr,
+            token,
+            api,
+            result,
+        }) {
             result.record_failure(
                 failure,
                 operations[index..]
                     .iter()
                     .map(GitlabApplyOperation::fingerprint_owned),
             );
-            return result;
+            return;
         }
     }
-    result
 }
 
 #[derive(Debug)]
@@ -932,16 +1041,18 @@ fn preflight_gitlab_operations(
     Ok(())
 }
 
-fn apply_gitlab_operation(
-    operation: &GitlabApplyOperation,
-    agent: &ureq::Agent,
-    encoded_project: &str,
-    mr: &str,
-    token: &str,
-    api: &str,
-    result: &mut ApplyResult,
-) -> Result<(), ApplyFailure> {
-    match operation {
+struct GitlabOperationInput<'a> {
+    operation: &'a GitlabApplyOperation,
+    agent: &'a ureq::Agent,
+    encoded_project: &'a str,
+    mr: &'a str,
+    token: &'a str,
+    api: &'a str,
+    result: &'a mut ApplyResult,
+}
+
+fn apply_gitlab_operation(input: &mut GitlabOperationInput<'_>) -> Result<(), ApplyFailure> {
+    match input.operation {
         GitlabApplyOperation::Note {
             fingerprint,
             discussion_id,
@@ -949,15 +1060,16 @@ fn apply_gitlab_operation(
         } => {
             let payload = serde_json::json!({ "body": body });
             let url = format!(
-                "{api}/projects/{encoded_project}/merge_requests/{mr}/discussions/{discussion_id}/notes"
+                "{}/projects/{}/merge_requests/{}/discussions/{discussion_id}/notes",
+                input.api, input.encoded_project, input.mr
             );
-            gitlab_post_json(agent, &url, token, &payload).map_err(|err| {
+            gitlab_post_json(input.agent, &url, input.token, &payload).map_err(|err| {
                 ApplyFailure::new(
                     fingerprint.clone(),
                     format!("GitLab failed to post resolution note for {fingerprint}: {err}"),
                 )
             })?;
-            result.resolution_comments_posted += 1;
+            input.result.resolution_comments_posted += 1;
         }
         GitlabApplyOperation::ResolveDiscussion {
             fingerprint,
@@ -965,15 +1077,16 @@ fn apply_gitlab_operation(
         } => {
             let payload = serde_json::json!({ "resolved": true });
             let url = format!(
-                "{api}/projects/{encoded_project}/merge_requests/{mr}/discussions/{discussion_id}"
+                "{}/projects/{}/merge_requests/{}/discussions/{discussion_id}",
+                input.api, input.encoded_project, input.mr
             );
-            gitlab_put_json(agent, &url, token, &payload).map_err(|err| {
+            gitlab_put_json(input.agent, &url, input.token, &payload).map_err(|err| {
                 ApplyFailure::new(
                     fingerprint.clone(),
                     format!("GitLab failed to resolve discussion {discussion_id}: {err}"),
                 )
             })?;
-            result.threads_resolved += 1;
+            input.result.threads_resolved += 1;
         }
     }
     Ok(())
@@ -1508,14 +1621,24 @@ mod tests {
         assert!(!is_github_bot_comment(&comment));
     }
 
+    // Serializes the PLOW_BOT_LOGIN env-mutating tests so the GitHub and
+    // GitLab override cases cannot overwrite each other's value when run in
+    // parallel (which raced and failed on Windows CI).
+    static BOT_LOGIN_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
-    #[allow(unsafe_code, reason = "test-only env mutation, single-threaded run")]
+    #[allow(
+        unsafe_code,
+        reason = "test-only env mutation, serialized via BOT_LOGIN_ENV_LOCK"
+    )]
     fn github_bot_check_accepts_explicit_login_override() {
+        let _env = BOT_LOGIN_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let comment = serde_json::json!({
             "user": { "type": "User", "login": "plow-bot-account" },
         });
-        // SAFETY: This test owns the PLOW_BOT_LOGIN override and clears it
-        // before returning.
+        // SAFETY: serialized by BOT_LOGIN_ENV_LOCK; cleared before returning.
         unsafe {
             std::env::set_var("PLOW_BOT_LOGIN", "plow-bot-account");
         }
@@ -1624,5 +1747,808 @@ mod tests {
         let body = resolved_body("abc", Some("1234567890"));
         assert!(body.contains("`1234567`"));
         assert!(body.contains("plow-resolved-fingerprint: abc@1234567"));
+    }
+
+    // --- envelope_fingerprints / envelope_comments_len (lines 183-200) ---
+
+    #[test]
+    fn envelope_fingerprints_extracts_non_empty_fingerprints() {
+        let value = serde_json::json!({
+            "comments": [
+                { "fingerprint": "fp-a" },
+                { "fingerprint": "fp-b" },
+            ]
+        });
+        let fps = envelope_fingerprints(&value);
+        assert!(fps.contains("fp-a"));
+        assert!(fps.contains("fp-b"));
+        assert_eq!(fps.len(), 2);
+    }
+
+    #[test]
+    fn envelope_fingerprints_skips_blank_fingerprint_entries() {
+        let value = serde_json::json!({
+            "comments": [
+                { "fingerprint": "" },
+                { "fingerprint": "   " },
+                { "fingerprint": "fp-c" },
+            ]
+        });
+        let fps = envelope_fingerprints(&value);
+        assert!(!fps.contains(""));
+        assert!(!fps.contains("   "));
+        assert!(fps.contains("fp-c"));
+        assert_eq!(fps.len(), 1);
+    }
+
+    #[test]
+    fn envelope_fingerprints_returns_empty_when_no_comments_key() {
+        let value = serde_json::json!({ "other": [] });
+        assert!(envelope_fingerprints(&value).is_empty());
+    }
+
+    #[test]
+    fn envelope_fingerprints_skips_comments_without_fingerprint_field() {
+        let value = serde_json::json!({
+            "comments": [
+                { "body": "no fingerprint here" },
+                { "fingerprint": "fp-ok" },
+            ]
+        });
+        let fps = envelope_fingerprints(&value);
+        assert_eq!(fps.len(), 1);
+        assert!(fps.contains("fp-ok"));
+    }
+
+    #[test]
+    fn envelope_comments_len_counts_array_entries() {
+        let value = serde_json::json!({ "comments": [1, 2, 3] });
+        assert_eq!(envelope_comments_len(&value), 3);
+    }
+
+    #[test]
+    fn envelope_comments_len_returns_zero_when_comments_missing() {
+        let value = serde_json::json!({ "other": [] });
+        assert_eq!(envelope_comments_len(&value), 0);
+    }
+
+    // --- extract_plow_fingerprint: v2-first ordering (lines 1376-1388) ---
+
+    #[test]
+    fn extract_plow_fingerprint_v2_wins_over_v1_substring_prefix() {
+        // v1 extraction would grab "v2:" as the fingerprint if it ran first
+        // because "plow-fingerprint:" is a prefix of "plow-fingerprint:v2:".
+        // Verify the v2-first order returns the real fingerprint.
+        let body = "<!-- plow-fingerprint:v2: realfp123 -->";
+        assert_eq!(extract_plow_fingerprint(body).as_deref(), Some("realfp123"));
+    }
+
+    #[test]
+    fn extract_plow_fingerprint_v2_preserves_merged_prefix() {
+        let body = "<!-- plow-fingerprint:v2: merged:deadbeefcafe0123 -->";
+        assert_eq!(
+            extract_plow_fingerprint(body).as_deref(),
+            Some("merged:deadbeefcafe0123")
+        );
+    }
+
+    #[test]
+    fn extract_plow_fingerprint_returns_none_for_empty_body() {
+        assert_eq!(extract_plow_fingerprint(""), None);
+    }
+
+    #[test]
+    fn extract_plow_fingerprint_v1_shape_in_multiline_body() {
+        let body = "Some finding text.\n\n<!-- plow-fingerprint: abc123def456 -->\n";
+        assert_eq!(
+            extract_plow_fingerprint(body).as_deref(),
+            Some("abc123def456")
+        );
+    }
+
+    // --- extract_marker edge cases (lines 1366-1374) ---
+
+    #[test]
+    fn extract_marker_stops_at_whitespace() {
+        let body = "plow-fingerprint: abc def";
+        assert_eq!(
+            extract_marker(body, "plow-fingerprint:").as_deref(),
+            Some("abc")
+        );
+    }
+
+    #[test]
+    fn extract_marker_stops_at_closing_angle_bracket() {
+        let body = "<!-- plow-fingerprint: abc123 -->";
+        assert_eq!(
+            extract_marker(body, "plow-fingerprint:").as_deref(),
+            Some("abc123")
+        );
+    }
+
+    #[test]
+    fn extract_marker_returns_none_when_marker_absent() {
+        assert_eq!(extract_marker("plain text", "plow-fingerprint:"), None);
+    }
+
+    #[test]
+    fn extract_marker_returns_none_when_value_is_empty_after_trim() {
+        // marker present but nothing follows except whitespace + end
+        let body = "plow-fingerprint:   ";
+        assert_eq!(extract_marker(body, "plow-fingerprint:"), None);
+    }
+
+    // --- reconcile_sets: all three set states (line 232-240) ---
+
+    #[test]
+    fn reconcile_sets_with_all_overlap_produces_empty_new_and_stale() {
+        let fps = BTreeSet::from(["a".to_owned(), "b".to_owned()]);
+        let plan = reconcile_sets(&fps, &fps);
+        assert!(plan.new.is_empty());
+        assert!(plan.stale.is_empty());
+        assert_eq!(plan.current.len(), 2);
+        assert_eq!(plan.existing.len(), 2);
+    }
+
+    #[test]
+    fn reconcile_sets_with_disjoint_sets_marks_all_current_new_and_all_existing_stale() {
+        let current = BTreeSet::from(["c1".to_owned(), "c2".to_owned()]);
+        let existing = BTreeSet::from(["e1".to_owned(), "e2".to_owned()]);
+        let plan = reconcile_sets(&current, &existing);
+        assert_eq!(plan.new, vec!["c1", "c2"]);
+        assert_eq!(plan.stale, vec!["e1", "e2"]);
+    }
+
+    #[test]
+    fn reconcile_sets_with_empty_current_marks_all_existing_stale() {
+        let current = BTreeSet::new();
+        let existing = BTreeSet::from(["old".to_owned()]);
+        let plan = reconcile_sets(&current, &existing);
+        assert!(plan.new.is_empty());
+        assert_eq!(plan.stale, vec!["old"]);
+    }
+
+    #[test]
+    fn reconcile_sets_with_empty_existing_marks_all_current_new() {
+        let current = BTreeSet::from(["new-fp".to_owned()]);
+        let existing = BTreeSet::new();
+        let plan = reconcile_sets(&current, &existing);
+        assert_eq!(plan.new, vec!["new-fp"]);
+        assert!(plan.stale.is_empty());
+    }
+
+    // --- ReconcilePlan::without_provider (lines 221-230) ---
+
+    #[test]
+    fn without_provider_has_no_warning_when_current_is_empty() {
+        let current = BTreeSet::new();
+        let plan = ReconcilePlan::without_provider(&current, "unavailable".to_owned());
+        assert!(plan.current.is_empty());
+        assert!(plan.new.is_empty());
+        assert_eq!(plan.provider_warning.as_deref(), Some("unavailable"));
+    }
+
+    // --- ApplyResult::hint (lines 266-271) ---
+
+    #[test]
+    fn apply_result_hint_is_none_when_no_errors() {
+        let result = ApplyResult::default();
+        assert!(result.hint().is_none());
+    }
+
+    #[test]
+    fn apply_result_hint_is_some_when_errors_present() {
+        let mut result = ApplyResult::default();
+        result.errors.push("something failed".to_owned());
+        assert!(result.hint().is_some());
+        let hint = result.hint().unwrap();
+        assert!(hint.contains("unapplied_fingerprints"));
+    }
+
+    // --- GithubApplyOperation::fingerprint / fingerprint_owned (lines 581-593) ---
+
+    #[test]
+    fn github_apply_operation_fingerprint_accessor_for_reply() {
+        let op = GithubApplyOperation::Reply {
+            fingerprint: "fp-reply".to_owned(),
+            comment_id: 42,
+            body: "body".to_owned(),
+        };
+        assert_eq!(op.fingerprint(), "fp-reply");
+        assert_eq!(op.fingerprint_owned(), "fp-reply");
+    }
+
+    #[test]
+    fn github_apply_operation_fingerprint_accessor_for_resolve_thread() {
+        let op = GithubApplyOperation::ResolveThread {
+            fingerprint: "fp-thread".to_owned(),
+            thread_id: "thread-xyz".to_owned(),
+        };
+        assert_eq!(op.fingerprint(), "fp-thread");
+        assert_eq!(op.fingerprint_owned(), "fp-thread");
+    }
+
+    // --- GitlabApplyOperation::fingerprint / fingerprint_owned (lines 955-967) ---
+
+    #[test]
+    fn gitlab_apply_operation_fingerprint_accessor_for_note() {
+        let op = GitlabApplyOperation::Note {
+            fingerprint: "fp-note".to_owned(),
+            discussion_id: "disc-1".to_owned(),
+            body: "body text".to_owned(),
+        };
+        assert_eq!(op.fingerprint(), "fp-note");
+        assert_eq!(op.fingerprint_owned(), "fp-note");
+    }
+
+    #[test]
+    fn gitlab_apply_operation_fingerprint_accessor_for_resolve_discussion() {
+        let op = GitlabApplyOperation::ResolveDiscussion {
+            fingerprint: "fp-resolve".to_owned(),
+            discussion_id: "disc-2".to_owned(),
+        };
+        assert_eq!(op.fingerprint(), "fp-resolve");
+        assert_eq!(op.fingerprint_owned(), "fp-resolve");
+    }
+
+    // --- collect_github_thread_fingerprints (lines 432-459) ---
+
+    #[test]
+    fn collect_github_thread_fingerprints_skips_resolved_threads() {
+        let thread = serde_json::json!({
+            "id": "thread-1",
+            "isResolved": true,
+            "comments": { "nodes": [
+                { "body": "<!-- plow-fingerprint:v2: fp-should-skip -->" }
+            ]}
+        });
+        let mut state = ProviderState::default();
+        collect_github_thread_fingerprints(&mut state, &thread);
+        assert!(state.fingerprints.is_empty());
+        assert!(state.github_threads_by_fingerprint.is_empty());
+    }
+
+    #[test]
+    fn collect_github_thread_fingerprints_skips_thread_without_id() {
+        let thread = serde_json::json!({
+            "isResolved": false,
+            "comments": { "nodes": [
+                { "body": "<!-- plow-fingerprint:v2: fp-noid -->" }
+            ]}
+        });
+        let mut state = ProviderState::default();
+        collect_github_thread_fingerprints(&mut state, &thread);
+        assert!(state.fingerprints.is_empty());
+    }
+
+    #[test]
+    fn collect_github_thread_fingerprints_indexes_unresolved_thread() {
+        let thread = serde_json::json!({
+            "id": "thread-unresolved",
+            "isResolved": false,
+            "comments": { "nodes": [
+                { "body": "<!-- plow-fingerprint:v2: fp-active -->" }
+            ]}
+        });
+        let mut state = ProviderState::default();
+        collect_github_thread_fingerprints(&mut state, &thread);
+        assert!(state.fingerprints.contains("fp-active"));
+        assert_eq!(
+            state.github_threads_by_fingerprint.get("fp-active"),
+            Some(&vec!["thread-unresolved".to_owned()])
+        );
+    }
+
+    #[test]
+    fn collect_github_thread_fingerprints_skips_comments_without_fingerprint() {
+        let thread = serde_json::json!({
+            "id": "thread-2",
+            "isResolved": false,
+            "comments": { "nodes": [
+                { "body": "plain comment, no marker" }
+            ]}
+        });
+        let mut state = ProviderState::default();
+        collect_github_thread_fingerprints(&mut state, &thread);
+        assert!(state.fingerprints.is_empty());
+    }
+
+    // --- collect_gitlab_discussion_fingerprints (lines 807-832) ---
+
+    #[test]
+    fn collect_gitlab_discussion_fingerprints_skips_discussion_without_id() {
+        let discussion = serde_json::json!({
+            "notes": [
+                { "body": "<!-- plow-fingerprint:v2: fp-x -->" }
+            ]
+        });
+        let mut state = ProviderState::default();
+        collect_gitlab_discussion_fingerprints(&mut state, &discussion);
+        assert!(state.fingerprints.is_empty());
+    }
+
+    #[test]
+    fn collect_gitlab_discussion_fingerprints_indexes_fingerprint_and_discussion() {
+        let discussion = serde_json::json!({
+            "id": "disc-99",
+            "notes": [
+                { "body": "<!-- plow-fingerprint:v2: fp-gitlab -->" }
+            ]
+        });
+        let mut state = ProviderState::default();
+        collect_gitlab_discussion_fingerprints(&mut state, &discussion);
+        assert!(state.fingerprints.contains("fp-gitlab"));
+        assert_eq!(
+            state.gitlab_discussions_by_fingerprint.get("fp-gitlab"),
+            Some(&vec!["disc-99".to_owned()])
+        );
+    }
+
+    #[test]
+    fn collect_gitlab_discussion_fingerprints_records_resolved_marker_from_bot_system_note() {
+        let discussion = serde_json::json!({
+            "id": "disc-100",
+            "notes": [
+                {
+                    "system": true,
+                    "body": "<!-- plow-resolved-fingerprint: fp-resolved -->"
+                }
+            ]
+        });
+        let mut state = ProviderState::default();
+        collect_gitlab_discussion_fingerprints(&mut state, &discussion);
+        assert!(state.gitlab_resolved_markers.contains("fp-resolved"));
+    }
+
+    #[test]
+    fn collect_gitlab_discussion_fingerprints_ignores_resolved_marker_from_human_note() {
+        let discussion = serde_json::json!({
+            "id": "disc-101",
+            "notes": [
+                {
+                    "system": false,
+                    "author": { "bot": false, "username": "alice" },
+                    "body": "<!-- plow-resolved-fingerprint: fp-human -->"
+                }
+            ]
+        });
+        let mut state = ProviderState::default();
+        collect_gitlab_discussion_fingerprints(&mut state, &discussion);
+        assert!(!state.gitlab_resolved_markers.contains("fp-human"));
+    }
+
+    // --- stage_github_operations: additional paths (lines 595-634) ---
+
+    #[test]
+    fn github_stage_emits_no_operations_when_no_stale_fingerprints() {
+        let plan = ReconcilePlan::default();
+        let state = ProviderState::default();
+        let planned = PlannedReconcile {
+            plan,
+            state: &state,
+        };
+        assert!(stage_github_operations(&planned, Some("abc1234567")).is_empty());
+    }
+
+    #[test]
+    fn github_stage_emits_reply_and_thread_for_unresolved_stale() {
+        let plan = ReconcilePlan {
+            stale: vec!["fp-stale".to_owned()],
+            ..ReconcilePlan::default()
+        };
+        let mut state = ProviderState::default();
+        state
+            .github_comments_by_fingerprint
+            .insert("fp-stale".to_owned(), vec![55]);
+        state
+            .github_threads_by_fingerprint
+            .insert("fp-stale".to_owned(), vec!["thread-55".to_owned()]);
+        let planned = PlannedReconcile {
+            plan,
+            state: &state,
+        };
+        let ops = stage_github_operations(&planned, Some("aaabbbccc"));
+        assert_eq!(ops.len(), 2, "expected reply + thread ops");
+        let has_reply = ops.iter().any(
+            |op| matches!(op, GithubApplyOperation::Reply { comment_id, .. } if *comment_id == 55),
+        );
+        let has_resolve = ops.iter().any(|op| {
+            matches!(op, GithubApplyOperation::ResolveThread { thread_id, .. } if thread_id == "thread-55")
+        });
+        assert!(has_reply, "expected a Reply operation for comment 55");
+        assert!(
+            has_resolve,
+            "expected a ResolveThread operation for thread-55"
+        );
+    }
+
+    #[test]
+    fn github_stage_skips_reply_when_bare_fingerprint_already_in_resolved_markers() {
+        // The bare fingerprint (no sha suffix) is in the resolved marker set:
+        // the reply was already posted but with no sha available at that time.
+        let plan = ReconcilePlan {
+            stale: vec!["fp-bare".to_owned()],
+            ..ReconcilePlan::default()
+        };
+        let mut state = ProviderState::default();
+        state
+            .github_comments_by_fingerprint
+            .insert("fp-bare".to_owned(), vec![99]);
+        state.github_resolved_markers.insert("fp-bare".to_owned());
+        let planned = PlannedReconcile {
+            plan,
+            state: &state,
+        };
+        let ops = stage_github_operations(&planned, None);
+        let has_reply = ops
+            .iter()
+            .any(|op| matches!(op, GithubApplyOperation::Reply { .. }));
+        assert!(
+            !has_reply,
+            "reply should be suppressed when bare marker exists"
+        );
+    }
+
+    #[test]
+    fn github_stage_no_sha_resolved_body_says_resolved_without_commit() {
+        let plan = ReconcilePlan {
+            stale: vec!["fp-nosha".to_owned()],
+            ..ReconcilePlan::default()
+        };
+        let mut state = ProviderState::default();
+        state
+            .github_comments_by_fingerprint
+            .insert("fp-nosha".to_owned(), vec![1]);
+        let planned = PlannedReconcile {
+            plan,
+            state: &state,
+        };
+        let ops = stage_github_operations(&planned, None);
+        let GithubApplyOperation::Reply { body, .. } = &ops[0] else {
+            panic!("expected Reply op");
+        };
+        assert!(
+            body.contains("Resolved."),
+            "no-sha body should say Resolved. without a commit hash"
+        );
+        assert!(body.contains("plow-resolved-fingerprint: fp-nosha"));
+    }
+
+    // --- stage_gitlab_operations: additional paths (lines 969-1000) ---
+
+    #[test]
+    fn gitlab_stage_emits_no_operations_when_no_stale_fingerprints() {
+        let plan = ReconcilePlan::default();
+        let state = ProviderState::default();
+        let planned = PlannedReconcile {
+            plan,
+            state: &state,
+        };
+        assert!(stage_gitlab_operations(&planned, Some("sha123")).is_empty());
+    }
+
+    #[test]
+    fn gitlab_stage_skips_note_when_already_resolved_but_still_resolves_discussion() {
+        let plan = ReconcilePlan {
+            stale: vec!["fp-gl".to_owned()],
+            ..ReconcilePlan::default()
+        };
+        let mut state = ProviderState::default();
+        state
+            .gitlab_discussions_by_fingerprint
+            .insert("fp-gl".to_owned(), vec!["disc-gl".to_owned()]);
+        state
+            .gitlab_resolved_markers
+            .insert("fp-gl@abc1234".to_owned());
+        let planned = PlannedReconcile {
+            plan,
+            state: &state,
+        };
+        let ops = stage_gitlab_operations(&planned, Some("abc12345678"));
+        assert_eq!(
+            ops.len(),
+            1,
+            "only resolve op, no note since already resolved"
+        );
+        assert!(
+            matches!(&ops[0], GitlabApplyOperation::ResolveDiscussion { discussion_id, .. } if discussion_id == "disc-gl"),
+            "expected ResolveDiscussion for disc-gl"
+        );
+    }
+
+    #[test]
+    fn gitlab_stage_skips_note_when_bare_marker_already_present() {
+        let plan = ReconcilePlan {
+            stale: vec!["fp-bare-gl".to_owned()],
+            ..ReconcilePlan::default()
+        };
+        let mut state = ProviderState::default();
+        state
+            .gitlab_discussions_by_fingerprint
+            .insert("fp-bare-gl".to_owned(), vec!["disc-bare".to_owned()]);
+        state
+            .gitlab_resolved_markers
+            .insert("fp-bare-gl".to_owned());
+        let planned = PlannedReconcile {
+            plan,
+            state: &state,
+        };
+        let ops = stage_gitlab_operations(&planned, None);
+        assert_eq!(ops.len(), 1);
+        assert!(
+            matches!(&ops[0], GitlabApplyOperation::ResolveDiscussion { .. }),
+            "bare-marker skip should still emit ResolveDiscussion"
+        );
+    }
+
+    #[test]
+    fn gitlab_stage_no_sha_resolved_body_omits_commit_hash() {
+        let plan = ReconcilePlan {
+            stale: vec!["fp-gl-nosha".to_owned()],
+            ..ReconcilePlan::default()
+        };
+        let mut state = ProviderState::default();
+        state
+            .gitlab_discussions_by_fingerprint
+            .insert("fp-gl-nosha".to_owned(), vec!["disc-nosha".to_owned()]);
+        let planned = PlannedReconcile {
+            plan,
+            state: &state,
+        };
+        let ops = stage_gitlab_operations(&planned, None);
+        assert_eq!(ops.len(), 2);
+        let GitlabApplyOperation::Note { body, .. } = &ops[0] else {
+            panic!("expected Note op first");
+        };
+        assert!(
+            body.contains("Resolved."),
+            "no-sha gitlab body should say Resolved."
+        );
+        assert!(body.contains("plow-resolved-fingerprint: fp-gl-nosha"));
+    }
+
+    // --- resolved_marker_key / resolved_body: edge cases (lines 1394-1409) ---
+
+    #[test]
+    fn resolved_marker_key_truncates_sha_to_seven_chars() {
+        assert_eq!(resolved_marker_key("fp", Some("abcdefg1234")), "fp@abcdefg");
+    }
+
+    #[test]
+    fn resolved_marker_key_uses_full_sha_when_shorter_than_seven() {
+        // A 6-char sha slice falls back to the None branch
+        assert_eq!(resolved_marker_key("fp", Some("abc")), "fp");
+    }
+
+    #[test]
+    fn resolved_body_without_sha_omits_backtick_and_uses_bare_marker() {
+        let body = resolved_body("fp-x", None);
+        assert!(!body.contains('`'), "no backtick when sha is None");
+        assert!(body.contains("plow-resolved-fingerprint: fp-x"));
+    }
+
+    // --- url_encode_path_segment (lines 1415-1429) ---
+
+    #[test]
+    fn url_encode_path_segment_passthrough_for_unreserved_chars() {
+        assert_eq!(
+            url_encode_path_segment("abc-123_foo.bar~"),
+            "abc-123_foo.bar~"
+        );
+    }
+
+    #[test]
+    fn url_encode_path_segment_encodes_slash() {
+        assert_eq!(url_encode_path_segment("/"), "%2F");
+    }
+
+    #[test]
+    fn url_encode_path_segment_encodes_at_sign() {
+        assert_eq!(url_encode_path_segment("@"), "%40");
+    }
+
+    #[test]
+    fn url_encode_path_segment_encodes_mixed_safe_and_reserved() {
+        assert_eq!(url_encode_path_segment("a/b@c"), "a%2Fb%40c");
+    }
+
+    #[test]
+    fn url_encode_path_segment_empty_string_returns_empty() {
+        assert_eq!(url_encode_path_segment(""), "");
+    }
+
+    // --- is_github_bot_comment: missing branch (line 1323-1331) ---
+
+    #[test]
+    fn github_bot_check_returns_false_when_no_user_field() {
+        let comment = serde_json::json!({ "body": "no user" });
+        assert!(!is_github_bot_comment(&comment));
+    }
+
+    #[test]
+    fn github_bot_check_returns_false_when_plow_bot_login_not_set_and_type_not_bot() {
+        let comment = serde_json::json!({
+            "user": { "type": "User", "login": "someperson" },
+        });
+        assert!(!is_github_bot_comment(&comment));
+    }
+
+    // --- is_gitlab_bot_note: PLOW_BOT_LOGIN path (lines 1356-1364) ---
+
+    #[test]
+    #[allow(
+        unsafe_code,
+        reason = "test-only env mutation, serialized via BOT_LOGIN_ENV_LOCK"
+    )]
+    fn gitlab_bot_check_accepts_explicit_login_override() {
+        let _env = BOT_LOGIN_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let note = serde_json::json!({
+            "system": false,
+            "author": { "bot": false, "username": "plow-gl-bot" },
+        });
+        // SAFETY: serialized by BOT_LOGIN_ENV_LOCK; cleared before returning.
+        unsafe {
+            std::env::set_var("PLOW_BOT_LOGIN", "plow-gl-bot");
+        }
+        assert!(is_gitlab_bot_note(&note));
+        // SAFETY: Restore the process environment after the scoped override.
+        unsafe {
+            std::env::remove_var("PLOW_BOT_LOGIN");
+        }
+    }
+
+    #[test]
+    fn gitlab_bot_check_returns_false_when_bot_flag_is_false_and_no_login_override() {
+        let note = serde_json::json!({
+            "system": false,
+            "author": { "bot": false, "username": "contributor" },
+        });
+        assert!(!is_gitlab_bot_note(&note));
+    }
+
+    // --- read_json_response: non-2xx path (lines 1288-1303) ---
+
+    #[test]
+    fn read_json_response_error_on_non_2xx_status() {
+        struct StubReader {
+            status_code: u16,
+            body_text: String,
+        }
+        impl ResponseBodyReader for StubReader {
+            fn status(&self) -> u16 {
+                self.status_code
+            }
+
+            fn read_json<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ureq::Error> {
+                unreachable!("only called on 2xx, not in this test")
+            }
+
+            fn read_to_string(&mut self) -> Result<String, ureq::Error> {
+                Ok(std::mem::take(&mut self.body_text))
+            }
+        }
+
+        let mut stub = StubReader {
+            status_code: 403,
+            body_text: "Forbidden".to_owned(),
+        };
+        let result = read_json_response(&mut stub, "GitHub");
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(msg.contains("403"), "error should mention status code");
+        assert!(msg.contains("Forbidden"), "error should include body");
+    }
+
+    #[test]
+    fn read_json_response_success_parses_json() {
+        struct SuccessReader {
+            body: serde_json::Value,
+        }
+        impl ResponseBodyReader for SuccessReader {
+            fn status(&self) -> u16 {
+                200
+            }
+
+            fn read_json<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ureq::Error> {
+                // Serialize to string and back to produce the generic T
+                let s = serde_json::to_string(&self.body).unwrap();
+                Ok(serde_json::from_str(&s).unwrap())
+            }
+
+            fn read_to_string(&mut self) -> Result<String, ureq::Error> {
+                unreachable!("not called on 2xx")
+            }
+        }
+
+        let mut reader = SuccessReader {
+            body: serde_json::json!({ "ok": true }),
+        };
+        let result = read_json_response(&mut reader, "GitHub");
+        assert!(result.is_ok());
+        assert_eq!(
+            result
+                .unwrap()
+                .get("ok")
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+    }
+
+    // --- parse_retry_after: header clamping edge (line 1282-1286) ---
+
+    #[test]
+    fn parse_retry_after_returns_zero_for_zero_header() {
+        // The header value "0" is valid u64 and parses; clamping to >=1 happens
+        // in compute_retry_wait, not in parse_retry_after itself.
+        assert_eq!(parse_retry_after(&headers_with_retry_after("0")), Some(0));
+    }
+
+    // --- ApplyFailure::new (lines 290-297) ---
+
+    #[test]
+    fn apply_failure_new_stores_fingerprint_and_message() {
+        let f = ApplyFailure::new("fp-fail", "something went wrong");
+        assert_eq!(f.fingerprint, "fp-fail");
+        assert_eq!(f.message, "something went wrong");
+    }
+
+    // --- PlannedReconcile::new (lines 248-255) ---
+
+    #[test]
+    fn planned_reconcile_new_derives_plan_from_current_and_provider_state() {
+        let current = BTreeSet::from(["fp-new".to_owned(), "fp-shared".to_owned()]);
+        let mut state = ProviderState::default();
+        state.fingerprints.insert("fp-shared".to_owned());
+        state.fingerprints.insert("fp-stale".to_owned());
+        let planned = PlannedReconcile::new(&current, &state);
+        assert_eq!(planned.plan.new, vec!["fp-new"]);
+        assert_eq!(planned.plan.stale, vec!["fp-stale"]);
+    }
+
+    // --- require_target (lines 1093-1097) ---
+
+    #[test]
+    fn require_target_returns_error_for_none() {
+        assert!(require_target("PR", None).is_err());
+    }
+
+    #[test]
+    fn require_target_returns_error_for_blank_string() {
+        assert!(require_target("PR", Some("   ")).is_err());
+        assert!(require_target("PR", Some("")).is_err());
+    }
+
+    #[test]
+    fn require_target_returns_value_when_non_empty() {
+        assert_eq!(require_target("PR", Some("42")).unwrap(), "42");
+    }
+
+    // --- should_retry_status: exact boundary (line 1188-1190) ---
+
+    #[test]
+    fn should_retry_status_exact_boundary_at_502_and_504() {
+        assert!(should_retry_status(502));
+        assert!(should_retry_status(504));
+        assert!(!should_retry_status(501));
+        assert!(!should_retry_status(505));
+    }
+
+    // --- compute_retry_wait: floor clamping (lines 1251-1265) ---
+
+    #[test]
+    fn compute_retry_wait_clamps_floor_delay_above_max() {
+        let headers = http::HeaderMap::new();
+        assert_eq!(
+            compute_retry_wait(&headers, RETRY_MAX_WAIT_SECONDS + 100, "GitHub"),
+            RETRY_MAX_WAIT_SECONDS
+        );
+    }
+
+    #[test]
+    fn compute_retry_wait_uses_retry_after_when_within_bounds() {
+        let headers = headers_with_retry_after("30");
+        assert_eq!(compute_retry_wait(&headers, 2, "GitHub"), 30);
     }
 }

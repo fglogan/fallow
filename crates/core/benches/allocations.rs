@@ -7,8 +7,8 @@
 //! Allocation tracking benchmark using dhat.
 //!
 //! This benchmark measures heap allocation statistics for the plow analysis
-//! pipeline. It cannot be a Criterion benchmark because dhat requires being
-//! the global allocator.
+//! pipeline. It uses a dedicated harness because dhat requires being the global
+//! allocator.
 //!
 //! Run with: `cargo bench --bench allocations`
 //!
@@ -26,7 +26,7 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 mod helpers;
 
 fn main() {
-    let (temp_dir, config) = helpers::create_synthetic_project("alloc-bench", 100);
+    let (_temp_dir, config) = helpers::create_synthetic_project("alloc-bench", 100);
 
     let profiler = dhat::Profiler::builder().testing().build();
 
@@ -34,8 +34,6 @@ fn main() {
 
     let stats = dhat::HeapStats::get();
     drop(profiler);
-
-    let _ = std::fs::remove_dir_all(&temp_dir);
 
     #[expect(
         clippy::print_stdout,

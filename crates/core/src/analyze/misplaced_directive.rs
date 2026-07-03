@@ -16,15 +16,19 @@
 //! detector resolves each site to a `(line, col)` and emits one finding per
 //! occurrence.
 //!
-//! Gated on the project declaring `next` (see [`find_misplaced_directives`]),
-//! exactly like the sibling `invalid_client_exports` / `mixed_barrel`
-//! detectors: without Next.js the directives carry no special meaning, so firing
-//! would be a false positive. Other RSC frameworks (Waku, Vite RSC) honor the
-//! same directive positioning, so widening the gate to them is a follow-up.
+//! Gated on the project using a React Server Components bundler (see
+//! [`find_misplaced_directives`] and
+//! [`crate::analyze::predicates::project_uses_rsc_directives`]): a body-position
+//! `"use client"` / `"use server"` is silently ignored by every RSC toolchain,
+//! so the rule applies to Next AND the framework-agnostic RSC bundlers (Waku,
+//! Vite RSC, etc.). Without an RSC bundler the directives carry no special
+//! meaning, so firing would be a false positive.
+
+use std::path::Path;
 
 use rustc_hash::FxHashMap;
 
-use plow_types::extract::ModuleInfo;
+use plow_types::extract::{MisplacedDirectiveSite, ModuleInfo};
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
@@ -43,8 +47,9 @@ const USE_SERVER: &str = "use server";
 
 /// Find misplaced `"use client"` / `"use server"` directives.
 ///
-/// Returns empty unless the project declares `next` (gated on `declared_deps`):
-/// without Next.js the directives carry no special meaning.
+/// Returns empty unless the project uses an RSC bundler (gated on
+/// `declared_deps` via [`crate::analyze::predicates::project_uses_rsc_directives`]):
+/// without one the directives carry no special meaning.
 ///
 /// For each module, every entry in
 /// [`ModuleInfo::misplaced_directives`](plow_types::extract::ModuleInfo) is
@@ -61,15 +66,11 @@ pub fn find_misplaced_directives(
     suppressions: &SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<MisplacedDirective> {
-    if !declared_deps.contains("next") {
+    if !crate::analyze::predicates::project_uses_rsc_directives(declared_deps) {
         return Vec::new();
     }
 
-    let path_by_id: FxHashMap<FileId, &std::path::Path> = graph
-        .modules
-        .iter()
-        .map(|module| (module.file_id, module.path.as_path()))
-        .collect();
+    let path_by_id = path_by_file_id(graph);
 
     let mut findings = Vec::new();
     for module in modules {
@@ -79,29 +80,63 @@ pub fn find_misplaced_directives(
         let Some(path) = path_by_id.get(&module.file_id) else {
             continue;
         };
-
-        for site in &module.misplaced_directives {
-            let (line, col) =
-                byte_offset_to_line_col(line_offsets_by_file, module.file_id, site.span_start);
-            if suppressions.is_suppressed(module.file_id, line, IssueKind::MisplacedDirective) {
-                continue;
-            }
-
-            let directive = if site.is_server {
-                USE_SERVER
-            } else {
-                USE_CLIENT
-            };
-            findings.push(MisplacedDirective {
-                path: path.to_path_buf(),
-                directive: directive.to_string(),
-                line,
-                col,
-            });
-        }
+        append_misplaced_directives_for_module(
+            module,
+            path,
+            suppressions,
+            line_offsets_by_file,
+            &mut findings,
+        );
     }
 
     findings
+}
+
+fn path_by_file_id(graph: &ModuleGraph) -> FxHashMap<FileId, &Path> {
+    graph
+        .modules
+        .iter()
+        .map(|module| (module.file_id, module.path.as_path()))
+        .collect()
+}
+
+fn append_misplaced_directives_for_module(
+    module: &ModuleInfo,
+    path: &Path,
+    suppressions: &SuppressionContext<'_>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    findings: &mut Vec<MisplacedDirective>,
+) {
+    for site in &module.misplaced_directives {
+        let (line, col) =
+            byte_offset_to_line_col(line_offsets_by_file, module.file_id, site.span_start);
+        if suppressions.is_suppressed(module.file_id, line, IssueKind::MisplacedDirective) {
+            continue;
+        }
+        findings.push(build_misplaced_directive(path, site, line, col));
+    }
+}
+
+fn build_misplaced_directive(
+    path: &Path,
+    site: &MisplacedDirectiveSite,
+    line: u32,
+    col: u32,
+) -> MisplacedDirective {
+    MisplacedDirective {
+        path: path.to_path_buf(),
+        directive: misplaced_directive_text(site).to_string(),
+        line,
+        col,
+    }
+}
+
+fn misplaced_directive_text(site: &MisplacedDirectiveSite) -> &'static str {
+    if site.is_server {
+        USE_SERVER
+    } else {
+        USE_CLIENT
+    }
 }
 
 #[cfg(test)]
@@ -114,7 +149,7 @@ mod tests {
     use super::find_misplaced_directives;
 
     #[test]
-    fn next_gate_returns_empty_without_next_dependency() {
+    fn rsc_gate_returns_empty_without_rsc_bundler_dependency() {
         let graph = ModuleGraph::build(&[], &[], &[]);
         let modules = Vec::new();
         let declared: FxHashSet<String> = std::iter::once("react".to_string()).collect();
@@ -125,7 +160,7 @@ mod tests {
             find_misplaced_directives(&graph, &modules, &declared, &suppressions, &offsets);
         assert!(
             findings.is_empty(),
-            "no `next` dependency means no findings"
+            "no RSC bundler dependency means no findings"
         );
     }
 }

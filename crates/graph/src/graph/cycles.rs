@@ -24,37 +24,28 @@ impl ModuleGraph {
     ///
     /// Panics if the internal file-to-path lookup is inconsistent with the module list.
     #[must_use]
-    #[expect(
-        clippy::excessive_nesting,
-        reason = "Tarjan's SCC requires deep nesting"
-    )]
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "file count is bounded by project size, well under u32::MAX"
-    )]
-    #[expect(
-        clippy::expect_used,
-        reason = "Tarjan traversal only pops nodes that were pushed onto the SCC stack"
-    )]
     pub fn find_cycles(&self) -> Vec<Vec<FileId>> {
         let n = self.modules.len();
         if n == 0 {
             return Vec::new();
         }
 
-        let mut index_counter: u32 = 0;
-        let mut indices: Vec<u32> = vec![u32::MAX; n];
-        let mut lowlinks: Vec<u32> = vec![0; n];
-        let mut on_stack = FixedBitSet::with_capacity(n);
-        let mut stack: Vec<usize> = Vec::new();
-        let mut sccs: Vec<Vec<FileId>> = Vec::new();
+        let (all_succs, succ_ranges) = self.build_runtime_successors(n);
 
-        struct Frame {
-            node: usize,
-            succ_pos: usize,
-            succ_end: usize,
+        let mut state = SccState::new(n);
+        for start_node in 0..n {
+            if state.indices[start_node] != u32::MAX {
+                continue;
+            }
+            state.run_dfs_from(start_node, &all_succs, &succ_ranges);
         }
 
+        self.enumerate_cycles_from_sccs(&state.sccs, &all_succs, &succ_ranges)
+    }
+
+    /// Build the flattened runtime-successor adjacency (type-only edges and
+    /// duplicate targets excluded) plus the per-node range index into it.
+    fn build_runtime_successors(&self, n: usize) -> (Vec<usize>, Vec<Range<usize>>) {
         let mut all_succs: Vec<usize> = Vec::with_capacity(self.edges.len());
         let mut succ_ranges: Vec<Range<usize>> = Vec::with_capacity(n);
         let mut seen_set = FxHashSet::default();
@@ -73,78 +64,7 @@ impl ModuleGraph {
             let end = all_succs.len();
             succ_ranges.push(start..end);
         }
-
-        let mut dfs_stack: Vec<Frame> = Vec::new();
-
-        for start_node in 0..n {
-            if indices[start_node] != u32::MAX {
-                continue;
-            }
-
-            indices[start_node] = index_counter;
-            lowlinks[start_node] = index_counter;
-            index_counter += 1;
-            on_stack.insert(start_node);
-            stack.push(start_node);
-
-            let range = &succ_ranges[start_node];
-            dfs_stack.push(Frame {
-                node: start_node,
-                succ_pos: range.start,
-                succ_end: range.end,
-            });
-
-            while let Some(frame) = dfs_stack.last_mut() {
-                if frame.succ_pos < frame.succ_end {
-                    let w = all_succs[frame.succ_pos];
-                    frame.succ_pos += 1;
-
-                    if indices[w] == u32::MAX {
-                        indices[w] = index_counter;
-                        lowlinks[w] = index_counter;
-                        index_counter += 1;
-                        on_stack.insert(w);
-                        stack.push(w);
-
-                        let range = &succ_ranges[w];
-                        dfs_stack.push(Frame {
-                            node: w,
-                            succ_pos: range.start,
-                            succ_end: range.end,
-                        });
-                    } else if on_stack.contains(w) {
-                        let v = frame.node;
-                        lowlinks[v] = lowlinks[v].min(indices[w]);
-                    }
-                } else {
-                    let v = frame.node;
-                    let v_lowlink = lowlinks[v];
-                    let v_index = indices[v];
-                    dfs_stack.pop();
-
-                    if let Some(parent) = dfs_stack.last_mut() {
-                        lowlinks[parent.node] = lowlinks[parent.node].min(v_lowlink);
-                    }
-
-                    if v_lowlink == v_index {
-                        let mut scc = Vec::new();
-                        loop {
-                            let w = stack.pop().expect("SCC stack should not be empty");
-                            on_stack.set(w, false);
-                            scc.push(FileId(w as u32));
-                            if w == v {
-                                break;
-                            }
-                        }
-                        if scc.len() >= 2 {
-                            sccs.push(scc);
-                        }
-                    }
-                }
-            }
-        }
-
-        self.enumerate_cycles_from_sccs(&sccs, &all_succs, &succ_ranges)
+        (all_succs, succ_ranges)
     }
 
     /// Enumerate individual elementary cycles from SCCs and return sorted results.
@@ -205,6 +125,124 @@ impl ModuleGraph {
     }
 }
 
+/// One iterative-DFS frame for the Tarjan SCC pass over runtime successors.
+struct SccFrame {
+    node: usize,
+    succ_pos: usize,
+    succ_end: usize,
+}
+
+/// Mutable Tarjan SCC state for `find_cycles`, collecting SCCs of size >= 2.
+struct SccState {
+    index_counter: u32,
+    indices: Vec<u32>,
+    lowlinks: Vec<u32>,
+    on_stack: FixedBitSet,
+    stack: Vec<usize>,
+    sccs: Vec<Vec<FileId>>,
+}
+
+impl SccState {
+    fn new(n: usize) -> Self {
+        Self {
+            index_counter: 0,
+            indices: vec![u32::MAX; n],
+            lowlinks: vec![0; n],
+            on_stack: FixedBitSet::with_capacity(n),
+            stack: Vec::new(),
+            sccs: Vec::new(),
+        }
+    }
+
+    /// Assign the next DFS index to `node` and push it onto the SCC stack.
+    fn discover(&mut self, node: usize) {
+        self.indices[node] = self.index_counter;
+        self.lowlinks[node] = self.index_counter;
+        self.index_counter += 1;
+        self.on_stack.insert(node);
+        self.stack.push(node);
+    }
+
+    /// Build a frame spanning the successor range of `node`.
+    fn frame_for(node: usize, succ_ranges: &[Range<usize>]) -> SccFrame {
+        let range = &succ_ranges[node];
+        SccFrame {
+            node,
+            succ_pos: range.start,
+            succ_end: range.end,
+        }
+    }
+
+    /// Run the iterative Tarjan DFS rooted at `start`, appending discovered
+    /// SCCs of size >= 2 to `self.sccs`.
+    fn run_dfs_from(&mut self, start: usize, all_succs: &[usize], succ_ranges: &[Range<usize>]) {
+        self.discover(start);
+        let mut dfs_stack: Vec<SccFrame> = vec![Self::frame_for(start, succ_ranges)];
+
+        while let Some(frame) = dfs_stack.last_mut() {
+            if frame.succ_pos < frame.succ_end {
+                if let Some(child) = self.advance_frame(frame, all_succs) {
+                    dfs_stack.push(Self::frame_for(child, succ_ranges));
+                }
+            } else {
+                let v = frame.node;
+                let v_lowlink = self.lowlinks[v];
+                dfs_stack.pop();
+                if let Some(parent) = dfs_stack.last() {
+                    let pv = parent.node;
+                    self.lowlinks[pv] = self.lowlinks[pv].min(v_lowlink);
+                }
+                self.collect_root_scc(v);
+            }
+        }
+    }
+
+    /// Advance one successor of `frame`, discovering a new child (returned for
+    /// descent) or updating the lowlink for an on-stack back edge.
+    fn advance_frame(&mut self, frame: &mut SccFrame, all_succs: &[usize]) -> Option<usize> {
+        let w = all_succs[frame.succ_pos];
+        frame.succ_pos += 1;
+        if self.indices[w] == u32::MAX {
+            self.discover(w);
+            Some(w)
+        } else {
+            if self.on_stack.contains(w) {
+                let v = frame.node;
+                self.lowlinks[v] = self.lowlinks[v].min(self.indices[w]);
+            }
+            None
+        }
+    }
+
+    /// When `v` is an SCC root, pop its members off the stack and record the
+    /// SCC if it has at least two nodes.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "file count is bounded by project size, well under u32::MAX"
+    )]
+    #[expect(
+        clippy::expect_used,
+        reason = "Tarjan traversal only pops nodes that were pushed onto the SCC stack"
+    )]
+    fn collect_root_scc(&mut self, v: usize) {
+        if self.lowlinks[v] != self.indices[v] {
+            return;
+        }
+        let mut scc = Vec::new();
+        loop {
+            let w = self.stack.pop().expect("SCC stack should not be empty");
+            self.on_stack.set(w, false);
+            scc.push(FileId(w as u32));
+            if w == v {
+                break;
+            }
+        }
+        if scc.len() >= 2 {
+            self.sccs.push(scc);
+        }
+    }
+}
+
 /// Rotate a cycle so the node with the smallest path is first (canonical form for dedup).
 fn canonical_cycle(cycle: &[usize], modules: &[ModuleNode]) -> Vec<usize> {
     if cycle.is_empty() {
@@ -252,27 +290,29 @@ fn try_record_cycle(
 ///
 /// Appends any newly found cycles to `cycles` (deduped via `seen`).
 /// Stops early once `cycles.len() >= max_cycles`.
-fn dfs_find_cycles_from(
+struct DfsCycleInput<'a> {
     start: usize,
     depth_limit: usize,
-    scc_set: &FxHashSet<usize>,
-    succs: &SuccessorMap<'_>,
+    scc_set: &'a FxHashSet<usize>,
+    succs: &'a SuccessorMap<'a>,
     max_cycles: usize,
-    seen: &mut FxHashSet<Vec<u32>>,
-    cycles: &mut Vec<Vec<usize>>,
-) {
-    let mut path: Vec<usize> = vec![start];
-    let mut path_set = FixedBitSet::with_capacity(succs.modules.len());
-    path_set.insert(start);
+    seen: &'a mut FxHashSet<Vec<u32>>,
+    cycles: &'a mut Vec<Vec<usize>>,
+}
 
-    let range = &succs.succ_ranges[start];
+fn dfs_find_cycles_from(input: &mut DfsCycleInput<'_>) {
+    let mut path: Vec<usize> = vec![input.start];
+    let mut path_set = FixedBitSet::with_capacity(input.succs.modules.len());
+    path_set.insert(input.start);
+
+    let range = &input.succs.succ_ranges[input.start];
     let mut dfs: Vec<CycleFrame> = vec![CycleFrame {
         succ_pos: range.start,
         succ_end: range.end,
     }];
 
     while let Some(frame) = dfs.last_mut() {
-        if cycles.len() >= max_cycles {
+        if input.cycles.len() >= input.max_cycles {
             return;
         }
 
@@ -287,26 +327,26 @@ fn dfs_find_cycles_from(
             continue;
         }
 
-        let w = succs.all_succs[frame.succ_pos];
+        let w = input.succs.all_succs[frame.succ_pos];
         frame.succ_pos += 1;
 
-        if !scc_set.contains(&w) {
+        if !input.scc_set.contains(&w) {
             continue;
         }
 
-        if w == start && path.len() >= 2 && path.len() == depth_limit {
-            try_record_cycle(&path, succs.modules, seen, cycles);
+        if w == input.start && path.len() >= 2 && path.len() == input.depth_limit {
+            try_record_cycle(&path, input.succs.modules, input.seen, input.cycles);
             continue;
         }
 
-        if path_set.contains(w) || path.len() >= depth_limit {
+        if path_set.contains(w) || path.len() >= input.depth_limit {
             continue;
         }
 
         path.push(w);
         path_set.insert(w);
 
-        let range = &succs.succ_ranges[w];
+        let range = &input.succs.succ_ranges[w];
         dfs.push(CycleFrame {
             succ_pos: range.start,
             succ_end: range.end,
@@ -342,15 +382,15 @@ fn enumerate_elementary_cycles(
                 break;
             }
 
-            dfs_find_cycles_from(
+            dfs_find_cycles_from(&mut DfsCycleInput {
                 start,
                 depth_limit,
-                &scc_set,
+                scc_set: &scc_set,
                 succs,
                 max_cycles,
-                &mut seen,
-                &mut cycles,
-            );
+                seen: &mut seen,
+                cycles: &mut cycles,
+            });
         }
     }
 
@@ -370,7 +410,7 @@ mod tests {
     use plow_types::extract::{ExportName, ImportInfo, ImportedName, VisibilityTag};
 
     use super::{
-        ModuleGraph, SuccessorMap, canonical_cycle, dfs_find_cycles_from,
+        DfsCycleInput, ModuleGraph, SuccessorMap, canonical_cycle, dfs_find_cycles_from,
         enumerate_elementary_cycles, try_record_cycle,
     };
 
@@ -415,6 +455,7 @@ mod tests {
                         local_name: Some("x".to_string()),
                         is_type_only: false,
                         visibility: VisibilityTag::None,
+                        expected_unused_reason: None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
                         is_side_effect_used: false,
@@ -425,13 +466,15 @@ mod tests {
                     resolved_dynamic_imports: vec![],
                     resolved_dynamic_patterns: vec![],
                     member_accesses: vec![],
-                    whole_object_uses: vec![],
+                    semantic_facts: Box::default(),
+                    whole_object_uses: Box::default(),
                     has_cjs_exports: false,
                     has_angular_component_template_url: false,
                     unused_import_bindings: FxHashSet::default(),
                     type_referenced_import_bindings: vec![],
                     value_referenced_import_bindings: vec![],
                     namespace_object_aliases: vec![],
+                    exported_factory_returns: Box::default(),
                 }
             })
             .collect();
@@ -442,6 +485,10 @@ mod tests {
         }];
 
         ModuleGraph::build(&resolved_modules, &entry_points, &files)
+    }
+
+    fn dfs_find_cycles_from_for_test(mut input: DfsCycleInput<'_>) {
+        dfs_find_cycles_from(&mut input);
     }
 
     #[test]
@@ -769,7 +816,15 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        dfs_find_cycles_from(0, 2, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        dfs_find_cycles_from_for_test(DfsCycleInput {
+            start: 0,
+            depth_limit: 2,
+            scc_set: &scc_set,
+            succs: &succs,
+            max_cycles: 10,
+            seen: &mut seen,
+            cycles: &mut cycles,
+        });
         assert!(cycles.is_empty(), "isolated node should have no cycles");
     }
 
@@ -785,7 +840,15 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        dfs_find_cycles_from(0, 2, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        dfs_find_cycles_from_for_test(DfsCycleInput {
+            start: 0,
+            depth_limit: 2,
+            scc_set: &scc_set,
+            succs: &succs,
+            max_cycles: 10,
+            seen: &mut seen,
+            cycles: &mut cycles,
+        });
         assert_eq!(cycles.len(), 1);
         assert_eq!(cycles[0].len(), 2);
     }
@@ -803,7 +866,15 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        dfs_find_cycles_from(0, 3, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        dfs_find_cycles_from_for_test(DfsCycleInput {
+            start: 0,
+            depth_limit: 3,
+            scc_set: &scc_set,
+            succs: &succs,
+            max_cycles: 10,
+            seen: &mut seen,
+            cycles: &mut cycles,
+        });
         assert_eq!(cycles.len(), 2, "diamond should have two 3-node cycles");
         assert!(cycles.iter().all(|c| c.len() == 3));
     }
@@ -821,7 +892,15 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        dfs_find_cycles_from(0, 3, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        dfs_find_cycles_from_for_test(DfsCycleInput {
+            start: 0,
+            depth_limit: 3,
+            scc_set: &scc_set,
+            succs: &succs,
+            max_cycles: 10,
+            seen: &mut seen,
+            cycles: &mut cycles,
+        });
         assert!(
             cycles.is_empty(),
             "depth_limit=3 should prevent finding a 4-node cycle"
@@ -841,7 +920,15 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        dfs_find_cycles_from(0, 4, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        dfs_find_cycles_from_for_test(DfsCycleInput {
+            start: 0,
+            depth_limit: 4,
+            scc_set: &scc_set,
+            succs: &succs,
+            max_cycles: 10,
+            seen: &mut seen,
+            cycles: &mut cycles,
+        });
         assert_eq!(
             cycles.len(),
             1,
@@ -865,7 +952,15 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        dfs_find_cycles_from(0, 2, &scc_set, &succs, 2, &mut seen, &mut cycles);
+        dfs_find_cycles_from_for_test(DfsCycleInput {
+            start: 0,
+            depth_limit: 2,
+            scc_set: &scc_set,
+            succs: &succs,
+            max_cycles: 2,
+            seen: &mut seen,
+            cycles: &mut cycles,
+        });
         assert!(
             cycles.len() <= 2,
             "should respect max_cycles limit, got {}",
@@ -886,7 +981,15 @@ mod tests {
         let mut cycles = Vec::new();
 
         for depth in 2..=3 {
-            dfs_find_cycles_from(0, depth, &scc_set, &succs, 10, &mut seen, &mut cycles);
+            dfs_find_cycles_from_for_test(DfsCycleInput {
+                start: 0,
+                depth_limit: depth,
+                scc_set: &scc_set,
+                succs: &succs,
+                max_cycles: 10,
+                seen: &mut seen,
+                cycles: &mut cycles,
+            });
         }
         assert!(
             cycles.is_empty(),
@@ -1043,7 +1146,15 @@ mod tests {
         let mut cycles = Vec::new();
 
         for depth in 1..=3 {
-            dfs_find_cycles_from(0, depth, &scc_set, &succs, 10, &mut seen, &mut cycles);
+            dfs_find_cycles_from_for_test(DfsCycleInput {
+                start: 0,
+                depth_limit: depth,
+                scc_set: &scc_set,
+                succs: &succs,
+                max_cycles: 10,
+                seen: &mut seen,
+                cycles: &mut cycles,
+            });
         }
         assert!(
             cycles.is_empty(),
@@ -1388,6 +1499,7 @@ mod tests {
                         local_name: Some("x".to_string()),
                         is_type_only: false,
                         visibility: VisibilityTag::None,
+                        expected_unused_reason: None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
                         is_side_effect_used: false,
@@ -1398,13 +1510,15 @@ mod tests {
                     resolved_dynamic_imports: vec![],
                     resolved_dynamic_patterns: vec![],
                     member_accesses: vec![],
-                    whole_object_uses: vec![],
+                    semantic_facts: Box::default(),
+                    whole_object_uses: Box::default(),
                     has_cjs_exports: false,
                     has_angular_component_template_url: false,
                     unused_import_bindings: FxHashSet::default(),
                     type_referenced_import_bindings: vec![],
                     value_referenced_import_bindings: vec![],
                     namespace_object_aliases: vec![],
+                    exported_factory_returns: Box::default(),
                 }
             })
             .collect();

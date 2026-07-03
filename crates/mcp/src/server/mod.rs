@@ -5,21 +5,19 @@ use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
 
 use crate::params::{
     AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, CodeExecuteParams,
-    ExplainParams, FeatureFlagsParams, FindDupesParams, FixParams, HealthParams, ImpactAllParams,
-    ImpactParams, InspectTargetParams, ListBoundariesParams, ProjectInfoParams,
-    SecurityCandidatesParams, TraceCloneParams, TraceDependencyParams, TraceExportParams,
-    TraceFileParams,
+    DecisionSurfaceParams, ExplainParams, FeatureFlagsParams, FindDupesParams, FixParams,
+    GetTokenBlastRadiusParams, HealthParams, ImpactAllParams, ImpactParams, InspectTargetParams,
+    ListBoundariesParams, ProjectInfoParams, SecurityCandidatesParams, TraceCloneParams,
+    TraceDependencyParams, TraceExportParams, TraceFileParams,
 };
 use crate::tools::{
-    build_analyze_args, build_audit_args, build_check_changed_args,
-    build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
-    build_find_dupes_args, build_fix_apply_args, build_fix_preview_args,
-    build_get_blast_radius_args, build_get_cleanup_candidates_args, build_get_hot_paths_args,
-    build_get_importance_args, build_health_args, build_impact_all_args, build_impact_args,
-    build_list_boundaries_args, build_project_info_args, build_security_candidates_args,
-    build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
-    build_trace_file_args, execute_code_mode, inspect_target, run_tool,
-    run_tool_with_top_level_warnings,
+    execute_code_mode, inspect_target, run_analyze, run_audit, run_check_changed,
+    run_check_runtime_coverage, run_decision_surface, run_explain, run_feature_flags,
+    run_find_dupes, run_fix_apply, run_fix_preview, run_get_blast_radius,
+    run_get_cleanup_candidates, run_get_hot_paths, run_get_importance, run_get_token_blast_radius,
+    run_health, run_impact, run_impact_all, run_list_boundaries, run_project_info,
+    run_security_candidates, run_trace_clone_tool, run_trace_dependency_tool,
+    run_trace_export_tool, run_trace_file_tool,
 };
 
 #[cfg(test)]
@@ -99,15 +97,11 @@ impl PlowMcp {
     }
 
     #[tool(
-        description = "Analyze a TypeScript/JavaScript project for unused code, circular dependencies, and re-export cycles (barrel files that form a structural loop, silently breaking re-exports). Detects unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted dependencies, duplicate exports, circular dependencies, re-export cycles, boundary violations, rule-pack policy violations (banned calls and banned imports declared via the rulePacks config key), stale suppression comments, unused pnpm catalog entries (entries in pnpm-workspace.yaml `catalog:` / `catalogs:` not referenced by any workspace package), empty pnpm catalog groups (named `catalogs.<name>:` groups with no entries), unresolved catalog references (workspace package.json declares `catalog:` but the catalog has no entry), unused pnpm dependency overrides (`pnpm-workspace.yaml#overrides` or `package.json#pnpm.overrides` targets a package no workspace package declares and pnpm-lock.yaml does not resolve), and misconfigured pnpm dependency overrides (unparsable key or empty value; pnpm install will reject). Private type leaks are an opt-in API hygiene check via issue_types: [\"private-type-leaks\"]. Returns structured JSON with all issues found, grouped by issue type. For code duplication use find_dupes, for complexity hotspots use check_health. Supports baseline comparisons (baseline/save_baseline), regression detection (fail_on_regression, tolerance, regression_baseline, save_regression_baseline), and performance tuning (no_cache, threads). Set boundary_violations=true to check only architecture boundary violations (convenience alias for issue_types: [\"boundary-violations\"]). Set group_by to \"owner\" (CODEOWNERS), \"directory\", \"package\" (workspace), or \"section\" to group results. The `section` mode reads GitLab CODEOWNERS `[Section]` headers and emits `owners` metadata per group. Responses also include a top-level `next_steps[]` array of read-only follow-up commands (`{id, command, reason}`) computed from the findings; the stable `id` (e.g. `trace-unused-export`, `trace-clone`, `complexity-breakdown`) maps to a sibling tool or `code_execute` host call (`traceExport`, `traceClone`, `checkHealth({complexity_breakdown:true})`), so dispatch on `id` rather than running the CLI `command` string verbatim.",
+        description = "Analyze a TypeScript/JavaScript project for unused code, circular dependencies, and re-export cycles (barrel files that form a structural loop, silently breaking re-exports). Detects unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted dependencies, duplicate exports, circular dependencies, re-export cycles, boundary violations, rule-pack policy violations (banned calls, imports, and catalogue-derived effects declared via the rulePacks config key), stale suppression comments, missing suppression reasons when rules.require-suppression-reason is enabled, unused pnpm catalog entries (entries in pnpm-workspace.yaml `catalog:` / `catalogs:` not referenced by any workspace package), empty pnpm catalog groups (named `catalogs.<name>:` groups with no entries), unresolved catalog references (workspace package.json declares `catalog:` but the catalog has no entry), unused pnpm dependency overrides (`pnpm-workspace.yaml#overrides` or `package.json#pnpm.overrides` targets a package no workspace package declares and pnpm-lock.yaml does not resolve), and misconfigured pnpm dependency overrides (unparsable key or empty value; pnpm install will reject). Private type leaks are an opt-in API hygiene check via issue_types: [\"private-type-leaks\"]. Returns structured JSON with all issues found, grouped by issue type. For code duplication use find_dupes, for complexity hotspots use check_health. Supports baseline comparisons (baseline/save_baseline), regression detection (fail_on_regression, tolerance, regression_baseline, save_regression_baseline), and performance tuning (no_cache, threads). Set boundary_violations=true to check only architecture boundary violations (convenience alias for issue_types: [\"boundary-violations\"]). Set group_by to \"owner\" (CODEOWNERS), \"directory\", \"package\" (workspace), or \"section\" to group results. The `section` mode reads GitLab CODEOWNERS `[Section]` headers and emits `owners` metadata per group. Responses also include a top-level `next_steps[]` array of read-only follow-up commands (`{id, command, reason}`) computed from the findings; the stable `id` (e.g. `trace-unused-export`, `trace-clone`, `complexity-breakdown`) maps to a sibling tool or `code_execute` host call (`traceExport`, `traceClone`, `checkHealth({complexity_breakdown:true})`), so dispatch on `id` rather than running the CLI `command` string verbatim.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn analyze(&self, params: Parameters<AnalyzeParams>) -> Result<CallToolResult, McpError> {
-        let params = params.0;
-        match build_analyze_args(&params) {
-            Ok(args) => run_tool(&self.binary, "analyze", &args).await,
-            Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
-        }
+        run_analyze(&self.binary, params.0).await
     }
 
     #[tool(
@@ -118,8 +112,7 @@ impl PlowMcp {
         &self,
         params: Parameters<CheckChangedParams>,
     ) -> Result<CallToolResult, McpError> {
-        let args = build_check_changed_args(params.0);
-        run_tool(&self.binary, "check_changed", &args).await
+        run_check_changed(&self.binary, params.0).await
     }
 
     #[tool(
@@ -130,15 +123,11 @@ impl PlowMcp {
         &self,
         params: Parameters<SecurityCandidatesParams>,
     ) -> Result<CallToolResult, McpError> {
-        let params = params.0;
-        match build_security_candidates_args(&params) {
-            Ok(args) => run_tool(&self.binary, "security_candidates", &args).await,
-            Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
-        }
+        run_security_candidates(&self.binary, params.0).await
     }
 
     #[tool(
-        description = "Inspect one file or exported symbol and return one typed evidence bundle. Address a file with target={type:\"file\", file:\"src/a.ts\"}; address a symbol with target={type:\"symbol\", file:\"src/a.ts\", export_name:\"foo\"}. Composes existing read-only analysis systems only: trace_file, trace_export for symbols, file-scoped dead-code actions, duplication groups filtered to the file, complexity findings filtered to the file, and security candidates scoped to the file. production is forwarded only to child analyses that support it: trace, dead-code, and health. Symbol targets include file-scoped evidence with explicit scope fields because file:line enclosing-symbol mapping is a follow-up. This is a bundled evidence query that may run several subprocess analyses sequentially; large repositories can exceed the default 120s subprocess timeout, so raise PLOW_TIMEOUT_SECS when needed.",
+        description = "Inspect one file or exported symbol and return one typed evidence bundle. Address a file with target={type:\"file\", file:\"src/a.ts\"}; address a symbol with target={type:\"symbol\", file:\"src/a.ts\", export_name:\"foo\"}. Composes existing read-only analysis systems only: trace_file, trace_export for symbols, file-scoped dead-code actions, duplication groups filtered to the file, complexity findings filtered to the file, security candidates scoped to the file, and the impact closure for the file (the transitive affected-but-not-in-diff set plus the coordination gap: modules that consume this file's contract but are not shown alongside it; a syntactic attention pointer, not a correctness proof). production is forwarded only to child analyses that support it: trace, dead-code, and health. Symbol targets include file-scoped evidence with explicit scope fields because file:line enclosing-symbol mapping is a follow-up. This is a bundled evidence query that may run several subprocess analyses sequentially; large repositories can exceed the default 120s subprocess timeout, so raise PLOW_TIMEOUT_SECS when needed.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn inspect_target(
@@ -156,11 +145,7 @@ impl PlowMcp {
         &self,
         params: Parameters<FindDupesParams>,
     ) -> Result<CallToolResult, McpError> {
-        let params = params.0;
-        match build_find_dupes_args(&params) {
-            Ok(args) => run_tool(&self.binary, "find_dupes", &args).await,
-            Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
-        }
+        run_find_dupes(&self.binary, params.0).await
     }
 
     #[tool(
@@ -168,8 +153,7 @@ impl PlowMcp {
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn fix_preview(&self, params: Parameters<FixParams>) -> Result<CallToolResult, McpError> {
-        let args = build_fix_preview_args(&params.0);
-        run_tool(&self.binary, "fix_preview", &args).await
+        run_fix_preview(&self.binary, params.0).await
     }
 
     #[tool(
@@ -177,8 +161,7 @@ impl PlowMcp {
         annotations(destructive_hint = true, read_only_hint = false)
     )]
     async fn fix_apply(&self, params: Parameters<FixParams>) -> Result<CallToolResult, McpError> {
-        let args = build_fix_apply_args(&params.0);
-        run_tool(&self.binary, "fix_apply", &args).await
+        run_fix_apply(&self.binary, params.0).await
     }
 
     #[tool(
@@ -189,8 +172,7 @@ impl PlowMcp {
         &self,
         params: Parameters<ProjectInfoParams>,
     ) -> Result<CallToolResult, McpError> {
-        let args = build_project_info_args(&params.0);
-        run_tool(&self.binary, "project_info", &args).await
+        run_project_info(&self.binary, params.0).await
     }
 
     #[tool(
@@ -201,10 +183,7 @@ impl PlowMcp {
         &self,
         params: Parameters<TraceExportParams>,
     ) -> Result<CallToolResult, McpError> {
-        match build_trace_export_args(&params.0) {
-            Ok(args) => run_tool(&self.binary, "trace_export", &args).await,
-            Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
-        }
+        run_trace_export_tool(params.0).await
     }
 
     #[tool(
@@ -215,10 +194,7 @@ impl PlowMcp {
         &self,
         params: Parameters<TraceFileParams>,
     ) -> Result<CallToolResult, McpError> {
-        match build_trace_file_args(&params.0) {
-            Ok(args) => run_tool(&self.binary, "trace_file", &args).await,
-            Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
-        }
+        run_trace_file_tool(params.0).await
     }
 
     #[tool(
@@ -229,10 +205,7 @@ impl PlowMcp {
         &self,
         params: Parameters<TraceDependencyParams>,
     ) -> Result<CallToolResult, McpError> {
-        match build_trace_dependency_args(&params.0) {
-            Ok(args) => run_tool(&self.binary, "trace_dependency", &args).await,
-            Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
-        }
+        run_trace_dependency_tool(params.0).await
     }
 
     #[tool(
@@ -243,22 +216,18 @@ impl PlowMcp {
         &self,
         params: Parameters<TraceCloneParams>,
     ) -> Result<CallToolResult, McpError> {
-        match build_trace_clone_args(&params.0) {
-            Ok(args) => run_tool(&self.binary, "trace_clone", &args).await,
-            Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
-        }
+        run_trace_clone_tool(params.0).await
     }
 
     #[tool(
-        description = "Check code health metrics (cyclomatic and cognitive complexity) for functions in the project. Returns structured JSON with complexity scores per function, sorted by severity. Set score=true for a single 0-100 health score with letter grade (A/B/C/D/F); runs duplication analysis automatically, but the churn-backed hotspot penalty requires hotspots=true (or targets=true). Set min_score=N to fail only when the score drops below a threshold (CI quality gate); min_score is authoritative, so complexity findings become informational and min_score=0 never fails. Exit codes are not surfaced over MCP (a findings exit still returns the JSON), so min_score and min_severity only affect the CLI exit code; min_severity, if also set, composes with min_score (the CLI run fails if either gate trips). Set file_scores=true for per-file health scores (maintainability index, fan-in, fan-out, dead code ratio, complexity density, CRAP risk), sorted in risk-aware triage order so lower MI and higher CRAP risk appear first. Set complexity_breakdown=true to add a `contributions[]` array to each complexity finding, breaking the cyclomatic and cognitive scores down per decision point (each entry names the construct: if, else-if, ternary, boolean operator, loop, case, catch, ... with its source line and weight) so you can explain WHY a function scored high and which specific lines to refactor. Set coverage_gaps=true to explicitly include static test coverage gaps: runtime files and exports with no test dependency path (not line-level coverage). A provided config file may also enable coverage gaps via rules.coverage-gaps when no health sections are explicitly selected. Set hotspots=true to identify files that are both complex and frequently changing (combines git churn with complexity). Set churn_file to a `plow-churn/v1` JSON path to power the churn-backed signals (hotspots, ownership, and refactoring targets) from imported VCS history instead of git, so they work on projects with no git repository (Yandex Arc, Mercurial, Perforce); a small wrapper translates the VCS log into the contract, and the `since` window then only labels output since the file is authoritative. Set ownership=true (implies hotspots) to attach per-file ownership signals: bus factor, contributor count, declared CODEOWNERS owner, ownership_state, drift, and unowned-hotspot flag. Use ownership_email_mode=raw|handle|anonymized|hash for author email privacy (default handle; hash is the legacy spelling for anonymized output). Set targets=true for ranked refactoring recommendations sorted by efficiency (quick wins first), with confidence scores and adaptive percentile-based thresholds. Set trend=true to compare current metrics against the most recent saved snapshot and show per-metric deltas with directional indicators (improving/declining/stable). Implies --score. Requires prior snapshots saved with save_snapshot. Set effort to control analysis depth: 'low' (fast, surface-level), 'medium' (balanced, default), or 'high' (thorough, all heuristics). Set summary=true to include a natural-language summary of findings alongside the structured JSON. Set coverage to a path to Istanbul-format coverage data (coverage-final.json from Jest, Vitest, c8, nyc) for accurate per-function CRAP scores instead of the default static binary model. CRAP findings carry a `coverage_source` discriminator (`istanbul`, `estimated`, or `estimated_component_inherited`); `summary.coverage_source_consistency` and grouped `coverage_source_consistency` report whether emitted CRAP finding sources are uniform or mixed; synthetic `<template>` findings on Angular `.html` files use `estimated_component_inherited` and include an `inherited_from` path to the owning `.component.ts` so agents target the component file for coverage remediation rather than the template. Angular components whose class AND template both contribute to complexity also emit a synthetic `<component>` rollup finding anchored at the worst class method's `(line, col)`. The rollup's `cyclomatic` is `worst_class_method.cyclomatic + template.cyclomatic` (the same worst-by-cyclomatic method drives both metrics; cognitive is `worst.cognitive + template.cognitive`). The `component_rollup` payload carries the pre-summation breakdown: `class_worst_function` (method name), `class_cyclomatic` / `class_cognitive` (per-method numbers), `template_path` / `template_cyclomatic` / `template_cognitive`, plus a `component` identifier derived from the .ts owner's file stem. The rollup's `suppress-line` action uses `placement: \"above-component-worst-method\"`: a `// plow-ignore-next-line complexity` placed above the worst class method hides BOTH the per-function finding AND the rollup, so agents do not need to emit two suppression edits. Per-function and per-`<template>` entries stay alongside the rollup; ranking and `--targets` use the rollup so a template-heavy component surfaces as one unit rather than scattered medium findings. Set runtime_coverage to a path (V8 coverage directory, V8 JSON file, or Istanbul JSON file) for merged runtime-coverage findings (a single local capture is free; continuous or multi-capture runtime monitoring requires an active license via `plow license activate`). Runtime-coverage tuning: set min_invocations_hot=N to tune the hot-path threshold (default 100), min_observation_volume=N to tune the high-confidence verdict floor (default 5000), and low_traffic_threshold=RATIO to tune the active/low-traffic split (default 0.001). Set group_by to \"owner\" (CODEOWNERS), \"directory\", \"package\" (workspace), or \"section\" (GitLab CODEOWNERS `[Section]` headers, with `owners` metadata per group) to partition results. Each group gets its own `vital_signs`, `health_score`, `findings`, `file_scores`, `hotspots`, `large_functions`, and `targets` recomputed against the group's files (top-level metrics stay project-wide). Use this to answer per-team or per-package quality questions like \"which workspace has the worst maintainability?\" without running plow once per package. When config health.thresholdOverrides is set, health findings use the resolved local thresholds and JSON includes threshold_overrides state so agents can see active, stale, and full-run no-match exceptions. Supports config, baseline comparisons, and performance tuning (no_cache, threads). Useful for identifying hard-to-maintain code and prioritizing refactoring.",
+        description = "Check code health metrics (cyclomatic and cognitive complexity) for functions in the project. Returns structured JSON with complexity scores per function, sorted by severity. Set score=true for a single 0-100 health score with letter grade (A/B/C/D/F); runs duplication analysis automatically, but the churn-backed hotspot penalty requires hotspots=true (or targets=true). Set min_score=N to fail only when the score drops below a threshold (CI quality gate); min_score is authoritative, so complexity findings become informational and min_score=0 never fails. Exit codes are not surfaced over MCP (a findings exit still returns the JSON), so min_score and min_severity only affect the CLI exit code; min_severity, if also set, composes with min_score (the CLI run fails if either gate trips). Set file_scores=true for per-file health scores (maintainability index, fan-in, fan-out, dead code ratio, complexity density, CRAP risk), sorted in risk-aware triage order so lower MI and higher CRAP risk appear first. Set css=true to add a `css_analytics` section: specificity hotspots, `!important` density, over-complex selectors, deep nesting, design-token sprawl (distinct color/font-size/z-index counts), and unreferenced custom-property / `@keyframes` cleanup candidates (the structural CSS slop linters do not aggregate); opt-in because it parses every project stylesheet (standard CSS only, SCSS skipped). Set complexity_breakdown=true to add a `contributions[]` array to each complexity finding, breaking the cyclomatic and cognitive scores down per decision point (each entry names the construct: if, else-if, ternary, boolean operator, loop, case, catch, and on React/Preact components hook-density / prop-count, with its source line and weight) so you can explain WHY a function scored high and which specific lines to refactor. JSX depth is carried as descriptive `react_jsx_max_depth` context, not a contribution. React/Preact complexity findings also carry a `react_hook_profile` object (always present, no flag needed, omitted for non-React findings): a per-component hook breakdown (`state`/`effect`/`memo`/`callback`/`custom` counts) plus `max_effect_dep_arity` (the largest useEffect dependency-array arity over effects with a literal deps array). It refines the bare `react_hook_count` headline so you can spot effect-soup (many `effect`) and large effect dep-arrays (high `max_effect_dep_arity`) as the actionable triage signals; the breakdown covers component-scope hooks only, so it may sum to LESS than `react_hook_count` when a `use*` call sits in a plain helper. On React/Preact projects `vital_signs` also reports render-fan-in concentration (`p95_render_fan_in`, `render_fan_in_high_pct`, `max_render_fan_in`), the component-graph analogue of module fan-in: where module fan-in counts importing MODULES, render fan-in counts distinct render LOCATIONS of a component (a shared `<Button>` is rendered in far more places than it is imported), surfaced as descriptive blast-radius context (not a gate or finding). The headline `max_render_fan_in` is the highest DISTINCT-PARENTS count (the honest edit-ripple count); test / spec / story / fixture files are excluded. `vital_signs.top_render_fan_in` lists the highest-fan-in components sorted by distinct parents (each with `component` name, project-relative `path`, `distinct_parents` as the headline, and `render_sites` as secondary \"incl. repeats\" context) so you can see WHICH components are the blast-radius hotspots, not just the `max_render_fan_in` number. Set coverage_gaps=true to explicitly include static test coverage gaps: runtime files and exports with no test dependency path (not line-level coverage). A provided config file may also enable coverage gaps via rules.coverage-gaps when no health sections are explicitly selected. Set hotspots=true to identify files that are both complex and frequently changing (combines git churn with complexity). Set churn_file to a `plow-churn/v1` JSON path to power the churn-backed signals (hotspots, ownership, and refactoring targets) from imported VCS history instead of git, so they work on projects with no git repository (Yandex Arc, Mercurial, Perforce); a small wrapper translates the VCS log into the contract, and the `since` window then only labels output since the file is authoritative. Set ownership=true (implies hotspots) to attach per-file ownership signals: bus factor, contributor count, declared CODEOWNERS owner, ownership_state, drift, and unowned-hotspot flag. Use ownership_email_mode=raw|handle|anonymized|hash for author email privacy (default handle; hash is the legacy spelling for anonymized output). Set targets=true for ranked refactoring recommendations sorted by efficiency (quick wins first), with confidence scores and adaptive percentile-based thresholds. Set trend=true to compare current metrics against the most recent saved snapshot and show per-metric deltas with directional indicators (improving/declining/stable). Implies --score. Requires prior snapshots saved with save_snapshot. Set effort to control analysis depth: 'low' (fast, surface-level), 'medium' (balanced, default), or 'high' (thorough, all heuristics). Set summary=true to include a natural-language summary of findings alongside the structured JSON. Set coverage to a path to Istanbul-format coverage data (coverage-final.json from Jest, Vitest, c8, nyc) for accurate per-function CRAP scores instead of the default static binary model. CRAP findings carry a `coverage_source` discriminator (`istanbul`, `estimated`, or `estimated_component_inherited`); `summary.coverage_source_consistency` and grouped `coverage_source_consistency` report whether emitted CRAP finding sources are uniform or mixed; synthetic `<template>` findings on Angular `.html` files use `estimated_component_inherited` and include an `inherited_from` path to the owning `.component.ts` so agents target the component file for coverage remediation rather than the template. Angular components whose class AND template both contribute to complexity also emit a synthetic `<component>` rollup finding anchored at the worst class method's `(line, col)`. The rollup's `cyclomatic` is `worst_class_method.cyclomatic + template.cyclomatic` (the same worst-by-cyclomatic method drives both metrics; cognitive is `worst.cognitive + template.cognitive`). The `component_rollup` payload carries the pre-summation breakdown: `class_worst_function` (method name), `class_cyclomatic` / `class_cognitive` (per-method numbers), `template_path` / `template_cyclomatic` / `template_cognitive`, plus a `component` identifier derived from the .ts owner's file stem. The rollup's `suppress-line` action uses `placement: \"above-component-worst-method\"`: a `// plow-ignore-next-line complexity` placed above the worst class method hides BOTH the per-function finding AND the rollup, so agents do not need to emit two suppression edits. Per-function and per-`<template>` entries stay alongside the rollup; ranking and `--targets` use the rollup so a template-heavy component surfaces as one unit rather than scattered medium findings. Set runtime_coverage to a path (V8 coverage directory, V8 JSON file, or Istanbul JSON file) for merged runtime-coverage findings (a single local capture is free; continuous or multi-capture runtime monitoring requires an active license via `plow license activate`). Runtime-coverage tuning: set min_invocations_hot=N to tune the hot-path threshold (default 100), min_observation_volume=N to tune the high-confidence verdict floor (default 5000), and low_traffic_threshold=RATIO to tune the active/low-traffic split (default 0.001). Set group_by to \"owner\" (CODEOWNERS), \"directory\", \"package\" (workspace), or \"section\" (GitLab CODEOWNERS `[Section]` headers, with `owners` metadata per group) to partition results. Each group gets its own `vital_signs`, `health_score`, `findings`, `file_scores`, `hotspots`, `large_functions`, and `targets` recomputed against the group's files (top-level metrics stay project-wide). Use this to answer per-team or per-package quality questions like \"which workspace has the worst maintainability?\" without running plow once per package. When config health.thresholdOverrides is set, health findings use the resolved local thresholds and JSON includes threshold_overrides state so agents can see active, stale, and full-run no-match exceptions. Supports config, baseline comparisons, and performance tuning (no_cache, threads). Useful for identifying hard-to-maintain code and prioritizing refactoring.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn check_health(
         &self,
         params: Parameters<HealthParams>,
     ) -> Result<CallToolResult, McpError> {
-        let args = build_health_args(&params.0);
-        run_tool(&self.binary, "check_health", &args).await
+        run_health(&self.binary, params.0).await
     }
 
     #[tool(
@@ -266,10 +235,18 @@ impl PlowMcp {
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn audit(&self, params: Parameters<AuditParams>) -> Result<CallToolResult, McpError> {
-        match build_audit_args(&params.0) {
-            Ok(args) => run_tool(&self.binary, "audit", &args).await,
-            Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
-        }
+        run_audit(&self.binary, params.0).await
+    }
+
+    #[tool(
+        description = "Surface the consequential structural DECISIONS a change embeds, each framed as a judgment question for a human with taste (`plow decision-surface --format json`). The apex of the review brief and the single call that puts taste-decisions in front of a reviewer; separable and cheap, it runs the same changed-code analysis as the brief, NOT the full project pipeline. Returns `kind: \"decision-surface\"` with `schema_version`, a ranked `decisions[]` list, an optional `truncated` note, and `signal_count`. Each decision carries a `signal_id` (a deterministic anchor to the plow-emitted candidate it frames; an agent decision whose `signal_id` plow did not emit must be REJECTED, this is the anti-hallucination contract), a `category` (EXACTLY the SOLID-3: `coupling-boundary`, `public-api-contract`, `dependency`, nothing else), the framed `question`, the `anchor_file`/`anchor_line`, the `blast` (modules affected beyond the diff) and `consequence` rank, the routed `expert[]` (who to ask) with a `bus_factor_one` flag, and structured `actions[]` (`ask-expert`, `suppress`). The surface is CAPPED to a working-memory-sized handful (4 plus or minus 1, configurable via `max_decisions`, clamped to 3-5); decisions beyond the cap collapse into `truncated`. Every decision is suppressible with a `// plow-ignore` comment on the anchor file (the `suppress` action carries the paste-ready comment). Always exits 0 (advisory, never a gate). Use `base` to pick the comparison point (defaults to the git merge-base). Use this to answer \"what are the few decisions in this change that actually need human judgment?\" rather than scanning the whole diff.",
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
+    async fn decision_surface(
+        &self,
+        params: Parameters<DecisionSurfaceParams>,
+    ) -> Result<CallToolResult, McpError> {
+        run_decision_surface(&self.binary, params.0).await
     }
 
     #[tool(
@@ -280,8 +257,7 @@ impl PlowMcp {
         &self,
         params: Parameters<ExplainParams>,
     ) -> Result<CallToolResult, McpError> {
-        let args = build_explain_args(&params.0);
-        run_tool(&self.binary, "plow_explain", &args).await
+        run_explain(&self.binary, params.0).await
     }
 
     #[tool(
@@ -292,8 +268,7 @@ impl PlowMcp {
         &self,
         params: Parameters<ListBoundariesParams>,
     ) -> Result<CallToolResult, McpError> {
-        let args = build_list_boundaries_args(&params.0);
-        run_tool(&self.binary, "list_boundaries", &args).await
+        run_list_boundaries(&self.binary, params.0).await
     }
 
     #[tool(
@@ -304,8 +279,7 @@ impl PlowMcp {
         &self,
         params: Parameters<FeatureFlagsParams>,
     ) -> Result<CallToolResult, McpError> {
-        let args = build_feature_flags_args(&params.0);
-        run_tool(&self.binary, "feature_flags", &args).await
+        run_feature_flags(&self.binary, params.0).await
     }
 
     #[tool(
@@ -313,8 +287,7 @@ impl PlowMcp {
         annotations(read_only_hint = true, idempotent_hint = true, open_world_hint = false)
     )]
     async fn impact(&self, params: Parameters<ImpactParams>) -> Result<CallToolResult, McpError> {
-        let args = build_impact_args(&params.0);
-        run_tool(&self.binary, "impact", &args).await
+        run_impact(&self.binary, params.0).await
     }
 
     #[tool(
@@ -325,8 +298,7 @@ impl PlowMcp {
         &self,
         params: Parameters<ImpactAllParams>,
     ) -> Result<CallToolResult, McpError> {
-        let args = build_impact_all_args(&params.0);
-        run_tool(&self.binary, "impact_all", &args).await
+        run_impact_all(&self.binary, params.0).await
     }
 
     #[tool(
@@ -337,8 +309,7 @@ impl PlowMcp {
         &self,
         params: Parameters<CheckRuntimeCoverageParams>,
     ) -> Result<CallToolResult, McpError> {
-        let args = build_check_runtime_coverage_args(&params.0);
-        run_tool(&self.binary, "check_runtime_coverage", &args).await
+        run_check_runtime_coverage(&self.binary, params.0).await
     }
 
     #[tool(
@@ -349,32 +320,29 @@ impl PlowMcp {
         &self,
         params: Parameters<CheckRuntimeCoverageParams>,
     ) -> Result<CallToolResult, McpError> {
-        let args = build_get_hot_paths_args(&params.0);
-        run_tool_with_top_level_warnings(&self.binary, "get_hot_paths", &args).await
+        run_get_hot_paths(&self.binary, params.0).await
     }
 
     #[tool(
-        description = "Return first-class blast-radius context alongside local runtime coverage. Pass `coverage` as a V8 coverage directory, single V8 JSON file, or Istanbul `coverage-final.json`. A single local capture is free and runs without a license; continuous or multi-capture runtime monitoring requires an active license. Returns the standard health JSON; agents should read `runtime_coverage.blast_radius`, which contains stable `plow:blast:<hash>` IDs, caller counts, traffic-weighted caller reach, and low/medium/high risk bands.",
+        description = "Return first-class blast-radius context alongside local runtime coverage. Pass `coverage` as a V8 coverage directory, single V8 JSON file, or Istanbul `coverage-final.json`. A single local capture is free and runs without a license; continuous or multi-capture runtime monitoring requires an active license. Returns the standard health JSON; agents should read `runtime_coverage.blast_radius`, which contains stable `plow:blast:<hash>` IDs, caller counts, traffic-weighted caller reach, and low/medium/high risk bands. This blast-radius signal augments context only: it scores the RISK of changing a function. It MUST NOT gate `safe_to_delete` or a confidence score (a function having callers does not make it 'keep'); only the three-state runtime tracking signal (called / never_called / untracked) can issue a deletion verdict.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn get_blast_radius(
         &self,
         params: Parameters<CheckRuntimeCoverageParams>,
     ) -> Result<CallToolResult, McpError> {
-        let args = build_get_blast_radius_args(&params.0);
-        run_tool_with_top_level_warnings(&self.binary, "get_blast_radius", &args).await
+        run_get_blast_radius(&self.binary, params.0).await
     }
 
     #[tool(
-        description = "Return first-class production-importance context from local runtime coverage plus static health signals. Pass `coverage` as a V8 coverage directory, single V8 JSON file, or Istanbul `coverage-final.json`. A single local capture is free and runs without a license; continuous or multi-capture runtime monitoring requires an active license. Returns the standard health JSON; agents should read `runtime_coverage.importance`, which contains stable `plow:importance:<hash>` IDs, invocations, cyclomatic complexity, owner count, a 0-100 score, and a templated reason.",
+        description = "Return first-class production-importance context from local runtime coverage plus static health signals. Pass `coverage` as a V8 coverage directory, single V8 JSON file, or Istanbul `coverage-final.json`. A single local capture is free and runs without a license; continuous or multi-capture runtime monitoring requires an active license. Returns the standard health JSON; agents should read `runtime_coverage.importance`, which contains stable `plow:importance:<hash>` IDs, invocations, cyclomatic complexity, owner count, a 0-100 score, and a templated reason. This importance signal augments context only. It MUST NOT gate `safe_to_delete` or a confidence score (a high or low score never decides deletion); only the three-state runtime tracking signal (called / never_called / untracked) can issue a deletion verdict.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn get_importance(
         &self,
         params: Parameters<CheckRuntimeCoverageParams>,
     ) -> Result<CallToolResult, McpError> {
-        let args = build_get_importance_args(&params.0);
-        run_tool_with_top_level_warnings(&self.binary, "get_importance", &args).await
+        run_get_importance(&self.binary, params.0).await
     }
 
     #[tool(
@@ -385,8 +353,18 @@ impl PlowMcp {
         &self,
         params: Parameters<CheckRuntimeCoverageParams>,
     ) -> Result<CallToolResult, McpError> {
-        let args = build_get_cleanup_candidates_args(&params.0);
-        run_tool_with_top_level_warnings(&self.binary, "get_cleanup_candidates", &args).await
+        run_get_cleanup_candidates(&self.binary, params.0).await
+    }
+
+    #[tool(
+        description = "Return design-token blast radius from static analysis. Runs `plow health --css --format json`; agents should read `css_analytics.token_consumers`, a reverse index keyed by each token of its defining site plus a `consumer_count` and a capped located `consumers[]` sample of `{path,line,kind}`. Covers TWO token origins, disambiguated by the consumer `kind`: Tailwind v4 `@theme` tokens (`token` is the `--`-prefixed custom property like `--color-brand`; `kind` in `theme-var` / `css-var` / `utility` / `apply`) AND CSS-in-JS token definitions (StyleX `defineVars`, vanilla-extract `createTheme` / `createThemeContract` / `createGlobalTheme`; `token` is the binding-qualified dotted access path like `vars.color.primary`, `namespace` is the defining binding, `kind` is `js-member`). The index is empty or absent on projects using neither. `consumer_count` is a static lower bound (a computed class name like `bg-${c}`, or a CSS-in-JS access through a path-aliased / bare-package import the relative-import resolver does not follow, is not counted), so it is descriptive context for sizing a token change, not a deletion gate. For Tailwind a `consumer_count` of 0 mirrors the unused-theme-token population (the dead-token verdict stays on `unused_theme_tokens` via check_health); CSS-in-JS tokens have no corroborating dead-token finding, so treat a CSS-in-JS 0 as weaker. Use this tool to scope the impact of editing or renaming a token, not to decide deletion.",
+        annotations(read_only_hint = true, idempotent_hint = true, open_world_hint = false)
+    )]
+    async fn get_token_blast_radius(
+        &self,
+        params: Parameters<GetTokenBlastRadiusParams>,
+    ) -> Result<CallToolResult, McpError> {
+        run_get_token_blast_radius(&self.binary, params.0).await
     }
 }
 
@@ -410,7 +388,9 @@ impl ServerHandler for PlowMcp {
                  check_health (code complexity metrics), \
                  check_runtime_coverage (paid; merges a V8 or Istanbul runtime coverage dump into the health report), \
                  get_hot_paths / get_blast_radius / get_importance / get_cleanup_candidates (paid runtime context slices), \
+                 get_token_blast_radius (free; design-token blast radius for Tailwind v4 @theme + CSS-in-JS defineVars/createTheme tokens via health --css token_consumers), \
                  audit (combined dead-code + complexity + duplication for changed files, returns verdict), \
+                 decision_surface (the few consequential structural decisions a change embeds, ranked, capped, and signal_id-anchored, each as a judgment question with the routed expert), \
                  plow_explain (rule rationale and fix guidance without running analysis), \
                  list_boundaries (architecture boundary zones and access rules), \
                  feature_flags (detect feature flag patterns), \

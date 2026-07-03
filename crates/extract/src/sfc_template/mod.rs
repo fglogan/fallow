@@ -17,9 +17,9 @@
 //!   external `.html` siblings (`templateUrl`). The scanner is invoked
 //!   directly from `crate::visitor::visit_impl::visit_class` for inline
 //!   templates and from `crate::html::parse_html_to_module_with_complexity`
-//!   for external templates. Bare identifier references use an
-//!   `ANGULAR_TPL_SENTINEL` object name so the analysis phase can bridge
-//!   them to the importing component's class members.
+//!   for external templates. Bare identifier references are persisted as typed
+//!   semantic facts so the analysis phase can bridge them to the importing
+//!   component's class members.
 //!
 //! - **Glimmer (`glimmer`)**: Ember `.gts` / `.gjs` single-file components.
 //!   The host file IS valid JS once `<template>...</template>` blocks are
@@ -69,6 +69,14 @@ pub fn collect_template_usage(
     }
 }
 
+/// Collect Svelte custom-event listener names from template `on:<name>`
+/// bindings on component tags (PascalCase). DOM-element `on:click` is excluded.
+/// Feeds the `unused-svelte-event` detector's liberal project-wide listened set.
+#[must_use]
+pub fn collect_svelte_listened_events(source: &str) -> Vec<String> {
+    svelte::collect_listened_events(source)
+}
+
 /// Collect template-visible usage, including framework template references to
 /// script-local instance bindings such as `const counter = new Counter()`.
 pub fn collect_template_usage_with_bound_targets(
@@ -76,20 +84,29 @@ pub fn collect_template_usage_with_bound_targets(
     source: &str,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
+    iterable_types: &FxHashMap<String, String>,
 ) -> TemplateUsage {
     match kind {
-        SfcKind::Vue => {
-            vue::collect_template_usage_with_bound_targets(source, imported_bindings, bound_targets)
-        }
+        // `iterable_types` maps a template-visible binding to its array element
+        // class; both scanners consume it to type an iteration variable (Vue
+        // `v-for`, Svelte `{#each}`) so member accesses on the item credit the
+        // element class. See issue #1707 and its follow-up.
+        SfcKind::Vue => vue::collect_template_usage_with_bound_targets(
+            source,
+            imported_bindings,
+            bound_targets,
+            iterable_types,
+        ),
         SfcKind::Svelte => svelte::collect_template_usage_with_bound_targets(
             source,
             imported_bindings,
             bound_targets,
+            iterable_types,
         ),
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
 

@@ -1,16 +1,17 @@
 use std::path::Path;
 
-use plow_core::extract::MemberKind;
-use plow_core::results::*;
+use plow_types::extract::MemberKind;
 use plow_types::output_dead_code::{
-    BoundaryViolationFinding, CircularDependencyFinding, TestOnlyDependencyFinding,
-    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
-    UnrenderedComponentFinding, UnresolvedImportFinding, UnusedClassMemberFinding,
-    UnusedComponentEmitFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
+    BoundaryViolationFinding, CircularDependencyFinding, DuplicateExportFinding,
+    TestOnlyDependencyFinding, TypeOnlyDependencyFinding, UnlistedDependencyFinding,
+    UnprovidedInjectFinding, UnrenderedComponentFinding, UnresolvedImportFinding,
+    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
+    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
     UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
-    UnusedTypeFinding,
+    UnusedLoadDataKeyFinding, UnusedOptionalDependencyFinding, UnusedServerActionFinding,
+    UnusedStoreMemberFinding, UnusedSvelteEventFinding, UnusedTypeFinding,
 };
+use plow_types::results::*;
 
 /// Build an `AnalysisResults` populated with one issue of every type.
 ///
@@ -210,6 +211,34 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
                 col: 2,
             },
         ));
+    r.unused_component_inputs
+        .push(UnusedComponentInputFinding::with_actions(
+            UnusedComponentInput {
+                path: root.join("src/user-card.component.ts"),
+                component_name: "UserCardComponent".to_string(),
+                input_name: "unusedVariant".to_string(),
+                line: 4,
+                col: 2,
+            },
+        ));
+    r.unused_component_outputs
+        .push(UnusedComponentOutputFinding::with_actions(
+            UnusedComponentOutput {
+                path: root.join("src/user-card.component.ts"),
+                component_name: "UserCardComponent".to_string(),
+                output_name: "unusedSelected".to_string(),
+                line: 5,
+                col: 2,
+            },
+        ));
+    r.unused_svelte_events
+        .push(UnusedSvelteEventFinding::with_actions(UnusedSvelteEvent {
+            path: root.join("src/Child.svelte"),
+            component_name: "Child".to_string(),
+            event_name: "dead".to_string(),
+            line: 6,
+            col: 2,
+        }));
     r.unused_server_actions
         .push(UnusedServerActionFinding::with_actions(
             UnusedServerAction {
@@ -219,15 +248,26 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
                 col: 0,
             },
         ));
+    r.unused_load_data_keys
+        .push(UnusedLoadDataKeyFinding::with_actions(UnusedLoadDataKey {
+            path: root.join("src/routes/blog/+page.ts"),
+            key_name: "draftCount".to_string(),
+            line: 4,
+            col: 2,
+            route_dir: Some("src/routes/blog".to_string()),
+        }));
     r.stale_suppressions.push(StaleSuppression {
         path: root.join("src/utils.ts"),
         line: 5,
         col: 0,
         origin: SuppressionOrigin::Comment {
             issue_kind: Some("unused-exports".to_string()),
+            reason: None,
             is_file_level: false,
             kind_known: false,
         },
+        missing_reason: false,
+        actions: StaleSuppression::actions_for(false),
     });
 
     r

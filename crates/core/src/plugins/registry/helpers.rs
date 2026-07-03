@@ -4,16 +4,17 @@
 //! config result merging, and plugin detection logic.
 
 use std::borrow::Cow;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use plow_config::{ExternalPluginDef, PackageJson, PluginDetection, UsedClassMemberRule};
 
 use crate::discover::SOURCE_EXTENSIONS;
 
 use super::super::{PathRule, Plugin, PluginResult, PluginUsedExportRule, UsedExportRule};
-use super::{AggregatedPluginResult, PluginRegexValidationError};
+use super::{AggregatedPluginResult, PluginRegexValidationError, PluginRegexValidationErrorInput};
 
 /// True when a config pattern names a source-extension config file living
 /// directly in some directory (no path separator, no leading dot, all expanded
@@ -61,25 +62,38 @@ pub fn process_static_patterns(
     root: &Path,
     result: &mut AggregatedPluginResult,
 ) {
-    result.active_plugins.push(plugin.name().to_string());
-
     let pname = plugin.name().to_string();
+    result.active_plugins.push(pname.clone());
     result
         .entry_point_roles
         .insert(pname.clone(), plugin.entry_point_role());
+
+    collect_static_plugin_rules(plugin, &pname, result);
+    collect_static_plugin_metadata(plugin, root, result);
+}
+
+/// Collect a plugin's entry/used-export/class-member/config/always-used rules
+/// into the aggregate, all scoped under `pname`.
+fn collect_static_plugin_rules(
+    plugin: &dyn Plugin,
+    pname: &str,
+    result: &mut AggregatedPluginResult,
+) {
     for rule in plugin.entry_pattern_rules() {
-        result.entry_patterns.push((rule, pname.clone()));
+        result.entry_patterns.push((rule, pname.to_string()));
     }
     for pat in plugin.config_patterns() {
         result.config_patterns.push((*pat).to_string());
     }
     for pat in plugin.always_used() {
-        result.always_used.push(((*pat).to_string(), pname.clone()));
+        result
+            .always_used
+            .push(((*pat).to_string(), pname.to_string()));
     }
     for rule in plugin.used_export_rules() {
         result
             .used_exports
-            .push(PluginUsedExportRule::new(pname.clone(), rule));
+            .push(PluginUsedExportRule::new(pname.to_string(), rule));
     }
     for member in plugin.used_class_members() {
         result
@@ -89,6 +103,20 @@ pub fn process_static_patterns(
     for rule in plugin.used_class_member_rules() {
         result.used_class_members.push(rule);
     }
+    for pat in plugin.fixture_glob_patterns() {
+        result
+            .fixture_patterns
+            .push(((*pat).to_string(), pname.to_string()));
+    }
+}
+
+/// Collect a plugin's dependency/virtual-module/alias/auto-import metadata into
+/// the aggregate.
+fn collect_static_plugin_metadata(
+    plugin: &dyn Plugin,
+    root: &Path,
+    result: &mut AggregatedPluginResult,
+) {
     for dep in plugin.tooling_dependencies() {
         result.tooling_dependencies.push((*dep).to_string());
     }
@@ -115,11 +143,6 @@ pub fn process_static_patterns(
     result
         .provided_dependencies
         .extend(plugin.provided_dependencies());
-    for pat in plugin.fixture_glob_patterns() {
-        result
-            .fixture_patterns
-            .push(((*pat).to_string(), pname.clone()));
-    }
 }
 
 /// Resolve package.json metadata hooks for active plugins.
@@ -224,7 +247,69 @@ pub fn process_external_plugins(
     }
 }
 
-/// Discover config files on disk for plugins that were not matched against the
+/// In-memory directory listing of config-candidate files (and discovered source
+/// files), keyed by absolute directory, used to resolve plugin config patterns
+/// without re-walking the filesystem.
+///
+/// Built once from the files the discovery walk already collected, so a
+/// `discover_config_files` lookup that previously cost one filesystem stat per
+/// `(plugin, ancestor-directory, pattern)` becomes an in-memory set lookup. The
+/// walk respects `.gitignore` / `ignorePatterns` / the hidden-directory
+/// allowlist, so config discovery via this index follows the same traversal
+/// rules as source discovery (the raw filesystem path used in production mode
+/// does not); see the crate docs / CHANGELOG for that deliberate refinement.
+pub struct ConfigCandidateIndex {
+    dirs: FxHashMap<PathBuf, FxHashSet<OsString>>,
+}
+
+impl ConfigCandidateIndex {
+    /// Build the index from absolute file paths (discovered source files unioned
+    /// with non-source config candidates). Files with no parent or no file name
+    /// are skipped.
+    #[must_use]
+    pub fn build<'a>(paths: impl IntoIterator<Item = &'a Path>) -> Self {
+        let mut dirs: FxHashMap<PathBuf, FxHashSet<OsString>> = FxHashMap::default();
+        for path in paths {
+            if let (Some(parent), Some(name)) = (path.parent(), path.file_name()) {
+                dirs.entry(parent.to_path_buf())
+                    .or_default()
+                    .insert(name.to_os_string());
+            }
+        }
+        Self { dirs }
+    }
+
+    /// Whether the directory `dir` contains a file named `name`, per the files
+    /// the discovery walk collected. Used by file-based plugin activation to
+    /// avoid a per-directory filesystem `read` probe.
+    #[must_use]
+    pub fn dir_contains(&self, dir: &Path, name: &OsStr) -> bool {
+        self.dirs.get(dir).is_some_and(|names| names.contains(name))
+    }
+
+    /// Whether any directory at or below `root` contains a file named `name`,
+    /// per the files the discovery walk collected. Lets a plugin activate from
+    /// a sentinel file nested anywhere under `root` (e.g. a `.env.schema` in a
+    /// workspace subdirectory) without a recursive filesystem walk.
+    #[must_use]
+    pub fn any_descendant_contains(&self, root: &Path, name: &OsStr) -> bool {
+        self.dirs
+            .iter()
+            .any(|(dir, names)| dir.starts_with(root) && names.contains(name))
+    }
+
+    fn glob_matches_in_dir(&self, dir: &Path, matcher: &globset::GlobMatcher) -> Vec<PathBuf> {
+        self.dirs.get(dir).map_or_else(Vec::new, |names| {
+            names
+                .iter()
+                .filter(|name| matcher.is_match(Path::new(name)))
+                .map(|name| dir.join(name))
+                .collect()
+        })
+    }
+}
+
+/// Discover config files for plugins that were not matched against the
 /// discovered source set.
 ///
 /// This intentionally probes only known search roots instead of recursively
@@ -232,6 +317,11 @@ pub fn process_external_plugins(
 /// `node_modules` directories, and a full `**/project.json` walk becomes
 /// pathological there. Callers should therefore pass a focused root list such
 /// as the repo root, workspace roots, and ancestors of discovered source files.
+///
+/// When `candidate_index` is `Some` (the non-production fast path), patterns are
+/// resolved against the in-memory directory index the discovery walk already
+/// built, avoiding one filesystem stat per `(plugin, root, pattern)`. When it is
+/// `None` (production mode), the filesystem is probed directly.
 ///
 /// When `production_mode` is `false`, source-extension root-anchored patterns
 /// (e.g., `webpack.config.{ts,js,mjs,cjs}`) are skipped because Phase 3a's
@@ -243,6 +333,7 @@ pub fn discover_config_files<'a>(
     resolved_plugins: &FxHashSet<&str>,
     roots: &[&Path],
     production_mode: bool,
+    candidate_index: Option<&ConfigCandidateIndex>,
 ) -> Vec<(PathBuf, &'a dyn Plugin)> {
     use rayon::prelude::*;
     let mut pending: Vec<(&'a dyn Plugin, &Path, String)> = Vec::new();
@@ -265,7 +356,17 @@ pub fn discover_config_files<'a>(
         .flat_map_iter(|(plugin, root, pat)| {
             expand_brace_pattern(pat)
                 .into_iter()
-                .flat_map(|expanded| discover_pattern_matches(root, &expanded))
+                .flat_map(|expanded| match candidate_index {
+                    // A pattern under a non-allowlisted hidden directory
+                    // (e.g. `.config/prisma.ts`) is never descended by the
+                    // discovery walk, so it cannot be in the in-memory index;
+                    // probe the filesystem for those few patterns even on the
+                    // fast path so they stay discoverable.
+                    Some(index) if !pattern_needs_filesystem(&expanded) => {
+                        match_pattern_in_index(root, &expanded, index)
+                    }
+                    _ => discover_pattern_matches(root, &expanded),
+                })
                 .map(move |path| (path, *plugin))
                 .collect::<Vec<_>>()
         })
@@ -283,6 +384,65 @@ pub fn discover_config_files<'a>(
 
 fn pattern_has_glob(pattern: &str) -> bool {
     pattern.contains('*') || pattern.contains('?') || pattern.contains('[')
+}
+
+/// True when `pattern` has a directory component (any component before the
+/// basename) that is a hidden directory NOT on the walk's traversal allowlist.
+/// The discovery walk never descends such directories, so the in-memory
+/// candidate index cannot contain files under them and the filesystem probe is
+/// required to keep those configs (e.g. `.config/prisma.ts`) discoverable.
+fn pattern_needs_filesystem(pattern: &str) -> bool {
+    let mut components = pattern.split('/').peekable();
+    let mut needs_fs = false;
+    while let Some(component) = components.next() {
+        if components.peek().is_none() {
+            break; // the basename is not a directory component
+        }
+        if component.starts_with('.')
+            && component != "."
+            && component != ".."
+            && !crate::discover::is_allowed_hidden_dir(OsStr::new(component))
+        {
+            needs_fs = true;
+            break;
+        }
+    }
+    needs_fs
+}
+
+/// In-memory equivalent of [`discover_pattern_matches`], resolving `pattern`
+/// against `index` instead of the filesystem. Mirrors that function's structure
+/// arm-for-arm (plain path, `**/` strip, parent/glob split) so the two produce
+/// identical hits for any file the index contains.
+fn match_pattern_in_index(
+    root: &Path,
+    pattern: &str,
+    index: &ConfigCandidateIndex,
+) -> Vec<PathBuf> {
+    if !pattern_has_glob(pattern) {
+        let path = root.join(pattern);
+        return match (path.parent(), path.file_name()) {
+            (Some(dir), Some(name)) if index.dir_contains(dir, name) => vec![path],
+            _ => Vec::new(),
+        };
+    }
+
+    if let Some(stripped) = pattern.strip_prefix("**/") {
+        return match_pattern_in_index(root, stripped, index);
+    }
+
+    let (dir, file_pattern) = match pattern.rsplit_once('/') {
+        Some((parent, file_pattern)) if !pattern_has_glob(parent) => {
+            (root.join(parent), file_pattern)
+        }
+        Some(_) => return Vec::new(),
+        None => (root.to_path_buf(), pattern),
+    };
+
+    let Ok(matcher) = globset::Glob::new(file_pattern).map(|g| g.compile_matcher()) else {
+        return Vec::new();
+    };
+    index.glob_matches_in_dir(&dir, &matcher)
 }
 
 fn discover_pattern_matches(root: &Path, pattern: &str) -> Vec<PathBuf> {
@@ -364,26 +524,30 @@ fn collect_path_rule_regex_errors(
     for pattern in &rule.exclude_regexes {
         if let Err(source) = regex::Regex::new(pattern) {
             errors.push(PluginRegexValidationError::new(
-                plugin_name,
-                config_path,
-                rule_kind,
-                "exclude_regexes",
-                &rule.pattern,
-                pattern,
-                &source,
+                PluginRegexValidationErrorInput {
+                    plugin_name,
+                    config_path,
+                    rule_kind,
+                    field: "exclude_regexes",
+                    rule_pattern: &rule.pattern,
+                    regex_pattern: pattern,
+                    source: &source,
+                },
             ));
         }
     }
     for pattern in &rule.exclude_segment_regexes {
         if let Err(source) = regex::Regex::new(pattern) {
             errors.push(PluginRegexValidationError::new(
-                plugin_name,
-                config_path,
-                rule_kind,
-                "exclude_segment_regexes",
-                &rule.pattern,
-                pattern,
-                &source,
+                PluginRegexValidationErrorInput {
+                    plugin_name,
+                    config_path,
+                    rule_kind,
+                    field: "exclude_segment_regexes",
+                    rule_pattern: &rule.pattern,
+                    regex_pattern: pattern,
+                    source: &source,
+                },
             ));
         }
     }
@@ -400,7 +564,6 @@ pub fn process_config_result(
     result: &mut AggregatedPluginResult,
     config_path: Option<&Path>,
 ) -> Result<(), Vec<PluginRegexValidationError>> {
-    let pname = plugin_name.to_string();
     let mut regex_errors = Vec::new();
 
     for rule in &plugin_result.entry_patterns {
@@ -424,8 +587,20 @@ pub fn process_config_result(
     if !regex_errors.is_empty() {
         return Err(regex_errors);
     }
+    merge_plugin_result_fields(plugin_name, plugin_result, result);
+    Ok(())
+}
+
+/// Merge a validated `PluginResult`'s payload fields into the aggregate, applying
+/// the per-plugin `replace_*` semantics for entry patterns, used-export rules,
+/// and path aliases.
+fn merge_plugin_result_fields(
+    pname: &str,
+    plugin_result: PluginResult,
+    result: &mut AggregatedPluginResult,
+) {
     if plugin_result.replace_entry_patterns && !plugin_result.entry_patterns.is_empty() {
-        result.entry_patterns.retain(|(_, name)| name != &pname);
+        result.entry_patterns.retain(|(_, name)| name != pname);
     }
     if plugin_result.replace_used_export_rules && !plugin_result.used_exports.is_empty() {
         result.used_exports.retain(|rule| rule.plugin_name != pname);
@@ -434,13 +609,13 @@ pub fn process_config_result(
         plugin_result
             .entry_patterns
             .into_iter()
-            .map(|rule| (rule, pname.clone())),
+            .map(|rule| (rule, pname.to_string())),
     );
     result.used_exports.extend(
         plugin_result
             .used_exports
             .into_iter()
-            .map(|rule| PluginUsedExportRule::new(pname.clone(), rule)),
+            .map(|rule| PluginUsedExportRule::new(pname.to_string(), rule)),
     );
     result
         .used_class_members
@@ -452,7 +627,7 @@ pub fn process_config_result(
         plugin_result
             .always_used_files
             .into_iter()
-            .map(|p| (p, pname.clone())),
+            .map(|p| (p, pname.to_string())),
     );
     for (prefix, replacement) in plugin_result.path_aliases {
         result
@@ -464,13 +639,13 @@ pub fn process_config_result(
         plugin_result
             .setup_files
             .into_iter()
-            .map(|p| (p, pname.clone())),
+            .map(|p| (p, pname.to_string())),
     );
     result.fixture_patterns.extend(
         plugin_result
             .fixture_patterns
             .into_iter()
-            .map(|p| (p, pname.clone())),
+            .map(|p| (p, pname.to_string())),
     );
     result
         .scss_include_paths
@@ -481,7 +656,6 @@ pub fn process_config_result(
     result
         .provided_dependencies
         .extend(plugin_result.provided_dependencies);
-    Ok(())
 }
 
 /// Check if a plugin already has a config file matched against discovered files.
@@ -528,5 +702,61 @@ pub fn check_plugin_detection(
         PluginDetection::Any { conditions } => conditions
             .iter()
             .any(|c| check_plugin_detection(c, all_deps, root, discovered_files)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pattern_needs_filesystem_only_for_non_allowlisted_hidden_dirs() {
+        // `.config` is a hidden directory not on the walk's allowlist, so a
+        // config under it is never in the in-memory index and must be probed.
+        assert!(pattern_needs_filesystem(".config/prisma.ts"));
+        // Plain, nested-non-hidden, dotfile-basename, `**/`, and allowlisted
+        // hidden-dir (`.storybook`) patterns all resolve from the index.
+        assert!(!pattern_needs_filesystem("tsconfig.json"));
+        assert!(!pattern_needs_filesystem("prisma/schema.prisma"));
+        assert!(!pattern_needs_filesystem(".eslintrc.json"));
+        assert!(!pattern_needs_filesystem("**/project.json"));
+        assert!(!pattern_needs_filesystem(".storybook/main.ts"));
+        assert!(!pattern_needs_filesystem("a/b/c.json"));
+    }
+
+    #[test]
+    fn config_candidate_index_matches_plain_nested_and_glob_shapes() {
+        let root = Path::new("/project");
+        let index = ConfigCandidateIndex::build([
+            Path::new("/project/tsconfig.json"),
+            Path::new("/project/packages/a/tsconfig.json"),
+            Path::new("/project/prisma/schema.prisma"),
+            Path::new("/project/src/main.ts"),
+        ]);
+
+        // Plain basename resolved at the project root and at a nested root.
+        assert_eq!(
+            match_pattern_in_index(root, "tsconfig.json", &index),
+            vec![PathBuf::from("/project/tsconfig.json")]
+        );
+        assert_eq!(
+            match_pattern_in_index(Path::new("/project/packages/a"), "tsconfig.json", &index),
+            vec![PathBuf::from("/project/packages/a/tsconfig.json")]
+        );
+        // Nested non-glob, `**/` strip, and a basename glob.
+        assert_eq!(
+            match_pattern_in_index(root, "prisma/schema.prisma", &index),
+            vec![PathBuf::from("/project/prisma/schema.prisma")]
+        );
+        assert_eq!(
+            match_pattern_in_index(root, "**/tsconfig.json", &index),
+            vec![PathBuf::from("/project/tsconfig.json")]
+        );
+        assert_eq!(
+            match_pattern_in_index(Path::new("/project/prisma"), "*.prisma", &index),
+            vec![PathBuf::from("/project/prisma/schema.prisma")]
+        );
+        // A pattern present in no indexed directory yields nothing.
+        assert!(match_pattern_in_index(root, "missing.json", &index).is_empty());
     }
 }

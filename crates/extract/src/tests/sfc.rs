@@ -246,6 +246,213 @@ import { tooltipText } from './utils';
 }
 
 #[test]
+fn vue_vbind_shorthand_credits_prop_usage() {
+    // Props referenced ONLY via a value-less Vue 3.4+ same-name `v-bind`
+    // shorthand (`:open` = `:open="open"`, `:some-prop` = `:some-prop="someProp"`)
+    // must count as template usage, otherwise `unused-component-props`
+    // false-flags them. Regression for #1641 (Vue side).
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+const { open, someProp } = defineProps<{ open: boolean; someProp: string }>();
+</script>
+<template><Child :open :some-prop /></template>
+"#,
+        "Parent.vue",
+    );
+
+    for name in ["open", "someProp"] {
+        let prop = info
+            .component_props
+            .iter()
+            .find(|prop| prop.name == name)
+            .unwrap_or_else(|| panic!("prop {name} should be harvested"));
+        assert!(
+            prop.used_in_template,
+            "{name} is referenced via a value-less v-bind shorthand, so used_in_template should be true",
+        );
+    }
+}
+
+#[test]
+fn vue_vbind_longform_shorthand_credits_prop_usage() {
+    // The long-form `v-bind:open` value-less shorthand is equivalent to `:open`
+    // and must credit the prop the same way. Regression for #1641 (Vue side).
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+const { open } = defineProps<{ open: boolean }>();
+</script>
+<template><Child v-bind:open /></template>
+"#,
+        "Parent.vue",
+    );
+
+    let prop = info
+        .component_props
+        .iter()
+        .find(|prop| prop.name == "open")
+        .expect("open prop should be harvested");
+    assert!(
+        prop.used_in_template,
+        "open is referenced via a value-less v-bind:open, so used_in_template should be true",
+    );
+}
+
+#[test]
+fn vue_vbind_valued_does_not_credit_target_name() {
+    // With an explicit value the `v-bind` argument is the binding target, not a
+    // local reference: `:label="text"` references `text`, so a same-named prop
+    // `label` stays unused.
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+const { label } = defineProps<{ label: string }>();
+const text = 'hi';
+</script>
+<template><Child :label="text" /></template>
+"#,
+        "Parent.vue",
+    );
+
+    let prop = info
+        .component_props
+        .iter()
+        .find(|prop| prop.name == "label")
+        .expect("label prop should be harvested");
+    assert!(
+        !prop.used_in_template,
+        ":label=\"text\" references text, not the prop label, so it stays unused",
+    );
+}
+
+#[test]
+fn vue_style_vbind_credits_prop_usage() {
+    // A prop used ONLY via Vue SFC `<style> v-bind(prop)` (CSS v-bind) must count
+    // as template usage; an unused prop stays flagged. Regression for the
+    // unused-component-props style-v-bind gap.
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+const { accent, gap } = defineProps<{ accent: string; gap: string }>();
+</script>
+<template><div class="box" /></template>
+<style scoped>
+.box { color: v-bind(accent); }
+</style>
+"#,
+        "Styled.vue",
+    );
+
+    let accent = info
+        .component_props
+        .iter()
+        .find(|prop| prop.name == "accent")
+        .expect("accent prop should be harvested");
+    assert!(
+        accent.used_in_template,
+        "accent is referenced via <style> v-bind(accent), so used_in_template should be true",
+    );
+    let gap = info
+        .component_props
+        .iter()
+        .find(|prop| prop.name == "gap")
+        .expect("gap prop should be harvested");
+    assert!(
+        !gap.used_in_template,
+        "gap is referenced nowhere, so it stays unused",
+    );
+}
+
+#[test]
+fn vue_style_vbind_member_and_string_forms_credit_prop_usage() {
+    // `v-bind(props.color)` (member) and `v-bind('props.size')` (string form,
+    // whose content is itself a JS expression) both credit the prop.
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+const props = defineProps<{ color: string; size: string }>();
+</script>
+<template><div /></template>
+<style>
+.a { color: v-bind(props.color); }
+.b { width: v-bind('props.size'); }
+</style>
+"#,
+        "Styled.vue",
+    );
+
+    for name in ["color", "size"] {
+        let prop = info
+            .component_props
+            .iter()
+            .find(|prop| prop.name == name)
+            .unwrap_or_else(|| panic!("prop {name} should be harvested"));
+        assert!(
+            prop.used_in_template,
+            "{name} is referenced via a <style> v-bind member/string form, so used_in_template should be true",
+        );
+    }
+}
+
+#[test]
+fn vue_style_vbind_word_boundary_guard_does_not_credit() {
+    // `zv-bind(accent)` is not the `v-bind` function; the boundary guard must
+    // not credit `accent`, so the prop stays correctly flagged as unused.
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+const { accent } = defineProps<{ accent: string }>();
+</script>
+<template><div /></template>
+<style>
+.box { color: zv-bind(accent); }
+</style>
+"#,
+        "Styled.vue",
+    );
+
+    let accent = info
+        .component_props
+        .iter()
+        .find(|prop| prop.name == "accent")
+        .expect("accent prop should be harvested");
+    assert!(
+        !accent.used_in_template,
+        "zv-bind(accent) is not a v-bind() reference, so accent stays unused",
+    );
+}
+
+#[test]
+fn vue_style_vbind_multibyte_body_does_not_panic() {
+    // A multi-byte UTF-8 character in the style body must not break byte-offset
+    // scanning of `v-bind()`.
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+const { accent } = defineProps<{ accent: string }>();
+</script>
+<template><div /></template>
+<style>
+/* 日本語コメント */
+.box { color: v-bind(accent); }
+</style>
+"#,
+        "Styled.vue",
+    );
+
+    let accent = info
+        .component_props
+        .iter()
+        .find(|prop| prop.name == "accent")
+        .expect("accent prop should be harvested");
+    assert!(
+        accent.used_in_template,
+        "accent is referenced via v-bind(accent) after a multibyte comment",
+    );
+}
+
+#[test]
 fn vue_v_on_object_syntax_clears_unused_import_binding() {
     let info = parse_sfc(
         r#"
@@ -497,6 +704,64 @@ import { isActive } from './utils';
             .contains(&"isActive".to_string()),
         "attribute value expressions should mark isActive as used, got: {:?}",
         info.unused_import_bindings
+    );
+}
+
+#[test]
+fn svelte_shorthand_directive_credits_prop_usage() {
+    // Props referenced ONLY via `bind:`/`style:`/`class:` shorthand directives
+    // (where the directive name IS the prop reference) must count as template
+    // usage, otherwise `unused-component-props` false-flags them. Regression
+    // for #1641.
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+let { open = $bindable(), height = '200px', active = false } = $props();
+</script>
+<details bind:open>
+  <div style:height class:active>x</div>
+</details>
+"#,
+        "Modal.svelte",
+    );
+
+    for name in ["open", "height", "active"] {
+        let prop = info
+            .component_props
+            .iter()
+            .find(|prop| prop.name == name)
+            .unwrap_or_else(|| panic!("prop {name} should be harvested"));
+        assert!(
+            prop.used_in_template,
+            "{name} is referenced via a shorthand directive, so used_in_template should be true",
+        );
+    }
+}
+
+#[test]
+fn svelte_directive_value_does_not_credit_target_name() {
+    // With an explicit `={…}` value the directive name is a target (CSS
+    // property / class name), not a local reference. The value expression is
+    // credited; the bare target name is not, so a same-named prop stays unused.
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+let { height = '200px' } = $props();
+let h = '300px';
+</script>
+<div style:height={h}>x</div>
+"#,
+        "Box.svelte",
+    );
+
+    let prop = info
+        .component_props
+        .iter()
+        .find(|prop| prop.name == "height")
+        .expect("height prop should be harvested");
+    assert!(
+        !prop.used_in_template,
+        "style:height={{h}} references h, not the prop height, so it stays unused",
     );
 }
 
@@ -1283,6 +1548,130 @@ fn vue_inline_script_complexity_maps_columns_to_sfc_source() {
 }
 
 #[test]
+fn vue_template_control_flow_adds_synthetic_template_entry() {
+    // Nested `v-for` inside `v-if` plus a ternary binding must surface a
+    // `<template>` complexity entry alongside the script function, proving the
+    // template scan is wired into `parse_sfc_to_module` under `need_complexity`.
+    let info = parse_sfc_with_complexity(
+        r#"<script setup>
+const helper = () => { if (flag) return 1; return 0; };
+</script>
+<template>
+  <div v-if="user?.enabled && ready">
+    <li v-for="item in items" :key="item.id">
+      <badge :color="item.level > 3 ? 'red' : 'green'" />
+    </li>
+  </div>
+</template>
+"#,
+        "VueTemplateComplexity.vue",
+    );
+
+    let template = info
+        .complexity
+        .iter()
+        .find(|fc| fc.name == "<template>")
+        .expect("vue template control flow should add a <template> entry");
+    assert!(template.cyclomatic > 1, "{template:?}");
+    assert!(template.cognitive > 0, "{template:?}");
+    // The script function must still be present (template entry is additive).
+    assert!(info.complexity.iter().any(|fc| fc.name == "helper"));
+}
+
+#[test]
+fn svelte_template_control_flow_adds_synthetic_template_entry() {
+    let info = parse_sfc_with_complexity(
+        r"<script>
+const helper = () => { if (flag) return 1; return 0; };
+</script>
+{#if user?.enabled && ready}
+  {#each items as item (item.id)}
+    <p>{item.level > 3 ? 'high' : 'low'}</p>
+  {/each}
+{:else if fallback}
+  <p>fallback</p>
+{/if}
+",
+        "SvelteTemplateComplexity.svelte",
+    );
+
+    let template = info
+        .complexity
+        .iter()
+        .find(|fc| fc.name == "<template>")
+        .expect("svelte template control flow should add a <template> entry");
+    assert!(template.cyclomatic > 1, "{template:?}");
+    assert!(template.cognitive > 0, "{template:?}");
+    assert!(info.complexity.iter().any(|fc| fc.name == "helper"));
+}
+
+#[test]
+fn vue_markup_only_template_adds_no_synthetic_entry() {
+    let info = parse_sfc_with_complexity(
+        r#"<script setup>
+const greeting = 'hi';
+</script>
+<template><div class="x"><p>Static markup</p></div></template>
+"#,
+        "VueMarkupOnly.vue",
+    );
+
+    assert!(
+        !info.complexity.iter().any(|fc| fc.name == "<template>"),
+        "markup-only template must not add a synthetic entry: {:?}",
+        info.complexity
+    );
+}
+
+#[test]
+fn vue_script_control_flow_not_counted_in_template_entry() {
+    // The `<script>` has an if/for, but the template is trivial: there must be
+    // no `<template>` entry (proving script control flow is masked out and not
+    // double-counted by the template scan).
+    let info = parse_sfc_with_complexity(
+        r"<script setup>
+const helper = () => {
+  if (a && b) return go();
+  for (const i of items) use(i);
+  return 0;
+};
+</script>
+<template><p>Static</p></template>
+",
+        "VueScriptOnly.vue",
+    );
+
+    assert!(
+        !info.complexity.iter().any(|fc| fc.name == "<template>"),
+        "trivial template must not inherit script control flow: {:?}",
+        info.complexity
+    );
+    // The script function is still scored on its own.
+    let helper = info
+        .complexity
+        .iter()
+        .find(|fc| fc.name == "helper")
+        .expect("script function should still be scored");
+    assert!(helper.cyclomatic > 1, "{helper:?}");
+}
+
+#[test]
+fn svelte_malformed_template_does_not_panic_or_add_entry() {
+    let info = parse_sfc_with_complexity(
+        r"<script>const x = 1;</script>
+{#if a && </p>
+",
+        "SvelteMalformed.svelte",
+    );
+
+    assert!(
+        !info.complexity.iter().any(|fc| fc.name == "<template>"),
+        "malformed template must not add a recovered entry: {:?}",
+        info.complexity
+    );
+}
+
+#[test]
 fn svelte_typed_snippet_full_pipeline() {
     let info = parse_sfc(
         r#"
@@ -1448,5 +1837,355 @@ type Local = UseTypeOnly;
         !info
             .auto_import_candidates
             .contains(&"localOnly".to_string())
+    );
+}
+
+// unused-load-data-key Primitive B: SvelteKit route components credit the `data`
+// prop as a template-visible root so `{data.x}` / `{#each data.items as i}`
+// markup reads emit `data.<key>` member accesses for the cross-file join.
+
+#[test]
+fn sveltekit_data_prop_template_member_access_in_page_svelte() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+export let data;
+</script>
+<h1>{data.title}</h1>
+<p>{data.user.name}</p>
+"#,
+        "src/routes/+page.svelte",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "data" && access.member == "title"),
+        "template `data.title` should be recorded, got: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "data" && access.member == "user"),
+        "template `data.user` (nested) should record the first member, got: {:?}",
+        info.member_accesses
+    );
+}
+
+// Regression: a typed route `data` prop (`export let data: PageData`) must keep
+// its template `data.<key>` accesses keyed on `data`. The typed binding
+// (`data -> PageData`) otherwise remaps a component-attribute access
+// (`<Post postId={data.postId} />`) onto the generated `$types` alias
+// (`PageData.postId`), which made the cross-file load-data join miss the consumer
+// read and false-flag the `load()` return key. Caught on the `query` benchmark.
+#[test]
+fn sveltekit_typed_data_prop_template_attribute_stays_data_keyed() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import Post from '$lib/Post.svelte'
+import type { PageData } from './$types'
+export let data: PageData
+</script>
+<Post postId={data.postId} />
+"#,
+        "src/routes/[postId]/+page.svelte",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "data" && access.member == "postId"),
+        "typed-data component-attribute `data.postId` should be recorded, got: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn sveltekit_typed_data_prop_script_read_stays_data_keyed() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import type { PageData } from './$types'
+export let data: PageData
+const greeting = data.message
+</script>
+<h1>{greeting}</h1>
+"#,
+        "src/routes/+page.svelte",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "data" && access.member == "message"),
+        "typed-data script-side `data.message` should be recorded, got: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn sveltekit_data_prop_each_block_member_access_in_page_svelte() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+export let data;
+</script>
+{#each data.items as item}
+  <li>{item}</li>
+{/each}
+"#,
+        "src/routes/blog/+page.svelte",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "data" && access.member == "items"),
+        "`{{#each data.items as item}}` should record `data.items`, got: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn sveltekit_data_prop_credited_in_layout_svelte() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+export let data;
+</script>
+<nav>{data.menu}</nav>
+"#,
+        "src/routes/+layout.svelte",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "data" && access.member == "menu"),
+        "`+layout.svelte` should credit `data.menu`, got: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn sveltekit_data_prop_credited_in_layout_reset_page() {
+    // Layout-reset route components (`+page@.svelte`, `+page@named.svelte`,
+    // `+page@(group).svelte`, `+layout@named.svelte`) still receive the `load()`
+    // `data` prop, so they must be credited too.
+    for filename in [
+        "src/routes/marketing/+page@.svelte",
+        "src/routes/marketing/+layout@named.svelte",
+        "src/routes/promo/+page@(checkout).svelte",
+    ] {
+        let info = parse_sfc(
+            r#"
+<script lang="ts">
+export let data;
+</script>
+<h1>{data.title}</h1>
+"#,
+            filename,
+        );
+
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "data" && access.member == "title"),
+            "layout-reset route `{filename}` should credit `data.title`, got: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn sveltekit_data_credit_excludes_error_and_non_route_plus_files() {
+    // `+error.svelte` receives `$page.error`, not the `load()` `data` prop, and a
+    // `+pageHelper.svelte` is not a SvelteKit route file, so neither is credited.
+    for filename in ["src/routes/+error.svelte", "src/routes/+pageHelper.svelte"] {
+        let info = parse_sfc(
+            r#"
+<script lang="ts">
+export let data;
+</script>
+<h1>{data.title}</h1>
+"#,
+            filename,
+        );
+
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "data"),
+            "`{filename}` must not credit `data.*`, got: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn sveltekit_data_prop_not_credited_in_non_route_svelte() {
+    // A non-route component's `data` is a parent-passed prop, NOT load() data, so
+    // crediting it as LOAD DATA would be semantically wrong. Route-narrowing keeps
+    // the load-data credit off ordinary `.svelte` files.
+    //
+    // Since W1.1's `$props()` harvest, the `data` prop IS harvested as an ordinary
+    // `ComponentProp` and credited as a template root, so `{data.title}` now emits
+    // a `data.title` member access keyed on `data`. That access is inert: the
+    // `unused-load-data-key` detector's sibling channel only reads `data.<key>`
+    // from the `+page.svelte` SIBLING of a `load()` producer's route directory, so
+    // a `src/lib/Card.svelte` is never consumed by the load-data join. The
+    // load-data-specific signal (`has_load_data_whole_use`) must stay off here.
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+let { data } = $props();
+</script>
+<h1>{data.title}</h1>
+"#,
+        "src/lib/Card.svelte",
+    );
+
+    // The prop is harvested generically (W1.1), so the template member access is
+    // present and keyed on `data` (inert for the route-pinned load-data join).
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "data" && access.member == "title"),
+        "non-route `data` prop is harvested generically and credited in markup, got: {:?}",
+        info.member_accesses
+    );
+    // The SvelteKit load-data-specific whole-`data` abstain signal must NOT fire on
+    // a non-route component (it is gated to route components via `credit_load_data`).
+    assert!(
+        !info.has_load_data_whole_use,
+        "non-route `Card.svelte` must not set the load-data whole-use signal"
+    );
+}
+
+#[test]
+fn sveltekit_page_store_data_key_recovered_in_script_and_template() {
+    // unused-load-data-key Primitive C cross-context contract: a SvelteKit global
+    // page-store `data` read recovers the nested `page.data.<key>` member access in
+    // BOTH the component `<script>` (Svelte 5 `$app/state`) and the markup
+    // (`{$page.data.X}` Svelte 4 store / `{page.data.X}` Svelte 5 rune). The script
+    // side already emitted the dotted object via the visitor's recursive
+    // member-name builder; this locks that contract and the template recovery.
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import { page } from '$app/state';
+const id = page.data.session;
+</script>
+<h1>{page.data.title}</h1>
+"#,
+        "src/lib/Header.svelte",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "page.data" && a.member == "session"),
+        "script `page.data.session` should be recorded, got: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "page.data" && a.member == "title"),
+        "template `page.data.title` should be recovered, got: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn route_component_template_data_prop_pass_is_whole_use() {
+    // FP-1: `<Child data={data} />` in a route component passes the whole `data`
+    // prop opaquely, so the load-data detector must abstain on this route.
+    let source =
+        "<script lang=\"ts\">\n  let { data } = $props();\n</script>\n<Child data={data} />";
+    let info = parse_sfc(source, "+page.svelte");
+    assert!(
+        info.has_load_data_whole_use,
+        "data={{data}} in a route component is a whole-data use"
+    );
+}
+
+#[test]
+fn route_component_template_data_spread_is_whole_use() {
+    // FP-1: `{...data}` template spread passes the whole `data` prop opaquely.
+    let source = "<script lang=\"ts\">\n  let { data } = $props();\n</script>\n<Child {...data} />";
+    let info = parse_sfc(source, "+page.svelte");
+    assert!(
+        info.has_load_data_whole_use,
+        "{{...data}} template spread is a whole-data use"
+    );
+}
+
+#[test]
+fn route_component_template_member_access_is_not_whole_use() {
+    // `{data.title}` is a credited member access, NOT a whole-data use.
+    let source =
+        "<script lang=\"ts\">\n  let { data } = $props();\n</script>\n<h1>{data.title}</h1>";
+    let info = parse_sfc(source, "+page.svelte");
+    assert!(
+        !info.has_load_data_whole_use,
+        "data.title member access must not set the whole-data-use flag"
+    );
+}
+
+#[test]
+fn vue_v_for_over_props_items_credits_element_class_members() {
+    // Issue #1711: `v-for="(util, i) of props.items"` where the prop `items` is
+    // typed `Util[]` via `defineProps<{ items: Util[] }>()`. The loop item must
+    // be typed to the element class `Util`, so `util.id` / `util.getValue()`
+    // credit `Util.id` / `Util.getValue` instead of reporting unused-class-member.
+    let source = r#"
+<script setup lang="ts">
+import type { Util } from './utils/Util'
+const props = defineProps<{ items: Util[] }>()
+</script>
+<template>
+  <div v-for="(util, i) of props.items" :key="i">
+    <span>{{ util.id }}</span>
+    <span>{{ util.getValue() }}</span>
+  </div>
+</template>
+"#;
+    let info = parse_sfc(source, "App.vue");
+
+    for member in ["id", "getValue"] {
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "Util" && access.member == member),
+            "props.items v-for item `util.{member}` should map to Util.{member}, found: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn vue_v_for_over_props_items_untyped_field_leaves_item_unmapped() {
+    // Neuter check: a prop field typed as a non-class array (`number[]`) yields
+    // no element class, so the loop item stays unmapped and its member accesses
+    // credit no user class (over-credit only, never a false positive).
+    let source = r#"
+<script setup lang="ts">
+const props = defineProps<{ items: number[] }>()
+</script>
+<template>
+  <div v-for="(util, i) of props.items" :key="i">{{ util.toFixed() }}</div>
+</template>
+"#;
+    let info = parse_sfc(source, "App.vue");
+
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Util"),
+        "a non-class array prop field must not type the loop item, found: {:?}",
+        info.member_accesses
     );
 }

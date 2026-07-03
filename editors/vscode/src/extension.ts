@@ -6,6 +6,7 @@ import {
   countCheckIssues,
   countDuplicationGroups,
 } from "./analysis-utils.js";
+import { shouldAcceptLspAnalysisComplete } from "./analysisNotification.js";
 import { startClient, stopClient, restartClient } from "./client.js";
 import { createSingleFlight } from "./analysis-single-flight.js";
 import {
@@ -33,6 +34,7 @@ import {
   runAudit,
   runFix,
   runHealthAnalysis,
+  runInspectActiveFile,
   runSecurityAnalysis,
   runWorkspaces,
 } from "./commands.js";
@@ -127,7 +129,7 @@ const AUDIT_SAVE_DEBOUNCE_MS = 600;
  */
 const MUTED_ALL_NUDGE_KEY = "plow.mutedAllNudgeShown.v1";
 
-let outputChannel: vscode.OutputChannel;
+let outputChannel: vscode.LogOutputChannel;
 let lastCheckResult: PlowCheckResult | null = null;
 let lastDupesResult: PlowDupesResult | null = null;
 let lastHealthResult: HealthOutput | null = null;
@@ -158,7 +160,7 @@ export interface ExtensionApi {
 }
 
 export const activate = async (context: vscode.ExtensionContext): Promise<ExtensionApi> => {
-  outputChannel = vscode.window.createOutputChannel("Plow");
+  outputChannel = vscode.window.createOutputChannel("Plow", { log: true });
   context.subscriptions.push(outputChannel);
 
   const statusBar = createStatusBar();
@@ -252,6 +254,9 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // (a restart builds a fresh client; a handler bound only to the first client
   // would stop firing and freeze the status bar after the first restart).
   const onAnalysisComplete = (params: AnalysisCompleteParams): void => {
+    if (!shouldAcceptLspAnalysisComplete(vscode.workspace.textDocuments)) {
+      return;
+    }
     updateStatusBarFromLsp(params);
     void vscode.commands.executeCommand("setContext", "plow.hasAnalyzed", true);
   };
@@ -745,6 +750,11 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   );
   context.subscriptions.push(
     vscode.commands.registerCommand("plow.analyzeSecurity", runSecurityAnalysisCommand),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("plow.inspectActiveFile", () =>
+      runInspectActiveFile(context, outputChannel),
+    ),
   );
 
   // Re-run the sidebar after a scope change so the tree views and status bar

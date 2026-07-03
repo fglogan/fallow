@@ -60,39 +60,72 @@ enum KeyResolution {
 /// Returns empty unless the project declares `vue` / `@vue/runtime-core` /
 /// `svelte`, or if any reachable module has an unknowable-key provide (see the
 /// module docs for the abstain ladder).
-#[must_use]
-pub fn find_unprovided_injects(
-    graph: &ModuleGraph,
-    resolved_modules: &[ResolvedModule],
-    modules: &[ModuleInfo],
-    declared_deps: &FxHashSet<String>,
-    public_api_entry_points: &FxHashSet<FileId>,
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-) -> Vec<UnprovidedInject> {
-    let vue = declared_deps.contains("vue") || declared_deps.contains("@vue/runtime-core");
-    let svelte = declared_deps.contains("svelte");
-    if !vue && !svelte {
-        return Vec::new();
-    }
+#[derive(Clone, Copy)]
+pub(super) struct UnprovidedInjectInput<'a> {
+    pub(super) graph: &'a ModuleGraph,
+    pub(super) resolved_modules: &'a [ResolvedModule],
+    pub(super) modules: &'a [ModuleInfo],
+    pub(super) declared_deps: &'a FxHashSet<String>,
+    pub(super) public_api_entry_points: &'a FxHashSet<FileId>,
+    pub(super) suppressions: &'a SuppressionContext<'a>,
+    pub(super) line_offsets_by_file: &'a LineOffsetsMap<'a>,
+}
 
-    // Dynamic-provide abstain: a single unknowable-key provide anywhere means a
-    // surviving inject finding could be a false positive, so abstain wholesale.
-    if modules.iter().any(|module| module.has_dynamic_provide) {
+#[must_use]
+pub fn find_unprovided_injects(input: UnprovidedInjectInput<'_>) -> Vec<UnprovidedInject> {
+    if !unprovided_inject_active(input) {
         return Vec::new();
     }
 
     let modules_by_id: FxHashMap<FileId, &ModuleInfo> =
-        modules.iter().map(|m| (m.file_id, m)).collect();
-    let path_by_id: FxHashMap<FileId, &std::path::Path> = graph
+        input.modules.iter().map(|m| (m.file_id, m)).collect();
+    let path_by_id: FxHashMap<FileId, &std::path::Path> = input
+        .graph
         .modules
         .iter()
         .map(|module| (module.file_id, module.path.as_path()))
         .collect();
 
-    // Pass 1: build the provided-key set liberally.
+    let provided = build_provided_key_set(input, &modules_by_id);
+    let entry_star_targets =
+        entry_point_star_re_export_targets(input.graph, input.public_api_entry_points);
+
+    let scan = InjectScanContext {
+        input,
+        modules_by_id: &modules_by_id,
+        path_by_id: &path_by_id,
+        provided: &provided,
+        entry_star_targets: &entry_star_targets,
+    };
+    collect_unprovided_inject_findings(&scan)
+}
+
+/// Whether the inject detector runs: a DI dependency is declared and no reachable
+/// module has an unknowable-key (dynamic) provide (which would abstain wholesale).
+fn unprovided_inject_active(input: UnprovidedInjectInput<'_>) -> bool {
+    let vue =
+        input.declared_deps.contains("vue") || input.declared_deps.contains("@vue/runtime-core");
+    let svelte = input.declared_deps.contains("svelte");
+    let angular = input.declared_deps.contains("@angular/core");
+    if !vue && !svelte && !angular {
+        return false;
+    }
+    // Dynamic-provide abstain: a single unknowable-key provide anywhere means a
+    // surviving inject finding could be a false positive, so abstain wholesale.
+    !input
+        .modules
+        .iter()
+        .any(|module| module.has_dynamic_provide)
+}
+
+/// Pass 1: build the provided-key set liberally (over-crediting a provided key
+/// only suppresses a finding, never creates one).
+fn build_provided_key_set(
+    input: UnprovidedInjectInput<'_>,
+    modules_by_id: &FxHashMap<FileId, &ModuleInfo>,
+) -> FxHashSet<ExportKey> {
     let mut provided: FxHashSet<ExportKey> = FxHashSet::default();
-    for resolved in resolved_modules {
+    for resolved in input.resolved_modules {
         let Some(module) = modules_by_id.get(&resolved.file_id) else {
             continue;
         };
@@ -108,7 +141,12 @@ pub fn find_unprovided_injects(
             if site.role != DiRole::Provide {
                 continue;
             }
-            match resolve_key(resolved, graph, &local_to_export_keys, &site.key_local) {
+            match resolve_key(
+                resolved,
+                input.graph,
+                &local_to_export_keys,
+                &site.key_local,
+            ) {
                 KeyResolution::Internal(keys) | KeyResolution::LocalOnly(keys) => {
                     provided.extend(keys);
                 }
@@ -116,13 +154,23 @@ pub fn find_unprovided_injects(
             }
         }
     }
+    provided
+}
 
-    let entry_star_targets = entry_point_star_re_export_targets(graph, public_api_entry_points);
+/// Shared read-only state threaded through the inject (Pass 2) scan.
+struct InjectScanContext<'a> {
+    input: UnprovidedInjectInput<'a>,
+    modules_by_id: &'a FxHashMap<FileId, &'a ModuleInfo>,
+    path_by_id: &'a FxHashMap<FileId, &'a std::path::Path>,
+    provided: &'a FxHashSet<ExportKey>,
+    entry_star_targets: &'a FxHashSet<FileId>,
+}
 
-    // Pass 2: emit a finding for each inject whose key is provided nowhere.
+/// Pass 2: emit a finding for each inject site whose key is provided nowhere.
+fn collect_unprovided_inject_findings(scan: &InjectScanContext<'_>) -> Vec<UnprovidedInject> {
     let mut findings = Vec::new();
-    for resolved in resolved_modules {
-        let Some(module) = modules_by_id.get(&resolved.file_id) else {
+    for resolved in scan.input.resolved_modules {
+        let Some(module) = scan.modules_by_id.get(&resolved.file_id) else {
             continue;
         };
         if module
@@ -137,47 +185,113 @@ pub fn find_unprovided_injects(
             if site.role != DiRole::Inject {
                 continue;
             }
-            let canonical =
-                match resolve_key(resolved, graph, &local_to_export_keys, &site.key_local) {
-                    // External: the provide may live inside the package; abstain.
-                    KeyResolution::External => continue,
-                    KeyResolution::Internal(keys) | KeyResolution::LocalOnly(keys) => keys,
-                };
-            if canonical.is_empty() {
-                continue;
-            }
-            // Matched by a provide somewhere in the project.
-            if canonical.iter().any(|key| provided.contains(key)) {
-                continue;
-            }
-            // Public-API abstain: the consumer of this package provides the key.
-            if canonical.iter().any(|key| {
-                key_is_public_api(graph, key, public_api_entry_points, &entry_star_targets)
-            }) {
-                continue;
-            }
-
-            let (line, col) =
-                byte_offset_to_line_col(line_offsets_by_file, resolved.file_id, site.span_start);
-            if suppressions.is_suppressed(resolved.file_id, line, IssueKind::UnprovidedInject)
-                || suppressions.is_file_suppressed(resolved.file_id, IssueKind::UnprovidedInject)
+            if let Some(finding) = evaluate_inject_site(scan, resolved, &local_to_export_keys, site)
             {
-                continue;
+                findings.push(finding);
             }
-            let Some(path) = path_by_id.get(&resolved.file_id) else {
-                continue;
-            };
-            findings.push(UnprovidedInject {
-                path: path.to_path_buf(),
-                key_name: site.key_local.clone(),
-                framework: framework_str(site.framework).to_string(),
-                line,
-                col,
-            });
         }
     }
-
     findings
+}
+
+/// Evaluate one inject site against the full abstain ladder (external key,
+/// empty canonical, Angular token gate, provided-match, public-API, suppression),
+/// returning a finding only when every abstain is cleared.
+fn evaluate_inject_site(
+    scan: &InjectScanContext<'_>,
+    resolved: &ResolvedModule,
+    local_to_export_keys: &FxHashMap<&str, Vec<ExportKey>>,
+    site: &plow_types::extract::DiKeySite,
+) -> Option<UnprovidedInject> {
+    if !inject_site_has_unprovided_key(scan, resolved, local_to_export_keys, site) {
+        return None;
+    }
+
+    let (line, col) = byte_offset_to_line_col(
+        scan.input.line_offsets_by_file,
+        resolved.file_id,
+        site.span_start,
+    );
+    if inject_site_suppressed(scan, resolved.file_id, line) {
+        return None;
+    }
+    let path = scan.path_by_id.get(&resolved.file_id)?;
+    Some(build_unprovided_inject(path, site, line, col))
+}
+
+fn inject_site_has_unprovided_key(
+    scan: &InjectScanContext<'_>,
+    resolved: &ResolvedModule,
+    local_to_export_keys: &FxHashMap<&str, Vec<ExportKey>>,
+    site: &plow_types::extract::DiKeySite,
+) -> bool {
+    let canonical = match resolve_key(
+        resolved,
+        scan.input.graph,
+        local_to_export_keys,
+        &site.key_local,
+    ) {
+        // External: the provide may live inside the package; abstain.
+        KeyResolution::External => return false,
+        KeyResolution::Internal(keys) | KeyResolution::LocalOnly(keys) => keys,
+    };
+    if canonical.is_empty() {
+        return false;
+    }
+    // Angular InjectionToken FP gate: only a USER `InjectionToken` is in scope. A
+    // class / framework token (`inject(MyService)`) is FP-prone via
+    // `providedIn: 'root'` and third-party `provideX()`, so abstain unless at
+    // least one canonical key is a known InjectionToken (its defining module
+    // lists the export name in `injection_tokens`). Vue / Svelte sites skip it.
+    if site.framework == DiFramework::Angular
+        && !canonical
+            .iter()
+            .any(|key| is_known_injection_token(scan.modules_by_id, key))
+    {
+        return false;
+    }
+    // Matched by a provide somewhere in the project.
+    if canonical.iter().any(|key| scan.provided.contains(key)) {
+        return false;
+    }
+    // Public-API abstain: the consumer of this package provides the key.
+    if canonical.iter().any(|key| {
+        key_is_public_api(
+            scan.input.graph,
+            key,
+            scan.input.public_api_entry_points,
+            scan.entry_star_targets,
+        )
+    }) {
+        return false;
+    }
+
+    true
+}
+
+fn inject_site_suppressed(scan: &InjectScanContext<'_>, file_id: FileId, line: u32) -> bool {
+    scan.input
+        .suppressions
+        .is_suppressed(file_id, line, IssueKind::UnprovidedInject)
+        || scan
+            .input
+            .suppressions
+            .is_file_suppressed(file_id, IssueKind::UnprovidedInject)
+}
+
+fn build_unprovided_inject(
+    path: &std::path::Path,
+    site: &plow_types::extract::DiKeySite,
+    line: u32,
+    col: u32,
+) -> UnprovidedInject {
+    UnprovidedInject {
+        path: path.to_path_buf(),
+        key_name: site.key_local.clone(),
+        framework: framework_str(site.framework).to_string(),
+        line,
+        col,
+    }
 }
 
 /// Resolve a key identifier to its cross-file identity, distinguishing an
@@ -244,6 +358,21 @@ fn key_is_public_api(
         || export_has_entry_point_re_export_reference(graph, export, public_api_entry_points)
 }
 
+/// Whether a canonical export key names a known Angular `InjectionToken`: the
+/// key's defining module lists the export name (`.0`) in `injection_tokens`. This
+/// is the load-bearing FP gate that keeps class / framework tokens out of scope.
+fn is_known_injection_token(
+    modules_by_id: &FxHashMap<FileId, &ModuleInfo>,
+    key: &ExportKey,
+) -> bool {
+    modules_by_id.get(&key.file_id).is_some_and(|module| {
+        module
+            .injection_tokens
+            .iter()
+            .any(|(token_name, _interface)| *token_name == key.export_name)
+    })
+}
+
 fn export_name_matches(name: &ExportName, target: &str) -> bool {
     match name {
         ExportName::Named(n) => n == target,
@@ -255,5 +384,6 @@ const fn framework_str(framework: DiFramework) -> &'static str {
     match framework {
         DiFramework::Vue => "vue",
         DiFramework::Svelte => "svelte",
+        DiFramework::Angular => "angular",
     }
 }

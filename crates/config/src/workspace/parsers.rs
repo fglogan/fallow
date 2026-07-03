@@ -250,50 +250,17 @@ pub(super) fn expand_workspace_glob_with_diagnostics(
         Ok(paths) => {
             let mut results = Vec::new();
             for path in paths.filter_map(Result::ok) {
-                if !path.is_dir() {
-                    continue;
-                }
-                if path.components().any(|c| c.as_os_str() == "node_modules") {
-                    continue;
-                }
-                if path.join("package.json").exists() {
-                    if let Some(cp) = dunce::canonicalize(&path)
-                        .ok()
-                        .filter(|cp| cp.starts_with(canonical_root))
-                    {
-                        results.push((path, cp));
-                    }
-                    continue;
-                }
-                // The glob matched a bare intermediate directory with no
-                // package.json (e.g. `packages/themes` for `packages/*`, where the
-                // real package lives at `packages/themes/<pkg>`). Descend one level
-                // and recover any child that is itself a named package, so a file
-                // under it is attributed to its own manifest instead of falling
-                // back to the project root. See issue #842.
-                let recovered = recover_nested_packages(&path, canonical_root, ignore_patterns);
-                if recovered.is_empty() {
-                    maybe_emit_glob_no_pkg_diag(
+                collect_globbed_workspace_dir(
+                    path,
+                    &mut GlobbedWorkspaceContext {
                         root,
                         raw_pattern,
-                        &path,
+                        canonical_root,
                         ignore_patterns,
+                        results: &mut results,
                         diagnostics,
-                    );
-                } else {
-                    // The user's glob is one level too shallow: it named the bare
-                    // grouping directory, not the package below it. Recovery keeps
-                    // the deep package discovered, but nudge the user toward the
-                    // glob the package manager itself would need.
-                    tracing::debug!(
-                        "workspace glob '{raw_pattern}' matched '{}' which has no package.json; \
-                         recovered {} nested package(s) one level down. Consider '{raw_pattern}/*' \
-                         so npm/pnpm/yarn resolve them as workspace members too.",
-                        path.display(),
-                        recovered.len()
-                    );
-                    results.extend(recovered);
-                }
+                    },
+                );
             }
             results
         }
@@ -301,6 +268,60 @@ pub(super) fn expand_workspace_glob_with_diagnostics(
             tracing::warn!("invalid workspace glob pattern '{raw_pattern}': {e}");
             Vec::new()
         }
+    }
+}
+
+struct GlobbedWorkspaceContext<'a, 'b> {
+    root: &'a Path,
+    raw_pattern: &'a str,
+    canonical_root: &'a Path,
+    ignore_patterns: &'a globset::GlobSet,
+    results: &'b mut Vec<(PathBuf, PathBuf)>,
+    diagnostics: &'b mut Vec<WorkspaceDiagnostic>,
+}
+
+/// Process one non-recursive glob match: keep package directories, recover named
+/// packages under a bare grouping directory, or emit a no-package.json
+/// diagnostic. See issue #842 for the recovery path.
+fn collect_globbed_workspace_dir(path: PathBuf, ctx: &mut GlobbedWorkspaceContext<'_, '_>) {
+    if !path.is_dir() {
+        return;
+    }
+    if path.components().any(|c| c.as_os_str() == "node_modules") {
+        return;
+    }
+    if path.join("package.json").exists() {
+        if let Some(cp) = dunce::canonicalize(&path)
+            .ok()
+            .filter(|cp| cp.starts_with(ctx.canonical_root))
+        {
+            ctx.results.push((path, cp));
+        }
+        return;
+    }
+    let recovered = recover_nested_packages(&path, ctx.canonical_root, ctx.ignore_patterns);
+    if recovered.is_empty() {
+        maybe_emit_glob_no_pkg_diag(
+            ctx.root,
+            ctx.raw_pattern,
+            &path,
+            ctx.ignore_patterns,
+            ctx.diagnostics,
+        );
+    } else {
+        let raw_pattern = ctx.raw_pattern;
+        // The user's glob is one level too shallow: it named the bare grouping
+        // directory, not the package below it. Recovery keeps the deep package
+        // discovered, but nudge the user toward the glob the package manager
+        // itself would need.
+        tracing::debug!(
+            "workspace glob '{raw_pattern}' matched '{}' which has no package.json; \
+             recovered {} nested package(s) one level down. Consider '{raw_pattern}/*' \
+             so npm/pnpm/yarn resolve them as workspace members too.",
+            path.display(),
+            recovered.len()
+        );
+        ctx.results.extend(recovered);
     }
 }
 
@@ -440,14 +461,16 @@ fn expand_recursive_workspace_pattern(
 
     let mut results = Vec::new();
     walk_workspace_dirs(
-        root,
-        &base_dir,
         raw_pattern,
-        &matcher,
-        canonical_root,
-        ignore_patterns,
-        &mut results,
-        diagnostics,
+        &base_dir,
+        &mut WorkspaceDirWalkInput {
+            root,
+            matcher: &matcher,
+            canonical_root,
+            ignore_patterns,
+            results: &mut results,
+            diagnostics,
+        },
     );
     results
 }
@@ -458,20 +481,16 @@ fn expand_recursive_workspace_pattern(
 /// Glob-matched directories without `package.json` are surfaced as
 /// `glob-matched-no-package-json` diagnostics unless they are in the
 /// conventional skip list or covered by `ignore_patterns`.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "internal recursion that threads diagnostic accumulator + ignore globset; refactoring into a context struct would obscure the recursive call site"
-)]
-fn walk_workspace_dirs(
-    root: &Path,
-    dir: &Path,
-    raw_pattern: &str,
-    matcher: &glob::Pattern,
-    canonical_root: &Path,
-    ignore_patterns: &globset::GlobSet,
-    results: &mut Vec<(PathBuf, PathBuf)>,
-    diagnostics: &mut Vec<WorkspaceDiagnostic>,
-) {
+struct WorkspaceDirWalkInput<'a> {
+    root: &'a Path,
+    matcher: &'a glob::Pattern,
+    canonical_root: &'a Path,
+    ignore_patterns: &'a globset::GlobSet,
+    results: &'a mut Vec<(PathBuf, PathBuf)>,
+    diagnostics: &'a mut Vec<WorkspaceDiagnostic>,
+}
+
+fn walk_workspace_dirs(raw_pattern: &str, dir: &Path, input: &mut WorkspaceDirWalkInput<'_>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -484,27 +503,24 @@ fn walk_workspace_dirs(
         if name == "node_modules" || name == ".git" {
             continue;
         }
-        if matcher.matches_path(&path) {
+        if input.matcher.matches_path(&path) {
             if path.join("package.json").exists() {
                 if let Ok(cp) = dunce::canonicalize(&path)
-                    && cp.starts_with(canonical_root)
+                    && cp.starts_with(input.canonical_root)
                 {
-                    results.push((path.clone(), cp));
+                    input.results.push((path.clone(), cp));
                 }
             } else {
-                maybe_emit_glob_no_pkg_diag(root, raw_pattern, &path, ignore_patterns, diagnostics);
+                maybe_emit_glob_no_pkg_diag(
+                    input.root,
+                    raw_pattern,
+                    &path,
+                    input.ignore_patterns,
+                    input.diagnostics,
+                );
             }
         }
-        walk_workspace_dirs(
-            root,
-            &path,
-            raw_pattern,
-            matcher,
-            canonical_root,
-            ignore_patterns,
-            results,
-            diagnostics,
-        );
+        walk_workspace_dirs(raw_pattern, &path, input);
     }
 }
 

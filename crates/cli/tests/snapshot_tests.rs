@@ -7,22 +7,127 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use plow_cli::health_types::*;
+use plow_api::{
+    build_codeclimate, build_duplication_codeclimate, build_health_codeclimate,
+    build_health_sarif as build_api_health_sarif, build_sarif as build_api_sarif,
+};
 use plow_cli::report::{
-    build_codeclimate, build_compact_lines, build_duplication_codeclimate,
-    build_duplication_markdown, build_grouped_duplication_json, build_health_codeclimate,
-    build_health_json, build_health_markdown, build_health_sarif, build_json, build_markdown,
-    build_sarif,
+    build_compact_lines, build_duplication_markdown, build_health_markdown, build_markdown,
     ci::{
         pr_comment::{Provider, issues_from_codeclimate, render_pr_comment},
         review::render_review_envelope,
     },
-    codeclimate_issues_to_value,
 };
 use plow_config::RulesConfig;
-use plow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
-use plow_core::extract::MemberKind;
-use plow_core::results::*;
+use plow_output::codeclimate_issues_to_value;
+use plow_output::*;
+use plow_types::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
+use plow_types::extract::MemberKind;
+use plow_types::output_dead_code::*;
+use plow_types::results::*;
+
+fn sarif_rule(id: &str, fallback_short: &str, level: &str) -> serde_json::Value {
+    let def = plow_cli::explain::rule_by_id(id);
+    let short_description = def.map_or(fallback_short, |def| def.short);
+    let full_description = def.map(|def| def.full);
+    let help_uri = def.map(plow_cli::explain::rule_docs_url);
+    build_sarif_rule(SarifRuleInput {
+        id,
+        short_description,
+        level,
+        full_description,
+        help_uri: help_uri.as_deref(),
+    })
+}
+
+fn build_sarif(results: &AnalysisResults, root: &Path, rules: &RulesConfig) -> serde_json::Value {
+    build_api_sarif(results, root, rules, &sarif_rule)
+}
+
+fn build_health_sarif(report: &HealthReport, root: &Path) -> serde_json::Value {
+    build_api_health_sarif(report, root, &sarif_rule)
+}
+
+fn api_check_json_document(
+    results: &AnalysisResults,
+    root: &Path,
+    elapsed: Duration,
+) -> Result<serde_json::Value, serde_json::Error> {
+    plow_api::serialize_check_json(plow_api::CheckJsonOutputInput {
+        results,
+        root,
+        elapsed,
+        config_fixable: true,
+        meta: None,
+        extras: plow_api::CheckJsonExtraOutputs::default(),
+        workspace_diagnostics: Vec::new(),
+        next_steps: build_dead_code_next_steps(DeadCodeNextStepsInput {
+            suggestions_enabled: true,
+            results,
+            root,
+            offer_setup: false,
+            impact_digest: None,
+            workspace_ref: None,
+            audit_changed: false,
+        }),
+        envelope_mode: RootEnvelopeMode::Tagged,
+        telemetry_analysis_run_id: None,
+    })
+}
+
+fn api_health_json_document(
+    report: &HealthReport,
+    root: &Path,
+    elapsed: Duration,
+    explain: bool,
+) -> Result<serde_json::Value, serde_json::Error> {
+    plow_api::serialize_health_report_json(plow_api::HealthJsonReportInput {
+        report: report.clone(),
+        root,
+        elapsed,
+        explain,
+        grouped_by: None,
+        groups: None,
+        workspace_diagnostics: Vec::new(),
+        next_steps: build_health_next_steps(build_health_next_steps_input(
+            report, true, false, None, false,
+        )),
+        envelope_mode: RootEnvelopeMode::Tagged,
+        telemetry_analysis_run_id: None,
+    })
+}
+
+fn api_grouped_duplication_json_document(
+    report: &DuplicationReport,
+    grouping: &plow_api::DuplicationGrouping,
+    root: &Path,
+    elapsed: Duration,
+    explain: bool,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let payload = plow_api::DupesReportPayload::from_report(report);
+    let fingerprints: Vec<&str> = payload
+        .clone_groups
+        .iter()
+        .map(|group| group.fingerprint.as_str())
+        .collect();
+    plow_api::serialize_grouped_duplication_json(plow_api::GroupedDuplicationJsonOutputInput {
+        report,
+        grouping,
+        root,
+        elapsed,
+        meta: explain.then(dupes_meta),
+        workspace_diagnostics: Vec::new(),
+        next_steps: build_dupes_next_steps(DupesNextStepsInput {
+            suggestions_enabled: true,
+            clone_fingerprints: &fingerprints,
+            offer_setup: false,
+            impact_digest: None,
+            audit_changed: false,
+        }),
+        envelope_mode: RootEnvelopeMode::Tagged,
+        telemetry_analysis_run_id: None,
+    })
+}
 
 /// Build sample `AnalysisResults` with one issue of each type for consistent snapshots.
 #[expect(
@@ -180,8 +285,8 @@ fn sample_results(root: &Path) -> AnalysisResults {
             kind: ReExportCycleKind::MultiNode,
         }));
     r.unused_catalog_entries
-        .push(plow_core::results::UnusedCatalogEntryFinding::with_actions(
-            plow_core::results::UnusedCatalogEntry {
+        .push(UnusedCatalogEntryFinding::with_actions(
+            UnusedCatalogEntry {
                 entry_name: "is-even".to_string(),
                 catalog_name: "default".to_string(),
                 path: PathBuf::from("pnpm-workspace.yaml"),
@@ -190,8 +295,8 @@ fn sample_results(root: &Path) -> AnalysisResults {
             },
         ));
     r.unused_catalog_entries
-        .push(plow_core::results::UnusedCatalogEntryFinding::with_actions(
-            plow_core::results::UnusedCatalogEntry {
+        .push(UnusedCatalogEntryFinding::with_actions(
+            UnusedCatalogEntry {
                 entry_name: "old-thing".to_string(),
                 catalog_name: "legacy".to_string(),
                 path: PathBuf::from("pnpm-workspace.yaml"),
@@ -200,33 +305,30 @@ fn sample_results(root: &Path) -> AnalysisResults {
             },
         ));
     r.empty_catalog_groups
-        .push(plow_core::results::EmptyCatalogGroupFinding::with_actions(
-            plow_core::results::EmptyCatalogGroup {
-                catalog_name: "react17".to_string(),
-                path: PathBuf::from("pnpm-workspace.yaml"),
-                line: 10,
-            },
-        ));
-    r.unresolved_catalog_references.push(
-        plow_core::results::UnresolvedCatalogReferenceFinding::with_actions(
-            plow_core::results::UnresolvedCatalogReference {
+        .push(EmptyCatalogGroupFinding::with_actions(EmptyCatalogGroup {
+            catalog_name: "react17".to_string(),
+            path: PathBuf::from("pnpm-workspace.yaml"),
+            line: 10,
+        }));
+    r.unresolved_catalog_references
+        .push(UnresolvedCatalogReferenceFinding::with_actions(
+            UnresolvedCatalogReference {
                 entry_name: "old-react".to_string(),
                 catalog_name: "react17".to_string(),
                 path: root.join("packages/app/package.json"),
                 line: 14,
                 available_in_catalogs: vec!["react18".to_string()],
             },
-        ),
-    );
+        ));
     r.unused_dependency_overrides.push(
-        plow_core::results::UnusedDependencyOverrideFinding::with_actions(
-            plow_core::results::UnusedDependencyOverride {
+        UnusedDependencyOverrideFinding::with_actions(
+            UnusedDependencyOverride {
                 raw_key: "axios".to_string(),
                 target_package: "axios".to_string(),
                 parent_package: None,
                 version_constraint: None,
                 version_range: "^1.6.0".to_string(),
-                source: plow_core::results::DependencyOverrideSource::PnpmWorkspaceYaml,
+                source: DependencyOverrideSource::PnpmWorkspaceYaml,
                 path: root.join("pnpm-workspace.yaml"),
                 line: 9,
                 hint: Some(
@@ -237,50 +339,72 @@ fn sample_results(root: &Path) -> AnalysisResults {
         ),
     );
     r.misconfigured_dependency_overrides.push(
-        plow_core::results::MisconfiguredDependencyOverrideFinding::with_actions(
-            plow_core::results::MisconfiguredDependencyOverride {
-                raw_key: "@types/react@<<18".to_string(),
-                target_package: None,
-                raw_value: "18.0.0".to_string(),
-                reason: plow_core::results::DependencyOverrideMisconfigReason::UnparsableKey,
-                source: plow_core::results::DependencyOverrideSource::PnpmPackageJson,
-                path: root.join("package.json"),
-                line: 3,
-            },
-        ),
+        MisconfiguredDependencyOverrideFinding::with_actions(MisconfiguredDependencyOverride {
+            raw_key: "@types/react@<<18".to_string(),
+            target_package: None,
+            raw_value: "18.0.0".to_string(),
+            reason: DependencyOverrideMisconfigReason::UnparsableKey,
+            source: DependencyOverrideSource::PnpmPackageJson,
+            path: root.join("package.json"),
+            line: 3,
+        }),
     );
-    r.invalid_client_exports.push(
-        plow_core::results::InvalidClientExportFinding::with_actions(
-            plow_core::results::InvalidClientExport {
+    r.invalid_client_exports
+        .push(InvalidClientExportFinding::with_actions(
+            InvalidClientExport {
                 path: root.join("app/page.tsx"),
                 export_name: "metadata".to_string(),
                 directive: "use client".to_string(),
                 line: 3,
                 col: 0,
             },
-        ),
-    );
-    r.mixed_client_server_barrels.push(
-        plow_core::results::MixedClientServerBarrelFinding::with_actions(
-            plow_core::results::MixedClientServerBarrel {
+        ));
+    r.mixed_client_server_barrels
+        .push(MixedClientServerBarrelFinding::with_actions(
+            MixedClientServerBarrel {
                 path: root.join("app/components/index.ts"),
                 client_origin: "./Button".to_string(),
                 server_origin: "./fetchUser".to_string(),
                 line: 2,
                 col: 0,
             },
-        ),
-    );
+        ));
     r.unprovided_injects
-        .push(plow_core::results::UnprovidedInjectFinding::with_actions(
-            plow_core::results::UnprovidedInject {
-                path: root.join("src/useTheme.ts"),
-                key_name: "THEME_KEY".to_string(),
-                framework: "vue".to_string(),
-                line: 5,
+        .push(UnprovidedInjectFinding::with_actions(UnprovidedInject {
+            path: root.join("src/useTheme.ts"),
+            key_name: "THEME_KEY".to_string(),
+            framework: "vue".to_string(),
+            line: 5,
+            col: 2,
+        }));
+    r.unused_component_inputs
+        .push(UnusedComponentInputFinding::with_actions(
+            UnusedComponentInput {
+                path: root.join("src/user-card.component.ts"),
+                component_name: "UserCardComponent".to_string(),
+                input_name: "variant".to_string(),
+                line: 12,
                 col: 2,
             },
         ));
+    r.unused_component_outputs
+        .push(UnusedComponentOutputFinding::with_actions(
+            UnusedComponentOutput {
+                path: root.join("src/user-card.component.ts"),
+                component_name: "UserCardComponent".to_string(),
+                output_name: "selected".to_string(),
+                line: 15,
+                col: 2,
+            },
+        ));
+    r.unused_svelte_events
+        .push(UnusedSvelteEventFinding::with_actions(UnusedSvelteEvent {
+            path: root.join("src/Child.svelte"),
+            component_name: "Child".to_string(),
+            event_name: "dead".to_string(),
+            line: 6,
+            col: 2,
+        }));
 
     r
 }
@@ -290,7 +414,8 @@ fn json_output_snapshot() {
     let root = PathBuf::from("/project");
     let results = sample_results(&root);
     let elapsed = Duration::from_millis(42);
-    let value = build_json(&results, &root, elapsed).expect("JSON build should succeed");
+    let value =
+        api_check_json_document(&results, &root, elapsed).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
 
     insta::assert_snapshot!(
@@ -309,7 +434,8 @@ fn next_steps_are_read_only_and_placeholder_free() {
     // mutating (`fix`/`init`/`hooks`/`migrate`), per the NextStep contract.
     let root = PathBuf::from("/project");
     let results = sample_results(&root);
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let steps = value
         .get("next_steps")
         .and_then(serde_json::Value::as_array)
@@ -343,7 +469,8 @@ fn json_empty_results_snapshot() {
     let root = PathBuf::from("/project");
     let results = AnalysisResults::default();
     let elapsed = Duration::from_millis(0);
-    let value = build_json(&results, &root, elapsed).expect("JSON build should succeed");
+    let value =
+        api_check_json_document(&results, &root, elapsed).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
 
     insta::assert_snapshot!(
@@ -679,7 +806,8 @@ fn json_re_export_variant_snapshot() {
             is_re_export: true,
         }));
     let elapsed = Duration::from_millis(0);
-    let value = build_json(&results, &root, elapsed).expect("JSON build should succeed");
+    let value =
+        api_check_json_document(&results, &root, elapsed).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!(
         "json_re_export_variant",
@@ -730,7 +858,14 @@ fn sarif_mixed_severity_snapshot() {
         unrendered_components: plow_config::Severity::Warn,
         unused_component_props: plow_config::Severity::Warn,
         unused_component_emits: plow_config::Severity::Warn,
+        unused_component_inputs: plow_config::Severity::Warn,
+        unused_component_outputs: plow_config::Severity::Warn,
+        unused_svelte_events: plow_config::Severity::Warn,
         unused_server_actions: plow_config::Severity::Warn,
+        unused_load_data_keys: plow_config::Severity::Warn,
+        prop_drilling: plow_config::Severity::Off,
+        thin_wrapper: plow_config::Severity::Off,
+        duplicate_prop_shape: plow_config::Severity::Off,
         unresolved_imports: plow_config::Severity::Error,
         unlisted_dependencies: plow_config::Severity::Error,
         duplicate_exports: plow_config::Severity::Warn,
@@ -742,6 +877,7 @@ fn sarif_mixed_severity_snapshot() {
         coverage_gaps: plow_config::Severity::Warn,
         feature_flags: plow_config::Severity::Off,
         stale_suppressions: plow_config::Severity::Warn,
+        require_suppression_reason: plow_config::Severity::Warn,
         unused_catalog_entries: plow_config::Severity::Warn,
         empty_catalog_groups: plow_config::Severity::Warn,
         unresolved_catalog_references: plow_config::Severity::Error,
@@ -784,7 +920,8 @@ fn json_type_only_deps_snapshot() {
             },
         ));
     let elapsed = Duration::from_millis(10);
-    let value = build_json(&results, &root, elapsed).expect("JSON build should succeed");
+    let value =
+        api_check_json_document(&results, &root, elapsed).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!(
         "json_type_only_deps",
@@ -811,7 +948,8 @@ fn json_unused_files_only_snapshot() {
         .push(UnusedFileFinding::with_actions(UnusedFile {
             path: root.join("src/dead.ts"),
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_files_only", redact_version(&json_str));
 }
@@ -831,7 +969,8 @@ fn json_unused_exports_only_snapshot() {
             span_start: 120,
             is_re_export: false,
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_exports_only", redact_version(&json_str));
 }
@@ -851,7 +990,8 @@ fn json_unused_types_only_snapshot() {
             span_start: 60,
             is_re_export: false,
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_types_only", redact_version(&json_str));
 }
@@ -869,7 +1009,8 @@ fn json_unused_deps_only_snapshot() {
             line: 5,
             used_in_workspaces: Vec::new(),
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_deps_only", redact_version(&json_str));
 }
@@ -887,7 +1028,8 @@ fn json_unresolved_imports_only_snapshot() {
             col: 0,
             specifier_col: 0,
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unresolved_imports_only", redact_version(&json_str));
 }
@@ -908,7 +1050,8 @@ fn json_unlisted_deps_only_snapshot() {
                 }],
             },
         ));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unlisted_deps_only", redact_version(&json_str));
 }
@@ -927,7 +1070,8 @@ fn json_unused_enum_members_only_snapshot() {
             line: 8,
             col: 2,
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_enum_members_only", redact_version(&json_str));
 }
@@ -946,7 +1090,8 @@ fn json_unused_class_members_only_snapshot() {
             line: 42,
             col: 4,
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_class_members_only", redact_version(&json_str));
 }
@@ -972,7 +1117,8 @@ fn json_duplicate_exports_only_snapshot() {
                 },
             ],
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_duplicate_exports_only", redact_version(&json_str));
 }
@@ -987,9 +1133,12 @@ fn json_stale_suppression_unknown_kind_snapshot() {
         col: 0,
         origin: SuppressionOrigin::Comment {
             issue_kind: Some("complexity-typo".to_string()),
+            reason: None,
             is_file_level: false,
             kind_known: false,
         },
+        missing_reason: false,
+        actions: StaleSuppression::actions_for(false),
     });
     results.stale_suppressions.push(StaleSuppression {
         path: root.join("src/utils.ts"),
@@ -997,11 +1146,15 @@ fn json_stale_suppression_unknown_kind_snapshot() {
         col: 0,
         origin: SuppressionOrigin::Comment {
             issue_kind: Some("unused-export".to_string()),
+            reason: None,
             is_file_level: false,
             kind_known: true,
         },
+        missing_reason: false,
+        actions: StaleSuppression::actions_for(false),
     });
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!(
         "json_stale_suppression_unknown_kind",
@@ -1243,7 +1396,8 @@ fn json_multiple_exports_same_file_snapshot() {
             span_start: 0,
             is_re_export: false,
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_multiple_exports_same_file", redact_version(&json_str));
 }
@@ -1335,7 +1489,8 @@ fn json_workspace_dep_snapshot() {
             line: 5,
             used_in_workspaces: Vec::new(),
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_workspace_deps", redact_version(&json_str));
 }
@@ -1603,7 +1758,14 @@ fn codeclimate_mixed_severity_snapshot() {
         unrendered_components: plow_config::Severity::Warn,
         unused_component_props: plow_config::Severity::Warn,
         unused_component_emits: plow_config::Severity::Warn,
+        unused_component_inputs: plow_config::Severity::Warn,
+        unused_component_outputs: plow_config::Severity::Warn,
+        unused_svelte_events: plow_config::Severity::Warn,
         unused_server_actions: plow_config::Severity::Warn,
+        unused_load_data_keys: plow_config::Severity::Warn,
+        prop_drilling: plow_config::Severity::Off,
+        thin_wrapper: plow_config::Severity::Off,
+        duplicate_prop_shape: plow_config::Severity::Off,
         unresolved_imports: plow_config::Severity::Error,
         unlisted_dependencies: plow_config::Severity::Error,
         duplicate_exports: plow_config::Severity::Warn,
@@ -1615,6 +1777,7 @@ fn codeclimate_mixed_severity_snapshot() {
         coverage_gaps: plow_config::Severity::Warn,
         feature_flags: plow_config::Severity::Off,
         stale_suppressions: plow_config::Severity::Warn,
+        require_suppression_reason: plow_config::Severity::Warn,
         unused_catalog_entries: plow_config::Severity::Warn,
         empty_catalog_groups: plow_config::Severity::Warn,
         unresolved_catalog_references: plow_config::Severity::Error,
@@ -1843,7 +2006,8 @@ fn json_circular_deps_only_snapshot() {
                 is_cross_package: false,
             },
         ));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_circular_deps_only", redact_version(&json_str));
 }
@@ -1913,7 +2077,8 @@ fn re_export_cycles_results(root: &Path) -> AnalysisResults {
 fn json_re_export_cycles_only_snapshot() {
     let root = PathBuf::from("/project");
     let results = re_export_cycles_results(&root);
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_re_export_cycles_only", redact_version(&json_str));
 }
@@ -2004,7 +2169,8 @@ fn json_unused_dev_deps_only_snapshot() {
             line: 12,
             used_in_workspaces: Vec::new(),
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_dev_deps_only", redact_version(&json_str));
 }
@@ -2045,7 +2211,8 @@ fn json_unused_optional_deps_only_snapshot() {
                 used_in_workspaces: Vec::new(),
             },
         ));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_optional_deps_only", redact_version(&json_str));
 }
@@ -2095,7 +2262,8 @@ fn json_mixed_severity_snapshot() {
     let root = PathBuf::from("/project");
     let results = sample_results(&root);
     let elapsed = Duration::from_millis(42);
-    let value = build_json(&results, &root, elapsed).expect("JSON build should succeed");
+    let value =
+        api_check_json_document(&results, &root, elapsed).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_mixed_severity", redact_version(&json_str));
 }
@@ -2368,15 +2536,15 @@ fn markdown_workspace_dep_snapshot() {
 
 /// Build a minimal health report with one finding for snapshot tests.
 fn sample_health_report(root: &Path) -> HealthReport {
-    let action_ctx = plow_cli::health_types::HealthActionContext {
-        opts: plow_cli::health_types::HealthActionOptions::default(),
+    let action_ctx = plow_output::HealthActionContext {
+        opts: plow_output::HealthActionOptions::default(),
         max_cyclomatic_threshold: 20,
         max_cognitive_threshold: 15,
         max_crap_threshold: 30.0,
         crap_refactor_band: 5,
     };
     HealthReport {
-        findings: vec![plow_cli::health_types::HealthFinding::with_actions(
+        findings: vec![plow_output::HealthFinding::with_actions(
             ComplexityViolation {
                 path: root.join("src/complex.ts"),
                 name: "processData".to_string(),
@@ -2386,6 +2554,10 @@ fn sample_health_report(root: &Path) -> HealthReport {
                 cognitive: 30,
                 line_count: 120,
                 param_count: 0,
+                react_hook_count: 0,
+                react_jsx_max_depth: 0,
+                react_prop_count: 0,
+                react_hook_profile: None,
                 exceeded: ExceededThreshold::Both,
                 severity: FindingSeverity::High,
                 crap: None,
@@ -2422,6 +2594,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
         file_scores: vec![],
         coverage_gaps: None,
         threshold_overrides: vec![],
+        prop_drilling_chains: vec![],
         hotspots: vec![],
         hotspot_summary: None,
         large_functions: vec![],
@@ -2431,6 +2604,10 @@ fn sample_health_report(root: &Path) -> HealthReport {
         runtime_coverage: None,
         coverage_intelligence: None,
         actions_meta: None,
+        framework_health: None,
+        css_analytics: None,
+        styling_health: None,
+        render_fan_in_top: rustc_hash::FxHashMap::default(),
     }
 }
 
@@ -2477,6 +2654,7 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
                     auto_fixable: false,
                 }],
                 source_hash: None,
+                discriminators: None,
             },
             RuntimeCoverageFinding {
                 id: "plow:prod:feedface".to_string(),
@@ -2501,6 +2679,7 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
                     auto_fixable: false,
                 }],
                 source_hash: None,
+                discriminators: None,
             },
         ],
         hot_paths: vec![RuntimeCoverageHotPath {
@@ -2521,6 +2700,10 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
             code: "partial-input".to_string(),
             message: "One dump was incomplete.".to_string(),
         }],
+        actionable: true,
+        actionability_reason: None,
+        actionability_verdict: None,
+        provenance: plow_output::RuntimeCoverageProvenance::default(),
     });
     report
 }
@@ -2620,7 +2803,7 @@ fn health_report_with_coverage_intelligence(root: &Path) -> HealthReport {
 fn json_health_with_coverage_intelligence_snapshot() {
     let root = PathBuf::from("/project");
     let report = health_report_with_coverage_intelligence(&root);
-    let value = build_health_json(&report, &root, Duration::ZERO, false)
+    let value = api_health_json_document(&report, &root, Duration::ZERO, false)
         .expect("health JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!(
@@ -2658,7 +2841,7 @@ fn codeclimate_health_with_coverage_intelligence_snapshot() {
 }
 
 /// Build an empty health report (no findings).
-const fn empty_health_report() -> HealthReport {
+fn empty_health_report() -> HealthReport {
     HealthReport {
         findings: vec![],
         summary: HealthSummary {
@@ -2683,6 +2866,7 @@ const fn empty_health_report() -> HealthReport {
         file_scores: vec![],
         coverage_gaps: None,
         threshold_overrides: vec![],
+        prop_drilling_chains: vec![],
         hotspots: vec![],
         hotspot_summary: None,
         large_functions: vec![],
@@ -2692,6 +2876,10 @@ const fn empty_health_report() -> HealthReport {
         runtime_coverage: None,
         coverage_intelligence: None,
         actions_meta: None,
+        framework_health: None,
+        css_analytics: None,
+        styling_health: None,
+        render_fan_in_top: rustc_hash::FxHashMap::default(),
     }
 }
 
@@ -2819,7 +3007,7 @@ fn codeclimate_health_with_runtime_coverage_snapshot() {
 fn json_health_with_runtime_coverage_snapshot() {
     let root = PathBuf::from("/project");
     let report = health_report_with_runtime_coverage(&root);
-    let value = build_health_json(&report, &root, Duration::ZERO, false)
+    let value = api_health_json_document(&report, &root, Duration::ZERO, false)
         .expect("health JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!(
@@ -2874,7 +3062,7 @@ fn health_report_with_coverage_gaps(root: &Path) -> HealthReport {
 fn json_health_with_coverage_gaps_snapshot() {
     let root = PathBuf::from("/project");
     let report = health_report_with_coverage_gaps(&root);
-    let value = build_health_json(&report, &root, Duration::ZERO, false)
+    let value = api_health_json_document(&report, &root, Duration::ZERO, false)
         .expect("health JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_health_with_coverage_gaps", redact_version(&json_str));
@@ -2917,6 +3105,7 @@ fn health_report_with_score(root: &Path) -> HealthReport {
             unit_size: None,
             coupling: None,
             duplication: None,
+            prop_drilling: None,
         },
     });
     report
@@ -3190,9 +3379,14 @@ fn grouped_duplication_json_directory_snapshot() {
     let resolver = plow_cli::report::OwnershipResolver::Directory;
     let grouping =
         plow_cli::report::dupes_grouping::build_duplication_grouping(&report, &root, &resolver);
-    let value =
-        build_grouped_duplication_json(&report, &grouping, &root, Duration::from_millis(0), false)
-            .expect("should serialize");
+    let value = api_grouped_duplication_json_document(
+        &report,
+        &grouping,
+        &root,
+        Duration::from_millis(0),
+        false,
+    )
+    .expect("should serialize");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!(
         "grouped_duplication_json_directory",
@@ -3208,7 +3402,7 @@ fn grouped_duplication_codeclimate_directory_snapshot() {
     let root = PathBuf::from("/project");
     let report = sample_grouped_duplication_report(&root);
     let resolver = plow_cli::report::OwnershipResolver::Directory;
-    let mut value = codeclimate_issues_to_value(&build_duplication_codeclimate(&report, &root));
+    let mut issues = build_duplication_codeclimate(&report, &root);
     let mut path_to_owner = rustc_hash::FxHashMap::<String, String>::default();
     for group in &report.clone_groups {
         let owner = plow_cli::report::dupes_grouping::largest_owner(group, &root, &resolver);
@@ -3222,23 +3416,17 @@ fn grouped_duplication_codeclimate_directory_snapshot() {
             path_to_owner.insert(rel, owner.clone());
         }
     }
-    if let Some(arr) = value.as_array_mut() {
-        for issue in arr {
-            let path = issue
-                .pointer("/location/path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let group = path_to_owner
-                .get(&path)
+    plow_output::annotate_codeclimate_issues(
+        &mut issues,
+        plow_output::CodeClimateAnnotationField::Group,
+        |path| {
+            path_to_owner
+                .get(path)
                 .cloned()
-                .unwrap_or_else(|| "(unowned)".to_string());
-            issue
-                .as_object_mut()
-                .expect("issue object")
-                .insert("group".to_string(), serde_json::Value::String(group));
-        }
-    }
+                .unwrap_or_else(|| "(unowned)".to_string())
+        },
+    );
+    let value = codeclimate_issues_to_value(&issues);
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("grouped_duplication_codeclimate_directory", json_str);
 }

@@ -107,12 +107,11 @@ pub struct RulesConfig {
     /// lower; warn encodes that without failing CI.
     #[serde(default, alias = "unrendered-component")]
     pub unrendered_components: Severity,
-    /// Vue `<script setup>` `defineProps` declared prop referenced nowhere
-    /// inside its own single-file component (neither `<script>` nor
-    /// `<template>`). The single-file dead-input direction. Defaults to `warn`,
-    /// not `error`: a prop can be part of a deliberately-stable public component
-    /// API, so analyzer confidence is lower; warn encodes that without failing
-    /// CI.
+    /// Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, or React
+    /// declared prop referenced nowhere inside its own component. The
+    /// single-component dead-input direction. Defaults to `warn`, not `error`: a
+    /// prop can be part of a deliberately-stable public component API, so
+    /// analyzer confidence is lower; warn encodes that without failing CI.
     #[serde(default, alias = "unused-component-prop")]
     pub unused_component_props: Severity,
     /// Vue `<script setup>` `defineEmits` declared event emitted nowhere inside
@@ -122,6 +121,31 @@ pub struct RulesConfig {
     /// lower; warn encodes that without failing CI.
     #[serde(default, alias = "unused-component-emit")]
     pub unused_component_emits: Severity,
+    /// Angular `@Input()` / signal `input()` / `model()` declared input read
+    /// nowhere inside its own component (neither the inline/external template nor
+    /// the class body). The single-file dead-input direction, the Angular
+    /// analogue of `unused-component-prop`. Defaults to `warn`, not `error`: an
+    /// input can be part of a deliberately-stable public component API, so
+    /// analyzer confidence is lower; warn encodes that without failing CI.
+    #[serde(default, alias = "unused-component-input")]
+    pub unused_component_inputs: Severity,
+    /// Angular `@Output()` / signal `output()` declared output emitted nowhere
+    /// inside its own component (no `this.<output>.emit(...)`). The single-file
+    /// dead-output direction, the Angular analogue of `unused-component-emit`.
+    /// Defaults to `warn`, not `error`: an output can be part of a
+    /// deliberately-stable public component API, so analyzer confidence is lower;
+    /// warn encodes that without failing CI.
+    #[serde(default, alias = "unused-component-output")]
+    pub unused_component_outputs: Severity,
+    /// Svelte component dispatching a custom event via `createEventDispatcher()`
+    /// whose event name is listened to nowhere in the analyzed project. The
+    /// cross-file dead-output direction (no eslint-plugin-svelte / svelte-check
+    /// rule covers the listener side). Defaults to `warn`, not `error`: a
+    /// dispatched event can be part of a deliberately-stable public component
+    /// API, or a listener may be added later, so analyzer confidence is lower;
+    /// warn encodes that without failing CI.
+    #[serde(default = "Severity::default_warn", alias = "unused-svelte-event")]
+    pub unused_svelte_events: Severity,
     /// Next.js Server Action (an export of a `"use server"` file) referenced by
     /// no code in the project: no import-and-call, no `action={fn}` binding, no
     /// `<form action={fn}>`. Cross-graph dead-export direction, reclassified out
@@ -131,6 +155,36 @@ pub struct RulesConfig {
     /// without failing CI until corpus-validated.
     #[serde(default, alias = "unused-server-action")]
     pub unused_server_actions: Severity,
+    /// SvelteKit `+page.{ts,server.ts,js,server.js}` `load()` return-object key
+    /// read by no consumer: not off the sibling `+page.svelte`'s `data.<key>`,
+    /// nor project-wide via `page.data.<key>` / `$page.data.<key>`. Cross-file
+    /// dead-input direction. Defaults to `warn`, not `error`: the rule is new and
+    /// false-negative-preferring (a whole-object `data` pass abstains), and a
+    /// load fetch can have side effects so deletion is a human call; warn encodes
+    /// that without failing CI until corpus-validated.
+    #[serde(default = "Severity::default_warn", alias = "unused-load-data-key")]
+    pub unused_load_data_keys: Severity,
+    /// React/Preact prop forwarded unchanged through `>= N` intermediate
+    /// pass-through components until a component that substantively consumes it.
+    /// A graph-derived health signal. Defaults to `off` (opt-in), like
+    /// `private-type-leak` / `security-*`: the located per-chain records and the
+    /// small capped health penalty are dormant until the user enables the rule.
+    #[serde(default = "Severity::default_off", alias = "prop-drilling")]
+    pub prop_drilling: Severity,
+    /// A React/Preact component whose entire body is `return <Child {...props}/>`
+    /// (pure structural indirection, a candidate for inlining). A graph-derived
+    /// health signal. Defaults to `off` (opt-in), like `prop-drilling`: the
+    /// located per-wrapper records are dormant until the user enables the rule.
+    #[serde(default = "Severity::default_off", alias = "thin-wrapper")]
+    pub thin_wrapper: Severity,
+    /// Three or more React/Preact components across two or more files whose
+    /// statically-harvested prop NAME set is identical after stripping ubiquitous
+    /// DOM / passthrough names (a missing shared `Props` type / base component).
+    /// A graph-derived structural-refactor health signal. Defaults to `off`
+    /// (opt-in), like `thin-wrapper`: the located per-component records are
+    /// dormant until the user enables the rule.
+    #[serde(default = "Severity::default_off", alias = "duplicate-prop-shape")]
+    pub duplicate_prop_shape: Severity,
     #[serde(default, alias = "unresolved-import")]
     pub unresolved_imports: Severity,
     #[serde(default, alias = "unlisted-dependency")]
@@ -158,6 +212,10 @@ pub struct RulesConfig {
     pub feature_flags: Severity,
     #[serde(default = "Severity::default_warn", alias = "stale-suppression")]
     pub stale_suppressions: Severity,
+    /// Opt-in suppression hygiene rule: when enabled, every `plow-ignore-*`
+    /// comment and `@expected-unused` tag must carry a `-- <reason>` suffix.
+    #[serde(default = "Severity::default_off", alias = "suppression-reason")]
+    pub require_suppression_reason: Severity,
     #[serde(default = "Severity::default_warn", alias = "unused-catalog-entry")]
     pub unused_catalog_entries: Severity,
     #[serde(default = "Severity::default_warn", alias = "empty-catalog-group")]
@@ -224,12 +282,11 @@ pub struct RulesConfig {
     /// cannot use different slug names for the same dynamic path" at dev and
     /// production runtime when the position is hit; `next build` does NOT catch
     /// it (the build succeeds), so CI passes while the route crashes on its
-    /// first request. plow catches it statically. Defaults to `warn` for now
-    /// (graduates to `error` in a later release once field-proven).
-    #[serde(
-        default = "Severity::default_warn",
-        alias = "dynamic-segment-name-conflicts"
-    )]
+    /// first request. plow catches it statically. Defaults to `error`: the
+    /// route is a deterministic runtime crash on first request, so failing CI
+    /// is the honest signal even though `next build` stays green (this is the
+    /// "error-runtime" severity tier, shared with `route-collision`).
+    #[serde(default, alias = "dynamic-segment-name-conflicts")]
     pub dynamic_segment_name_conflict: Severity,
 }
 
@@ -250,7 +307,14 @@ impl Default for RulesConfig {
             unrendered_components: Severity::Warn,
             unused_component_props: Severity::Warn,
             unused_component_emits: Severity::Warn,
+            unused_component_inputs: Severity::Warn,
+            unused_component_outputs: Severity::Warn,
+            unused_svelte_events: Severity::Warn,
             unused_server_actions: Severity::Warn,
+            unused_load_data_keys: Severity::Warn,
+            prop_drilling: Severity::Off,
+            thin_wrapper: Severity::Off,
+            duplicate_prop_shape: Severity::Off,
             unresolved_imports: Severity::Error,
             unlisted_dependencies: Severity::Error,
             duplicate_exports: Severity::Error,
@@ -262,6 +326,7 @@ impl Default for RulesConfig {
             coverage_gaps: Severity::Off,
             feature_flags: Severity::Off,
             stale_suppressions: Severity::Warn,
+            require_suppression_reason: Severity::Off,
             unused_catalog_entries: Severity::Warn,
             empty_catalog_groups: Severity::Warn,
             unresolved_catalog_references: Severity::Error,
@@ -274,131 +339,101 @@ impl Default for RulesConfig {
             mixed_client_server_barrel: Severity::Warn,
             misplaced_directive: Severity::Warn,
             route_collision: Severity::Error,
-            dynamic_segment_name_conflict: Severity::Warn,
+            dynamic_segment_name_conflict: Severity::Error,
         }
     }
+}
+
+macro_rules! apply_partial_rules {
+    ($target:expr, $partial:expr, [$($field:ident),+ $(,)?]) => {
+        $(
+            if let Some(severity) = $partial.$field {
+                $target.$field = severity;
+            }
+        )+
+    };
 }
 
 impl RulesConfig {
     /// Apply a partial rules config on top. Only `Some` fields override.
     pub const fn apply_partial(&mut self, partial: &PartialRulesConfig) {
-        if let Some(s) = partial.unused_files {
-            self.unused_files = s;
-        }
-        if let Some(s) = partial.unused_exports {
-            self.unused_exports = s;
-        }
-        if let Some(s) = partial.unused_types {
-            self.unused_types = s;
-        }
-        if let Some(s) = partial.private_type_leaks {
-            self.private_type_leaks = s;
-        }
-        if let Some(s) = partial.unused_dependencies {
-            self.unused_dependencies = s;
-        }
-        if let Some(s) = partial.unused_dev_dependencies {
-            self.unused_dev_dependencies = s;
-        }
-        if let Some(s) = partial.unused_optional_dependencies {
-            self.unused_optional_dependencies = s;
-        }
-        if let Some(s) = partial.unused_enum_members {
-            self.unused_enum_members = s;
-        }
-        if let Some(s) = partial.unused_class_members {
-            self.unused_class_members = s;
-        }
-        if let Some(s) = partial.unused_store_members {
-            self.unused_store_members = s;
-        }
-        if let Some(s) = partial.unprovided_injects {
-            self.unprovided_injects = s;
-        }
-        if let Some(s) = partial.unrendered_components {
-            self.unrendered_components = s;
-        }
-        if let Some(s) = partial.unused_component_props {
-            self.unused_component_props = s;
-        }
-        if let Some(s) = partial.unused_component_emits {
-            self.unused_component_emits = s;
-        }
-        if let Some(s) = partial.unused_server_actions {
-            self.unused_server_actions = s;
-        }
-        if let Some(s) = partial.unresolved_imports {
-            self.unresolved_imports = s;
-        }
-        if let Some(s) = partial.unlisted_dependencies {
-            self.unlisted_dependencies = s;
-        }
-        if let Some(s) = partial.duplicate_exports {
-            self.duplicate_exports = s;
-        }
-        if let Some(s) = partial.type_only_dependencies {
-            self.type_only_dependencies = s;
-        }
-        if let Some(s) = partial.test_only_dependencies {
-            self.test_only_dependencies = s;
-        }
-        if let Some(s) = partial.circular_dependencies {
-            self.circular_dependencies = s;
-        }
-        if let Some(s) = partial.re_export_cycle {
-            self.re_export_cycle = s;
-        }
-        if let Some(s) = partial.boundary_violation {
-            self.boundary_violation = s;
-        }
-        if let Some(s) = partial.coverage_gaps {
-            self.coverage_gaps = s;
-        }
-        if let Some(s) = partial.feature_flags {
-            self.feature_flags = s;
-        }
-        if let Some(s) = partial.stale_suppressions {
-            self.stale_suppressions = s;
-        }
-        if let Some(s) = partial.unused_catalog_entries {
-            self.unused_catalog_entries = s;
-        }
-        if let Some(s) = partial.empty_catalog_groups {
-            self.empty_catalog_groups = s;
-        }
-        if let Some(s) = partial.unresolved_catalog_references {
-            self.unresolved_catalog_references = s;
-        }
-        if let Some(s) = partial.unused_dependency_overrides {
-            self.unused_dependency_overrides = s;
-        }
-        if let Some(s) = partial.misconfigured_dependency_overrides {
-            self.misconfigured_dependency_overrides = s;
-        }
-        if let Some(s) = partial.security_client_server_leak {
-            self.security_client_server_leak = s;
-        }
-        if let Some(s) = partial.security_sink {
-            self.security_sink = s;
-        }
-        if let Some(s) = partial.policy_violation {
-            self.policy_violation = s;
-        }
-        if let Some(s) = partial.invalid_client_export {
-            self.invalid_client_export = s;
-        }
-        if let Some(s) = partial.mixed_client_server_barrel {
-            self.mixed_client_server_barrel = s;
-        }
-        if let Some(s) = partial.misplaced_directive {
-            self.misplaced_directive = s;
-        }
-        if let Some(s) = partial.route_collision {
-            self.route_collision = s;
-        }
-        if let Some(s) = partial.dynamic_segment_name_conflict {
-            self.dynamic_segment_name_conflict = s;
-        }
+        apply_partial_rules!(
+            self,
+            partial,
+            [
+                unused_files,
+                unused_exports,
+                unused_types,
+                private_type_leaks,
+                unused_dependencies,
+                unused_dev_dependencies,
+                unused_optional_dependencies,
+            ]
+        );
+        apply_partial_rules!(
+            self,
+            partial,
+            [
+                unused_enum_members,
+                unused_class_members,
+                unused_store_members,
+                unprovided_injects,
+                unrendered_components,
+                unused_component_props,
+                unused_component_emits,
+                unused_component_inputs,
+                unused_component_outputs,
+                unused_svelte_events,
+                unused_server_actions,
+                unused_load_data_keys,
+                prop_drilling,
+                thin_wrapper,
+                duplicate_prop_shape,
+            ]
+        );
+        apply_partial_rules!(
+            self,
+            partial,
+            [
+                unresolved_imports,
+                unlisted_dependencies,
+                duplicate_exports,
+                type_only_dependencies,
+                test_only_dependencies,
+                circular_dependencies,
+                re_export_cycle,
+                boundary_violation,
+            ]
+        );
+        apply_partial_rules!(
+            self,
+            partial,
+            [
+                coverage_gaps,
+                feature_flags,
+                stale_suppressions,
+                require_suppression_reason,
+                unused_catalog_entries,
+                empty_catalog_groups,
+                unresolved_catalog_references,
+                unused_dependency_overrides,
+                misconfigured_dependency_overrides,
+            ]
+        );
+        apply_partial_rules!(
+            self,
+            partial,
+            [
+                security_client_server_leak,
+                security_sink,
+                policy_violation,
+                invalid_client_export,
+                mixed_client_server_barrel,
+                misplaced_directive,
+                route_collision,
+                dynamic_segment_name_conflict,
+            ]
+        );
     }
 }
 
@@ -492,10 +527,52 @@ pub struct PartialRulesConfig {
     pub unused_component_emits: Option<Severity>,
     #[serde(
         default,
+        alias = "unused-component-input",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_component_inputs: Option<Severity>,
+    #[serde(
+        default,
+        alias = "unused-component-output",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_component_outputs: Option<Severity>,
+    #[serde(
+        default,
+        alias = "unused-svelte-event",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_svelte_events: Option<Severity>,
+    #[serde(
+        default,
         alias = "unused-server-action",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_server_actions: Option<Severity>,
+    #[serde(
+        default,
+        alias = "unused-load-data-key",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_load_data_keys: Option<Severity>,
+    #[serde(
+        default,
+        alias = "prop-drilling",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub prop_drilling: Option<Severity>,
+    #[serde(
+        default,
+        alias = "thin-wrapper",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub thin_wrapper: Option<Severity>,
+    #[serde(
+        default,
+        alias = "duplicate-prop-shape",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub duplicate_prop_shape: Option<Severity>,
     #[serde(
         default,
         alias = "unresolved-import",
@@ -564,6 +641,12 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub stale_suppressions: Option<Severity>,
+    #[serde(
+        default,
+        alias = "suppression-reason",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub require_suppression_reason: Option<Severity>,
     #[serde(
         default,
         alias = "unused-catalog-entry",
@@ -661,7 +744,14 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unrendered-components",
     "unused-component-props",
     "unused-component-emits",
+    "unused-component-inputs",
+    "unused-component-outputs",
+    "unused-svelte-events",
     "unused-server-actions",
+    "unused-load-data-keys",
+    "prop-drilling",
+    "thin-wrapper",
+    "duplicate-prop-shape",
     "unresolved-imports",
     "unlisted-dependencies",
     "duplicate-exports",
@@ -673,6 +763,8 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "coverage-gaps",
     "feature-flags",
     "stale-suppressions",
+    "require-suppression-reason",
+    "suppression-reason",
     "unused-catalog-entries",
     "empty-catalog-groups",
     "unresolved-catalog-references",
@@ -701,7 +793,11 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unrendered-component",
     "unused-component-prop",
     "unused-component-emit",
+    "unused-component-input",
+    "unused-component-output",
+    "unused-svelte-event",
     "unused-server-action",
+    "unused-load-data-key",
     "unresolved-import",
     "unlisted-dependency",
     "duplicate-export",
@@ -889,6 +985,7 @@ mod tests {
             "coverage-gap": "warn",
             "feature-flag": "warn",
             "stale-suppression": "off",
+            "suppression-reason": "warn",
             "unused-catalog-entry": "error",
             "empty-catalog-group": "error",
             "unresolved-catalog-reference": "warn"
@@ -912,6 +1009,7 @@ mod tests {
         assert_eq!(rules.coverage_gaps, Severity::Warn);
         assert_eq!(rules.feature_flags, Severity::Warn);
         assert_eq!(rules.stale_suppressions, Severity::Off);
+        assert_eq!(rules.require_suppression_reason, Severity::Warn);
         assert_eq!(rules.unused_catalog_entries, Severity::Error);
         assert_eq!(rules.empty_catalog_groups, Severity::Error);
         assert_eq!(rules.unresolved_catalog_references, Severity::Warn);
@@ -934,6 +1032,7 @@ mod tests {
         assert_eq!(partial.coverage_gaps, Some(Severity::Warn));
         assert_eq!(partial.feature_flags, Some(Severity::Warn));
         assert_eq!(partial.stale_suppressions, Some(Severity::Off));
+        assert_eq!(partial.require_suppression_reason, Some(Severity::Warn));
         assert_eq!(partial.unused_catalog_entries, Some(Severity::Error));
         assert_eq!(partial.empty_catalog_groups, Some(Severity::Error));
         assert_eq!(partial.unresolved_catalog_references, Some(Severity::Warn));
@@ -962,6 +1061,26 @@ mod tests {
         assert_eq!(rules.unused_exports, Severity::Off);
         assert_eq!(rules.unused_types, Severity::Error);
         assert_eq!(rules.unresolved_imports, Severity::Error);
+        assert_eq!(rules.require_suppression_reason, Severity::Off);
+    }
+
+    #[test]
+    fn require_suppression_reason_deserializes_canonical_and_alias() {
+        let rules: RulesConfig = serde_json::from_str(
+            r#"{
+                "require-suppression-reason": "error"
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(rules.require_suppression_reason, Severity::Error);
+
+        let partial: PartialRulesConfig = serde_json::from_str(
+            r#"{
+                "suppression-reason": "warn"
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(partial.require_suppression_reason, Some(Severity::Warn));
     }
 
     #[test]
@@ -1003,7 +1122,14 @@ mod tests {
             unrendered_components: Some(Severity::Off),
             unused_component_props: Some(Severity::Off),
             unused_component_emits: Some(Severity::Off),
+            unused_component_inputs: Some(Severity::Off),
+            unused_component_outputs: Some(Severity::Off),
+            unused_svelte_events: Some(Severity::Off),
             unused_server_actions: Some(Severity::Off),
+            unused_load_data_keys: Some(Severity::Off),
+            prop_drilling: Some(Severity::Off),
+            thin_wrapper: Some(Severity::Off),
+            duplicate_prop_shape: Some(Severity::Off),
             unresolved_imports: Some(Severity::Off),
             unlisted_dependencies: Some(Severity::Off),
             duplicate_exports: Some(Severity::Off),
@@ -1015,6 +1141,7 @@ mod tests {
             coverage_gaps: Some(Severity::Off),
             feature_flags: Some(Severity::Off),
             stale_suppressions: Some(Severity::Off),
+            require_suppression_reason: Some(Severity::Off),
             unused_catalog_entries: Some(Severity::Off),
             empty_catalog_groups: Some(Severity::Off),
             unresolved_catalog_references: Some(Severity::Off),
@@ -1039,6 +1166,7 @@ mod tests {
         assert_eq!(rules.coverage_gaps, Severity::Off);
         assert_eq!(rules.feature_flags, Severity::Off);
         assert_eq!(rules.stale_suppressions, Severity::Off);
+        assert_eq!(rules.require_suppression_reason, Severity::Off);
         assert_eq!(rules.security_sink, Severity::Off);
         assert_eq!(rules.policy_violation, Severity::Off);
         assert_eq!(rules.invalid_client_export, Severity::Off);
@@ -1047,6 +1175,9 @@ mod tests {
         assert_eq!(rules.unrendered_components, Severity::Off);
         assert_eq!(rules.unused_component_props, Severity::Off);
         assert_eq!(rules.unused_component_emits, Severity::Off);
+        assert_eq!(rules.unused_component_inputs, Severity::Off);
+        assert_eq!(rules.unused_component_outputs, Severity::Off);
+        assert_eq!(rules.unused_svelte_events, Severity::Off);
         assert_eq!(rules.route_collision, Severity::Off);
         assert_eq!(rules.dynamic_segment_name_conflict, Severity::Off);
     }
@@ -1092,7 +1223,7 @@ mod tests {
 
     #[test]
     fn known_rule_names_count_matches_struct() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 78);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 91);
     }
 
     #[test]
@@ -1133,8 +1264,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            78,
-            "expected 78 source-level alias attrs (39 per struct); got {}: {:?}",
+            94,
+            "expected 94 source-level alias attrs (47 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

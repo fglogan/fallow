@@ -7,7 +7,7 @@ use plow_config::OutputFormat;
 use super::{plural, relative_path};
 
 pub(in crate::report) fn print_cross_reference_findings(
-    cross_ref: &plow_core::cross_reference::CrossReferenceResult,
+    cross_ref: &plow_engine::CrossReferenceResult,
     root: &Path,
     quiet: bool,
     output: OutputFormat,
@@ -44,10 +44,10 @@ pub(in crate::report) fn print_cross_reference_findings(
 
 /// Build human-readable output lines for cross-reference findings.
 pub(in crate::report) fn build_cross_reference_lines(
-    cross_ref: &plow_core::cross_reference::CrossReferenceResult,
+    cross_ref: &plow_engine::CrossReferenceResult,
     root: &Path,
 ) -> Vec<String> {
-    use plow_core::cross_reference::DeadCodeKind;
+    use plow_engine::DeadCodeKind;
 
     let mut lines = Vec::new();
 
@@ -97,8 +97,8 @@ pub(in crate::report) fn build_cross_reference_lines(
 mod tests {
     use super::super::plain;
     use super::*;
-    use plow_core::cross_reference::{CombinedFinding, CrossReferenceResult, DeadCodeKind};
-    use plow_core::duplicates::CloneInstance;
+    use plow_engine::{CombinedFinding, CrossReferenceResult, DeadCodeKind};
+    use plow_types::duplicates::CloneInstance;
     use std::path::PathBuf;
 
     #[test]

@@ -1,5 +1,6 @@
 mod declarations;
 mod helpers;
+mod react;
 mod visit_impl;
 
 use oxc_ast::ast::{
@@ -11,15 +12,36 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::suppress::ParsedSuppressions;
 use crate::{
-    DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
-    MemberAccess, MemberInfo, MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
+    AngularTemplateMemberAccessFact, AngularThisSpreadFact, DynamicCustomElementRenderFact,
+    DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, FactoryCallMemberAccessFact,
+    FactoryFnMemberAccessFact, FluentChainMemberAccessFact, FluentChainNewMemberAccessFact,
+    ImportInfo, ImportedName, InstanceExportBindingFact, MemberAccess, MemberInfo, MemberKind,
+    ModuleInfo, PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact,
+    PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact, ReExportInfo, RequireCallInfo,
+    SemanticFact, VisibilityTag,
 };
 use helpers::LitCustomElementDecorator;
+use helpers::array_element_type_from_type;
 use plow_types::extract::{
-    CalleeUse, ClassHeritageInfo, DiKeySite, LocalTypeDeclaration, MisplacedDirectiveSite,
-    PublicSignatureTypeReference, SanitizedSinkArg, SanitizerScope, SecurityControlSite,
-    SinkLiteralValue, SinkSite, SkippedSecurityCalleeSite, TaintedBinding,
+    AngularComponentSelector, AngularInputMember, AngularOutputMember, CalleeUse,
+    ClassHeritageInfo, ComponentFunction, ComponentProp, DiKeySite, DispatchedEvent, HookUse,
+    LocalTypeDeclaration, MisplacedDirectiveSite, PublicSignatureTypeReference, RenderEdge,
+    SanitizedSinkArg, SanitizerScope, SecurityControlSite, SinkLiteralValue, SinkSite,
+    SkippedSecurityCalleeSite, TaintedBinding,
 };
+
+/// Infer the element class of a Vue `defineProps` field whose declared type is an
+/// array (or nullable array) of a non-builtin class (`items: Util[]` /
+/// `Array<Util>` / `readonly Util[]` / `Util[] | null`). Thin crate-visible
+/// wrapper over the visitor helper so the SFC props harvest reuses the same
+/// inference the `v-for` binding fix uses, keyed by the prop field's `TSType`.
+/// Returns a non-builtin class name only; `number[]` / `Map[]` / non-array field
+/// types yield `None` (over-credit only, issue #1711).
+pub(crate) fn infer_props_field_array_element_type(
+    field_type: &oxc_ast::ast::TSType<'_>,
+) -> Option<String> {
+    array_element_type_from_type(field_type)
+}
 
 #[derive(Debug, Clone)]
 struct LocalClassExportInfo {
@@ -80,6 +102,52 @@ pub(crate) struct FactoryCallCandidate {
     pub(crate) callee_method: String,
 }
 
+/// `const local = useApi()` where `useApi` is a same-file function whose body
+/// returns `new Class()`. Resolved against `factory_return_functions` at finalize
+/// time so `local.member` credits the constructed class. See issue #1441.
+#[derive(Debug, Clone)]
+pub(crate) struct FactoryReturnCandidate {
+    pub(crate) local_name: String,
+    pub(crate) callee_name: String,
+}
+
+/// The classified right-hand side of a module-local assignment, used to build a
+/// VALUE proof that an aliased factory's returned local really holds a class
+/// instance, not merely a type annotation. See issue #1441.
+#[derive(Debug, Clone)]
+pub(crate) enum FactoryAssignedValue {
+    /// `id = new Class()`, directly a class instance.
+    NewClass(String),
+    /// `id = callee(...)`, a class instance only if `callee` is a strict
+    /// same-file factory (resolved at finalize).
+    Call(String),
+    /// Anything else (a literal, a mock, `as any`, …), poisons the proof.
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BindingTarget {
+    Class(String),
+    FactoryCall {
+        callee_object: String,
+        callee_method: String,
+    },
+}
+
+impl BindingTarget {
+    pub(crate) fn class_name(&self) -> Option<&str> {
+        match self {
+            Self::Class(name) => Some(name),
+            Self::FactoryCall { .. } => None,
+        }
+    }
+
+    fn class_with_suffix(&self, suffix: &str) -> Option<String> {
+        self.class_name()
+            .map(|class_name| format!("{class_name}.{suffix}"))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct PendingPlaywrightFactory {
     pub(crate) test_name: String,
@@ -108,6 +176,12 @@ enum SideEffectRegistrationTarget {
 struct LitCustomElementCandidate {
     decorator: LitCustomElementDecorator,
     target: SideEffectRegistrationTarget,
+    /// The `@customElement('x-foo')` tag literal, if statically recoverable.
+    /// `None` for a computed / non-literal tag argument (which the Lit
+    /// `unrendered-component` arm cannot key on, so no registration is recorded).
+    tag: Option<String>,
+    /// Start byte offset of the decorated class (anchors the finding).
+    span_start: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -126,16 +200,24 @@ pub(crate) struct ModuleInfoExtractor {
     pub(crate) require_calls: Vec<RequireCallInfo>,
     pub(crate) package_path_references: Vec<String>,
     pub(crate) member_accesses: Vec<MemberAccess>,
+    pub(crate) semantic_facts: Vec<SemanticFact>,
     pub(crate) whole_object_uses: Vec<String>,
     pub(crate) has_cjs_exports: bool,
     pub(crate) has_angular_component_template_url: bool,
     handled_require_spans: FxHashSet<Span>,
     handled_import_spans: FxHashSet<Span>,
     namespace_binding_names: Vec<String>,
-    binding_target_names: FxHashMap<String, String>,
+    binding_target_names: FxHashMap<String, BindingTarget>,
     interface_property_types: FxHashMap<String, FxHashMap<String, String>>,
     pending_typed_destructures: Vec<(String, String, String)>,
     iterable_element_types: FxHashMap<String, String>,
+    /// Module-scope value bindings whose type is an array (or Vue reactive array)
+    /// of a non-builtin class, keyed by binding name -> element class name. Read
+    /// by the Vue SFC template scanner to type a `v-for` loop variable to its
+    /// source iterable's element class so template member accesses on the item
+    /// (`{{ util.getter }}`) credit the class. Transient extractor state, not a
+    /// cached `ModuleInfo` field (mirrors `binding_target_names`).
+    array_binding_element_types: FxHashMap<String, String>,
     object_binding_candidates: Vec<ObjectBindingCandidate>,
     local_declaration_names: FxHashSet<String>,
     pending_local_export_specifiers: Vec<PendingLocalExportSpecifier>,
@@ -154,11 +236,61 @@ pub(crate) struct ModuleInfoExtractor {
     playwright_fixture_types: FxHashMap<String, Vec<(String, String)>>,
     block_depth: u32,
     function_depth: u32,
+    /// True while walking the immediate quasi of a tagged template. Tagged
+    /// templates receive raw values, so interpolation should not credit
+    /// `toString` coercion for the quasi itself.
+    in_tagged_template_quasi: bool,
     pub(crate) class_super_stack: Vec<Option<String>>,
     pub(crate) inline_template_findings: Vec<InlineTemplateFinding>,
     pub(crate) side_effect_registered_class_names: FxHashSet<String>,
     lit_custom_element_candidates: Vec<LitCustomElementCandidate>,
+    pub(crate) registered_custom_elements: Vec<plow_types::extract::RegisteredCustomElement>,
+    pub(crate) used_custom_element_tags: FxHashSet<String>,
     pub(crate) factory_call_candidates: Vec<FactoryCallCandidate>,
+    /// Same-file functions whose body returns `new Class()`, mapped to the class
+    /// name, plus the `const x = fn()` bindings to resolve against them. See #1441.
+    factory_return_functions: FxHashMap<String, String>,
+    factory_return_candidates: Vec<FactoryReturnCandidate>,
+    /// Same-file functions whose body returns a bare identifier (e.g.
+    /// `useApi() { return api }`). Resolved against `binding_target_names` at
+    /// finalize: a typed local (`let api: RESTApi`) promotes the function to a
+    /// `factory_return_functions` entry, so `const x = useApi()` credits the
+    /// class without tracing the assignment chain. See issue #1441 (var-return).
+    factory_return_alias_functions: FxHashMap<String, String>,
+    /// Subset of factory-return functions (by local name) whose body provably
+    /// returns a SINGLE class across ALL static return paths, the all-paths
+    /// unanimity proof required before a factory may be exported as cross-module
+    /// metadata. Stricter than `factory_return_functions` (which keeps the
+    /// same-file last-return leniency). Only entries here become
+    /// `ModuleInfo.exported_factory_returns`, bounding the cross-module
+    /// over-credit blast radius. See issue #1441 (Part A).
+    strict_factory_return_functions: FxHashMap<String, String>,
+    /// Alias factory functions (by local name) whose body is eligible for STRICT
+    /// (cross-module) promotion: it returns synchronously (not async/generator)
+    /// and cannot fall through to `undefined` (terminal last statement). The
+    /// same-file (loose) alias promotion does not require this. See #1441 (A).
+    strict_alias_eligible: FxHashSet<String>,
+    /// Module-scope identifier -> classified initializer right-hand sides, from
+    /// MODULE-SCOPE declarators and MODULE-SCOPE assignment expressions
+    /// (`let api = new RESTApi()`, `api = init()` at top level). A module-scope
+    /// write runs at load and dominates any later call, usable as PROOF and
+    /// checked for poison. See #1441 (Part A).
+    module_scope_initializers: FxHashMap<String, Vec<FactoryAssignedValue>>,
+    /// Identifier -> classified right-hand sides of EVERY assignment expression
+    /// to it, in ANY scope (sibling functions, non-dominating branches, …). Used
+    /// ONLY as a POISON input for the strict alias proof: a write to the returned
+    /// module binding that is `Other`/unresolved/a conflicting class (e.g.
+    /// `poison() { api = {} as any }`) makes the strict export abstain, since it
+    /// can leave the binding holding a non-class at return time. Declarations
+    /// (which introduce a separate binding) are intentionally excluded. See #1441
+    /// (Part A).
+    identifier_write_values: FxHashMap<String, Vec<FactoryAssignedValue>>,
+    /// Alias factory function (by local name) -> classified right-hand sides of
+    /// assignments to its RETURNED identifier, collected from that function's OWN
+    /// body only (not nested functions). Ties the value-proof to the alias
+    /// function itself, so an assignment in an unrelated/sibling function does not
+    /// falsely prove it. See #1441 (Part A).
+    alias_in_body_assignments: FxHashMap<String, Vec<FactoryAssignedValue>>,
     pub(crate) node_module_register_url_bindings: FxHashMap<String, Vec<String>>,
     pub(crate) child_process_fork_bindings: FxHashSet<String>,
     pub(crate) child_process_namespace_bindings: FxHashSet<String>,
@@ -228,6 +360,14 @@ pub(crate) struct ModuleInfoExtractor {
     /// prologue), so the RSC bundler silently ignores them. Captured by
     /// `visit_program` and consumed by the `misplaced-directive` detector.
     pub(crate) misplaced_directives: Vec<MisplacedDirectiveSite>,
+    /// Export LOCAL NAMES of exported functions / const-arrows whose body has an
+    /// inline `"use server"` directive. Captured by `extract_declaration_exports`
+    /// and consumed by the `unused-server-action` reclassifier. Only EXPORTED
+    /// declarations are captured (the capture sits on the exported-declaration
+    /// path), so a non-exported local function with a use-server body is never
+    /// recorded; even if it were, the reclassifier only matches against
+    /// unused-EXPORT names, so a stray name is inert.
+    pub(crate) inline_server_action_exports: Vec<String>,
     /// Vue `provide`/`inject` and Svelte `setContext`/`getContext` call sites
     /// keyed by a stable identifier symbol. Consumed by the `unprovided-inject`
     /// detector.
@@ -285,6 +425,173 @@ pub(crate) struct ModuleInfoExtractor {
     /// / `storeToRefs(s)`) so it never fires on a plain `new`-instance or object
     /// binding, keeping class-member detection drift-free. Working state only.
     store_instance_locals: FxHashSet<String>,
+    /// Local type aliases of the form `type X = ReturnType<typeof useFooStore>`
+    /// mapped to the store factory name (`X -> useFooStore`). Lets a param typed
+    /// as the store (`(s: X)` or `(props: { store: X })`) bind to the factory so
+    /// `s.member` / `props.store.member` credit the store member through the
+    /// existing `binding_target_names` remap (issue #1489 Case 2). Working state
+    /// only; never persisted.
+    ///
+    /// Resolution is source-order-dependent (recorded during the walk, the same
+    /// constraint as class type-param resolution): an alias declared BELOW its
+    /// first consuming param is not in the map yet when the param is processed,
+    /// so that one ordering keeps the false positive. The inline
+    /// `ReturnType<typeof useStore>` annotation needs no alias and is unaffected.
+    type_alias_store_factory: FxHashMap<String, String>,
+    /// SvelteKit `load()` return-object keys harvested from a `load` export.
+    /// Basename-gated to page-load producers in `parse.rs` (cleared for any
+    /// non-`+page.{ts,server.ts,js,server.js}` file). Consumed by the
+    /// `unused-load-data-key` detector.
+    pub(crate) load_return_keys: Vec<plow_types::extract::LoadReturnKey>,
+    /// `true` when a `load` export was seen whose body could not be harvested
+    /// safely (spread/non-literal/multi-return/computed-key/wrapped). Forces the
+    /// `unused-load-data-key` detector to abstain on the whole file.
+    pub(crate) has_unharvestable_load: bool,
+    /// `true` when this file passes the whole `data` binding opaquely
+    /// (`const X = data`, `fn(data)` / `fn(...data)`). Name-gated on `data`.
+    /// Consumed only by the `unused-load-data-key` detector (FP-1).
+    pub(crate) has_load_data_whole_use: bool,
+    /// `true` when the parse is JSX-capable (`.jsx`/`.tsx`, or a `.js`/`.ts`
+    /// file re-parsed through the JSX retry). Gates the React/JSX structural
+    /// walk so it is a no-op on non-JSX files (perf: `audit` hot path on
+    /// non-React repos must not regress). Set by `parse.rs` after construction.
+    pub(crate) jsx_capable: bool,
+    /// React component definitions captured during the JSX walk. Empty unless
+    /// `jsx_capable`.
+    pub(crate) component_functions: Vec<ComponentFunction>,
+    /// React component props (reuses `ComponentProp`; `used_in_template` always
+    /// false, `used_in_script` = used-in-body). Empty unless `jsx_capable`.
+    pub(crate) react_props: Vec<ComponentProp>,
+    /// React hook call sites. Empty unless `jsx_capable`.
+    pub(crate) hook_uses: Vec<HookUse>,
+    /// React render edges (child name captured; resolution deferred to graph
+    /// build). Empty unless `jsx_capable`.
+    pub(crate) render_edges: Vec<RenderEdge>,
+    /// Stack of enclosing React component names, pushed when a component
+    /// function/arrow is entered and popped on exit. The top is the
+    /// `parent_component` for any render edge or hook captured inside.
+    pub(crate) component_stack: Vec<String>,
+    /// Pending React-component metadata for a named arrow / function-expression
+    /// binding, keyed by the arrow/function span. Populated in
+    /// `visit_variable_declaration` BEFORE the walk descends into the init, then
+    /// consumed by `visit_arrow_function_expression` /
+    /// `visit_function` to push the component stack with the binding name. Working
+    /// state only (not persisted, not merged across SFC blocks).
+    pub(crate) pending_component_arrows: FxHashMap<Span, PendingComponentArrow>,
+    /// Same-file object-type declarations eligible to back a React component's
+    /// bare-identifier typed props param (`(props: Props) => ...`). Maps the
+    /// type/interface name to its `(prop_name, span_start)` members, populated
+    /// ONLY for a plain object shape: an `interface X { ... }` with no `extends`
+    /// and no type parameters, or a `type X = { ... }` whose annotation is a bare
+    /// object type literal with no type parameters. An `extends` / intersection /
+    /// generic / mapped / imported type never enters this map, so a pending typed
+    /// props harvest that misses it abstains (ADR-001, zero-FP). Working state,
+    /// not persisted.
+    pub(crate) react_object_type_props: FxHashMap<String, Vec<(String, u32)>>,
+    /// React components whose first param is a bare identifier with a
+    /// same-file-resolvable object-type annotation, deferred to finalize because
+    /// the backing interface/type may hoist (be declared after the component).
+    /// The `props.<name>` member-access usage is computed at capture time (the
+    /// body is in hand then); the prop-name SET is resolved in finalize against
+    /// `react_object_type_props`. Working state, not persisted.
+    pub(crate) pending_typed_react_props: Vec<PendingTypedReactProps>,
+    /// Angular component/directive inputs harvested from Angular-decorated
+    /// classes (`@Input()` decorators and signal `input()` / `model()`
+    /// initializers). Accumulated across every Angular class in the module and
+    /// copied onto `ModuleInfo.angular_inputs`. Consumed by the
+    /// `unused-component-input` detector.
+    pub(crate) angular_inputs: Vec<AngularInputMember>,
+    /// Angular component/directive outputs harvested from Angular-decorated
+    /// classes (`@Output()` decorators and signal `output()` /
+    /// `outputFromObservable()` initializers). Accumulated across every Angular
+    /// class in the module and copied onto `ModuleInfo.angular_outputs`. Consumed
+    /// by the `unused-component-output` detector.
+    pub(crate) angular_outputs: Vec<AngularOutputMember>,
+    /// Spans of Angular classes already harvested into `angular_inputs` /
+    /// `angular_outputs`. An `export class FooComponent` is visited by both the
+    /// named-export declaration path and the top-level class-declaration path, so
+    /// this dedups the harvest and prevents one declared input/output from being
+    /// flagged twice.
+    pub(crate) harvested_angular_class_spans: FxHashSet<Span>,
+    /// Angular `@Component` declarations with their `selector` value(s), harvested
+    /// from `@Component({ selector })` decorators. Accumulated across every
+    /// Angular component class in the module and copied onto
+    /// `ModuleInfo.angular_component_selectors`. Consumed by the Angular arm of
+    /// the `unrendered-component` detector.
+    pub(crate) angular_component_selectors: Vec<AngularComponentSelector>,
+    /// Custom element selector tags referenced in this file's Angular templates
+    /// (inline `template:` blocks). External `templateUrl` `.html` files are
+    /// scanned separately when that file is parsed. Copied onto
+    /// `ModuleInfo.angular_used_selectors`.
+    pub(crate) angular_used_selectors: Vec<String>,
+    /// Angular component class names referenced as a route entry or bootstrap
+    /// target (route `component:` / `loadComponent`, `bootstrapApplication` /
+    /// `bootstrap: [...]`). Copied onto `ModuleInfo.angular_entry_component_refs`
+    /// (the Angular `unrendered-component` entry-point abstain).
+    pub(crate) angular_entry_component_refs: Vec<String>,
+    /// `true` when a dynamic component render was seen
+    /// (`*.createComponent(<ident>)`). Copied onto
+    /// `ModuleInfo.has_dynamic_component_render` (the Angular
+    /// `unrendered-component` project-wide abstain).
+    pub(crate) has_dynamic_component_render: bool,
+    /// Local binding names bound from `const dispatch = createEventDispatcher()`
+    /// (where `createEventDispatcher` is imported from `svelte`). A
+    /// `dispatch('<name>')` call through one of these bindings records a
+    /// `DispatchedEvent`. Working state, then copied as the gate for the dispatch
+    /// harvest. Not persisted.
+    pub(crate) event_dispatch_bindings: FxHashSet<String>,
+    /// Svelte custom events dispatched via `dispatch('<name>')` (literal arg).
+    /// Copied onto `ModuleInfo.svelte_dispatched_events`. Consumed by the
+    /// `unused-svelte-event` detector.
+    pub(crate) svelte_dispatched_events: Vec<DispatchedEvent>,
+    /// `true` when a `dispatch(<nonLiteral>)` call was seen, or a `dispatch`
+    /// binding was used as a whole value (passed / returned). Forces the
+    /// `unused-svelte-event` detector to abstain on the whole component.
+    pub(crate) has_dynamic_dispatch: bool,
+}
+
+/// Metadata for a named arrow / function-expression that may be a React
+/// component, captured at the declarator before the function body is walked.
+#[derive(Debug, Clone)]
+pub(crate) struct PendingComponentArrow {
+    /// The binding name.
+    pub(crate) name: String,
+    /// The component kind (`Arrow`, or a `forwardRef` / `memo` wrapper).
+    pub(crate) kind: plow_types::extract::ComponentFunctionKind,
+    /// Whether the binding is exported.
+    pub(crate) is_exported: bool,
+    /// For a `forwardRef<Ref, Props>((props, ref) => ...)` wrapper, the bare
+    /// single-name SECOND generic type argument (`Props`). The inner render
+    /// function's `props` param carries no annotation in this shape, so the props
+    /// type lives on the wrapper call's type arguments instead. Resolved against
+    /// `react_object_type_props` in finalize, exactly like an inline
+    /// `(props: Props)` annotation. `None` for every non-generic / unresolvable
+    /// shape (the inner param's own annotation, if any, still wins).
+    pub(crate) props_type_name: Option<String>,
+}
+
+/// A React component whose first param is a bare identifier carrying a
+/// same-file object-type annotation (`(props: Props) => ...`). Captured during
+/// the body walk so `props.<name>` member-access usage is recorded against the
+/// props local while the body is in hand; the prop-name set is resolved in
+/// finalize because the backing interface/type may be declared after the
+/// component (TypeScript hoists type declarations).
+#[derive(Debug, Clone)]
+pub(crate) struct PendingTypedReactProps {
+    /// The enclosing component name (`ComponentProp.component`).
+    pub(crate) component: String,
+    /// The bare-identifier props parameter local (e.g. `props`).
+    pub(crate) props_local: String,
+    /// The annotation type name to resolve against `react_object_type_props`.
+    pub(crate) type_name: String,
+    /// Prop names read via `<props_local>.<name>` member access (or via a
+    /// `const { name } = props` destructure local) anywhere in the body. A name
+    /// in this set is credited `used_in_script = true`.
+    pub(crate) member_uses: FxHashSet<String>,
+    /// `true` when the props binding is consumed as a whole object (passed to a
+    /// call/hook, spread, returned, or assigned). The prop set is then opaque, so
+    /// the whole component abstains (`has_unharvestable_props`).
+    pub(crate) has_whole_object_use: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -317,8 +624,221 @@ impl ModuleInfoExtractor {
         );
     }
 
-    pub(crate) fn binding_target_names(&self) -> &FxHashMap<String, String> {
+    pub(crate) fn binding_target_names(&self) -> &FxHashMap<String, BindingTarget> {
         &self.binding_target_names
+    }
+
+    pub(crate) fn array_binding_element_types(&self) -> &FxHashMap<String, String> {
+        &self.array_binding_element_types
+    }
+
+    /// Mutable accessor so the SFC props harvest can record `props.<field>` ->
+    /// element-class entries after the visit but before the template-visible
+    /// iterable-types read, typing a Vue `v-for="(util) of props.items"` loop
+    /// item to the prop field's array element class (issue #1711).
+    pub(crate) fn array_binding_element_types_mut(&mut self) -> &mut FxHashMap<String, String> {
+        &mut self.array_binding_element_types
+    }
+
+    /// Seed the array/reactive-array element-type map from an already-parsed
+    /// scope (the Astro frontmatter). Used by the Astro template-expression pass
+    /// so a fresh extractor visiting `{utils.map((util) => util.getter)}` can bind
+    /// `util` to the frontmatter's `const utils: Util[]` element class. See issue
+    /// #1713.
+    pub(crate) fn seed_array_binding_element_types(
+        &mut self,
+        element_types: &FxHashMap<String, String>,
+    ) {
+        for (binding, class) in element_types {
+            self.array_binding_element_types
+                .insert(binding.clone(), class.clone());
+        }
+    }
+
+    /// Run the bound-member resolution finalize and take the member accesses that
+    /// resolved onto a SEEDED element class. For the Astro template-expression
+    /// pass (issue #1713): a fresh extractor seeded with the frontmatter element
+    /// types visits the template `{...}` expression regions,
+    /// `bind_iterable_callback_parameter` types each `.map((util) => ...)` callback
+    /// param to its element class during the walk, and `resolve_bound_member_accesses`
+    /// re-emits the class-qualified access (`Util.getter`). This returns ONLY those
+    /// class-qualified accesses (object == a seeded element-class name), dropping
+    /// the raw `util.getter` / `utils.map` noise so nothing but the intended
+    /// element-class credit reaches the module. Accesses are span-less name pairs,
+    /// so no un-remapped template-region span ever leaks into the module.
+    pub(crate) fn take_resolved_iteration_member_accesses(&mut self) -> Vec<MemberAccess> {
+        self.resolve_typed_destructure_bindings();
+        self.resolve_bound_member_accesses();
+        let element_classes: FxHashSet<&str> = self
+            .array_binding_element_types
+            .values()
+            .map(String::as_str)
+            .collect();
+        self.member_accesses
+            .drain(..)
+            .filter(|access| element_classes.contains(access.object.as_str()))
+            .collect()
+    }
+
+    fn insert_class_binding_target(&mut self, binding: String, target: String) {
+        self.binding_target_names
+            .insert(binding, BindingTarget::Class(target));
+    }
+
+    fn insert_class_binding_target_if_absent(&mut self, binding: String, target: String) {
+        self.binding_target_names
+            .entry(binding)
+            .or_insert(BindingTarget::Class(target));
+    }
+
+    pub(crate) fn record_angular_template_member_fact(&mut self, member: String) {
+        self.semantic_facts
+            .push(SemanticFact::AngularTemplateMemberAccess(
+                AngularTemplateMemberAccessFact { member },
+            ));
+    }
+
+    pub(crate) fn record_angular_this_spread_fact(&mut self) {
+        self.semantic_facts
+            .push(SemanticFact::AngularThisSpread(AngularThisSpreadFact));
+    }
+
+    pub(crate) fn record_dynamic_custom_element_render_fact(&mut self) {
+        self.semantic_facts
+            .push(SemanticFact::DynamicCustomElementRender(
+                DynamicCustomElementRenderFact,
+            ));
+    }
+
+    fn record_instance_export_binding_fact(&mut self, export_name: String, target_name: String) {
+        self.semantic_facts
+            .push(SemanticFact::InstanceExportBinding(
+                InstanceExportBindingFact {
+                    export_name,
+                    target_name,
+                },
+            ));
+    }
+
+    fn record_factory_call_member_fact(
+        &mut self,
+        callee_object: String,
+        callee_method: String,
+        member: String,
+    ) {
+        self.semantic_facts
+            .push(SemanticFact::FactoryCallMemberAccess(
+                FactoryCallMemberAccessFact {
+                    callee_object,
+                    callee_method,
+                    member,
+                },
+            ));
+    }
+
+    fn record_factory_fn_member_fact(&mut self, callee_name: String, member: String) {
+        self.semantic_facts
+            .push(SemanticFact::FactoryFnMemberAccess(
+                FactoryFnMemberAccessFact {
+                    callee_name,
+                    member,
+                },
+            ));
+    }
+
+    pub(crate) fn record_fluent_chain_member_fact(
+        &mut self,
+        root_object: String,
+        root_method: String,
+        chain: Vec<String>,
+        member: String,
+    ) {
+        self.semantic_facts
+            .push(SemanticFact::FluentChainMemberAccess(
+                FluentChainMemberAccessFact {
+                    root_object,
+                    root_method,
+                    chain,
+                    member,
+                },
+            ));
+    }
+
+    pub(crate) fn record_fluent_chain_new_member_fact(
+        &mut self,
+        class_name: String,
+        chain: Vec<String>,
+        member: String,
+    ) {
+        self.semantic_facts
+            .push(SemanticFact::FluentChainNewMemberAccess(
+                FluentChainNewMemberAccessFact {
+                    class_name,
+                    chain,
+                    member,
+                },
+            ));
+    }
+
+    pub(crate) fn record_playwright_fixture_use_fact(
+        &mut self,
+        test_name: String,
+        fixture_name: String,
+        member: String,
+    ) {
+        self.semantic_facts.push(SemanticFact::PlaywrightFixtureUse(
+            PlaywrightFixtureUseFact {
+                test_name,
+                fixture_name,
+                member,
+            },
+        ));
+    }
+
+    pub(crate) fn record_playwright_fixture_definition_fact(
+        &mut self,
+        test_name: String,
+        fixture_name: String,
+        type_name: String,
+    ) {
+        self.semantic_facts
+            .push(SemanticFact::PlaywrightFixtureDefinition(
+                PlaywrightFixtureDefinitionFact {
+                    test_name,
+                    fixture_name,
+                    type_name,
+                },
+            ));
+    }
+
+    pub(crate) fn record_playwright_fixture_alias_fact(
+        &mut self,
+        test_name: String,
+        base_name: String,
+    ) {
+        self.semantic_facts
+            .push(SemanticFact::PlaywrightFixtureAlias(
+                PlaywrightFixtureAliasFact {
+                    test_name,
+                    base_name,
+                },
+            ));
+    }
+
+    pub(crate) fn record_playwright_fixture_type_fact(
+        &mut self,
+        alias_name: String,
+        fixture_name: String,
+        type_name: String,
+    ) {
+        self.semantic_facts
+            .push(SemanticFact::PlaywrightFixtureType(
+                PlaywrightFixtureTypeFact {
+                    alias_name,
+                    fixture_name,
+                    type_name,
+                },
+            ));
     }
 
     pub(crate) fn record_local_declaration_name(&mut self, name: &str) {
@@ -326,6 +846,14 @@ impl ModuleInfoExtractor {
     }
 
     pub(crate) fn remap_spans_with(&mut self, mut remap: impl FnMut(Span) -> Span) {
+        self.remap_graph_spans(&mut remap);
+        self.remap_type_and_signature_spans(&mut remap);
+        self.remap_handled_spans(&mut remap);
+        self.remap_security_spans(&mut remap);
+    }
+
+    /// Remap import/export/re-export/dynamic-import/require graph spans.
+    fn remap_graph_spans(&mut self, remap: &mut impl FnMut(Span) -> Span) {
         for export in &mut self.exports {
             export.span = remap(export.span);
             for member in &mut export.members {
@@ -348,6 +876,11 @@ impl ModuleInfoExtractor {
         for require_call in &mut self.require_calls {
             require_call.span = remap(require_call.span);
         }
+    }
+
+    /// Remap type declarations, signature references, pending specifiers, and
+    /// local class member spans.
+    fn remap_type_and_signature_spans(&mut self, remap: &mut impl FnMut(Span) -> Span) {
         for declaration in &mut self.local_type_declarations {
             declaration.span = remap(declaration.span);
         }
@@ -365,6 +898,10 @@ impl ModuleInfoExtractor {
                 member.span = remap(member.span);
             }
         }
+    }
+
+    /// Remap the deduped handled-require / handled-import span sets.
+    fn remap_handled_spans(&mut self, remap: &mut impl FnMut(Span) -> Span) {
         self.handled_require_spans = self
             .handled_require_spans
             .iter()
@@ -375,6 +912,10 @@ impl ModuleInfoExtractor {
             .iter()
             .map(|span| remap(*span))
             .collect();
+    }
+
+    /// Remap inline-template, security sink, and security control site spans.
+    fn remap_security_spans(&mut self, remap: &mut impl FnMut(Span) -> Span) {
         for finding in &mut self.inline_template_findings {
             finding.decorator_start =
                 remap(Span::new(finding.decorator_start, finding.decorator_start)).start;
@@ -435,6 +976,7 @@ impl ModuleInfoExtractor {
                     local_name: Some(spec.local_name),
                     is_type_only: spec.is_type_only,
                     visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
                     span: spec.span,
                     members: vec![],
                     is_side_effect_used: false,
@@ -490,9 +1032,24 @@ impl ModuleInfoExtractor {
 
         let mut class_names = Vec::new();
         let mut anonymous_default_indices = Vec::new();
+        let mut registrations = Vec::new();
         for candidate in &self.lit_custom_element_candidates {
             if !self.is_lit_custom_element_decorator(&candidate.decorator) {
                 continue;
+            }
+            // Record the registration for the Lit `unrendered-component` arm, but
+            // only when a static tag literal was recoverable (a computed tag is
+            // not flaggable). The class-local name drives the public-API abstain.
+            if let Some(tag) = &candidate.tag {
+                let class_local_name = match &candidate.target {
+                    SideEffectRegistrationTarget::LocalClass(name) => name.clone(),
+                    SideEffectRegistrationTarget::AnonymousDefaultExport(_) => String::new(),
+                };
+                registrations.push(plow_types::extract::RegisteredCustomElement {
+                    tag: tag.clone(),
+                    class_local_name,
+                    span_start: candidate.span_start,
+                });
             }
             match &candidate.target {
                 SideEffectRegistrationTarget::LocalClass(class_name) => {
@@ -504,6 +1061,7 @@ impl ModuleInfoExtractor {
             }
         }
 
+        self.registered_custom_elements.extend(registrations);
         self.side_effect_registered_class_names.extend(class_names);
         for index in anonymous_default_indices {
             if let Some(export) = self.exports.get_mut(index) {
@@ -516,9 +1074,16 @@ impl ModuleInfoExtractor {
         &mut self,
         decorator: LitCustomElementDecorator,
         target: SideEffectRegistrationTarget,
+        tag: Option<String>,
+        span_start: u32,
     ) {
         self.lit_custom_element_candidates
-            .push(LitCustomElementCandidate { decorator, target });
+            .push(LitCustomElementCandidate {
+                decorator,
+                target,
+                tag,
+                span_start,
+            });
     }
 
     fn apply_side_effect_registrations(&mut self) {
@@ -581,20 +1146,20 @@ impl ModuleInfoExtractor {
             return;
         }
 
-        let additional_accesses: Vec<MemberAccess> = self
-            .exports
-            .iter()
-            .filter_map(|export| {
-                let local_name = export.local_name.as_deref()?;
-                let target_name = self.binding_target_names.get(local_name)?;
-                Some(MemberAccess {
-                    object: format!("{}{}", crate::INSTANCE_EXPORT_SENTINEL, export.name),
-                    member: target_name.clone(),
-                })
-            })
-            .collect();
-
-        self.member_accesses.extend(additional_accesses);
+        for export in self.exports.clone() {
+            let Some(local_name) = export.local_name.as_deref() else {
+                continue;
+            };
+            let Some(target_name) = self
+                .binding_target_names
+                .get(local_name)
+                .and_then(BindingTarget::class_name)
+            else {
+                continue;
+            };
+            let export_name = export.name.to_string();
+            self.record_instance_export_binding_fact(export_name, target_name.to_string());
+        }
     }
 
     fn map_local_signature_refs_to_exports(&mut self) {
@@ -670,15 +1235,11 @@ impl ModuleInfoExtractor {
 
         for (test_name, bindings) in factory_bindings {
             for (fixture_name, type_name) in bindings {
-                self.member_accesses.push(MemberAccess {
-                    object: format!(
-                        "{}{}:{}",
-                        crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
-                        test_name,
-                        fixture_name,
-                    ),
-                    member: type_name,
-                });
+                self.record_playwright_fixture_definition_fact(
+                    test_name.clone(),
+                    fixture_name,
+                    type_name,
+                );
             }
         }
     }
@@ -706,7 +1267,7 @@ impl ModuleInfoExtractor {
                         && m.name == callee_method
                 })
             {
-                self.binding_target_names.insert(local_name, callee_object);
+                self.insert_class_binding_target(local_name, callee_object);
                 continue;
             }
 
@@ -715,13 +1276,216 @@ impl ModuleInfoExtractor {
                 .iter()
                 .any(|import| import.local_name == callee_object);
             if has_import {
-                let sentinel = format!(
-                    "{}{callee_object}:{callee_method}",
-                    crate::FACTORY_CALL_SENTINEL,
+                self.binding_target_names.insert(
+                    local_name,
+                    BindingTarget::FactoryCall {
+                        callee_object,
+                        callee_method,
+                    },
                 );
-                self.binding_target_names.insert(local_name, sentinel);
             }
         }
+    }
+
+    /// Promote `useApi() { return api }`-style functions so `const x = useApi()`
+    /// credits the class. TWO promotions with different proofs:
+    ///
+    /// - SAME-FILE (loose) `factory_return_functions`: the returned identifier
+    ///   resolves to a class in `binding_target_names` (e.g. a typed `let api:
+    ///   RESTApi`). A type annotation is acceptable here, the blast radius is one
+    ///   file. This preserves the original var-return behavior.
+    /// - CROSS-MODULE (strict) `strict_factory_return_functions`: ALSO requires a
+    ///   VALUE proof, the returned local must be assigned `new Class()` or a
+    ///   strict same-file factory (`value_prove_alias`), and the function must be
+    ///   sync + non-falling-through (`strict_alias_eligible`). A type annotation
+    ///   alone (`let api: RESTApi` assigned a mock) must NOT leak into
+    ///   cross-module credit. See #1441 (Part A).
+    fn resolve_factory_return_aliases(&mut self) {
+        if self.factory_return_alias_functions.is_empty() {
+            return;
+        }
+        let aliases = std::mem::take(&mut self.factory_return_alias_functions);
+        for (fn_name, returned_id) in aliases {
+            if self.factory_return_functions.contains_key(&fn_name) {
+                continue;
+            }
+            let Some(class_name) = self
+                .binding_target_names
+                .get(&returned_id)
+                .and_then(BindingTarget::class_name)
+            else {
+                continue;
+            };
+            let class_name = class_name.to_string();
+            // Cross-module strict promotion: a sync, terminal body AND a VALUE
+            // proof tied to THIS function. Done before the loose insert so a
+            // type-only binding never reaches the strict map.
+            if self.strict_alias_eligible.contains(&fn_name)
+                && let Some(proven_class) = self.value_prove_alias(&fn_name, &returned_id)
+            {
+                self.strict_factory_return_functions
+                    .insert(fn_name.clone(), proven_class);
+            }
+            self.factory_return_functions.insert(fn_name, class_name);
+        }
+    }
+
+    /// VALUE-prove the class an alias factory `fn_name` returns through its
+    /// returned identifier `returned_id`. The proof is tied to the function:
+    /// assignments to `returned_id` inside `fn_name`'s OWN body
+    /// (`alias_in_body_assignments`) plus a MODULE-SCOPE initializer of
+    /// `returned_id` (`module_scope_initializers`), never an assignment in an
+    /// unrelated/sibling function. `new Class()` proves directly; `factory()`
+    /// proves only when `factory` is a strict same-file factory. Proven ONLY with
+    /// at least one resolvable source and ALL sources agreeing on one class; any
+    /// `Other`/unresolved/conflicting source abstains. So `let api: RESTApi` with
+    /// no class-proven write is not proven. See #1441 (Part A).
+    fn value_prove_alias(&self, fn_name: &str, returned_id: &str) -> Option<String> {
+        // PROOF: dominating writes, the alias's own dominating in-body
+        // assignments and module-scope initializers. Must be unanimous on one
+        // class, with at least one source.
+        let mut class: Option<String> = None;
+        let mut saw_source = false;
+        let proof_sources = self
+            .alias_in_body_assignments
+            .get(fn_name)
+            .into_iter()
+            .flatten()
+            .chain(
+                self.module_scope_initializers
+                    .get(returned_id)
+                    .into_iter()
+                    .flatten(),
+            );
+        for value in proof_sources {
+            saw_source = true;
+            let resolved = self.resolve_factory_assigned_value(value)?;
+            match &class {
+                None => class = Some(resolved),
+                Some(existing) if *existing == resolved => {}
+                Some(_) => return None,
+            }
+        }
+        let class = if saw_source { class? } else { return None };
+
+        // POISON: ANY write to the binding (any scope, incl. sibling functions
+        // and non-dominating branches) that is `Other`/unresolved or a CONFLICTING
+        // class means the binding can hold a non-`class` value at return time
+        // (e.g. `poison() { api = {} as any }`). Abstain. A write that resolves to
+        // the same class is harmless. See #1441 (Part A).
+        let poison_sources = self
+            .identifier_write_values
+            .get(returned_id)
+            .into_iter()
+            .flatten()
+            .chain(
+                self.module_scope_initializers
+                    .get(returned_id)
+                    .into_iter()
+                    .flatten(),
+            );
+        for value in poison_sources {
+            match self.resolve_factory_assigned_value(value) {
+                Some(resolved) if resolved == class => {}
+                _ => return None,
+            }
+        }
+        Some(class)
+    }
+
+    /// Resolve a classified assignment value to the class it produces: a direct
+    /// `new Class()`, or a `factory()` call only when the callee is a strict
+    /// same-file factory. `Other` and unresolved calls yield `None`. #1441 (A).
+    fn resolve_factory_assigned_value(&self, value: &FactoryAssignedValue) -> Option<String> {
+        match value {
+            FactoryAssignedValue::NewClass(name) => Some(name.clone()),
+            FactoryAssignedValue::Call(callee) => {
+                self.strict_factory_return_functions.get(callee).cloned()
+            }
+            FactoryAssignedValue::Other => None,
+        }
+    }
+
+    /// Resolve `const x = useApi()` bindings. A same-file factory whose body
+    /// returns `new Class()` binds `x` directly to the class so `x.member`
+    /// credits it. An IMPORTED factory callee instead emits a typed
+    /// `FactoryFnMemberAccess` fact so the analyze layer resolves the returned
+    /// class across the module boundary via `exported_factory_returns`. See issue
+    /// #1441 (Part A).
+    fn resolve_factory_return_candidates(&mut self) {
+        if self.factory_return_candidates.is_empty() {
+            return;
+        }
+        let candidates = std::mem::take(&mut self.factory_return_candidates);
+        let mut deferred_factory_facts: Vec<(String, String)> = Vec::new();
+        for candidate in candidates {
+            // Same-file factory returning `new Class()`: bind the local to the
+            // class so `resolve_bound_member_accesses` credits `x.member` directly.
+            if let Some(class_name) = self.factory_return_functions.get(&candidate.callee_name) {
+                let class_name = class_name.clone();
+                self.binding_target_names
+                    .entry(candidate.local_name)
+                    .or_insert(BindingTarget::Class(class_name));
+                continue;
+            }
+            // Cross-module: `const x = importedFactory()`. We do NOT route through
+            // `binding_target_names` here: the Pinia store-consumption heuristic
+            // (`is_store_factory_call`) already weakly binds every imported-call
+            // local to its bare callee name, which would shadow a fact binding.
+            // Instead emit the factory-fn member facts directly for the local's
+            // first-level reads. The analyze layer credits a class only when the
+            // callee resolves to a proven exported factory return; for any other
+            // callee (a real store, a plain helper) it is a harmless no-op.
+            // See issue #1441 (Part A).
+            let callee_is_imported = self
+                .imports
+                .iter()
+                .any(|import| import.local_name == candidate.callee_name);
+            if !callee_is_imported {
+                continue;
+            }
+            for access in &self.member_accesses {
+                if access.object == candidate.local_name {
+                    deferred_factory_facts
+                        .push((candidate.callee_name.clone(), access.member.clone()));
+                }
+            }
+        }
+        for (callee_name, member) in deferred_factory_facts {
+            self.record_factory_fn_member_fact(callee_name, member);
+        }
+    }
+
+    /// Build the cross-module `exported_factory_returns` metadata: join the
+    /// strict (all-paths-unanimous) factory map against this module's exports, so
+    /// a `const x = useApi()` consumer can credit the returned class across the
+    /// boundary. The stored class name is the factory module's own LOCAL name,
+    /// resolved at analyze time through this module's imports to the real class
+    /// export. Only strict entries qualify, bounding over-credit. Must run after
+    /// `resolve_factory_return_aliases` has populated the strict map. See issue
+    /// #1441 (Part A).
+    fn collect_exported_factory_returns(&self) -> Vec<plow_types::extract::FactoryReturnExport> {
+        if self.strict_factory_return_functions.is_empty() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for export in &self.exports {
+            if export.is_type_only {
+                continue;
+            }
+            let local_name = match (export.local_name.as_deref(), &export.name) {
+                (Some(local), _) => local,
+                (None, ExportName::Named(name)) => name.as_str(),
+                (None, ExportName::Default) => continue,
+            };
+            if let Some(class_local_name) = self.strict_factory_return_functions.get(local_name) {
+                out.push(plow_types::extract::FactoryReturnExport {
+                    export_name: export.name.to_string(),
+                    class_local_name: class_local_name.clone(),
+                });
+            }
+        }
+        out
     }
 
     pub(crate) fn resolve_typed_destructure_bindings(&mut self) {
@@ -736,13 +1500,11 @@ impl ModuleInfoExtractor {
             let Some(class_name) = properties.get(&property_key) else {
                 continue;
             };
-            self.binding_target_names
-                .entry(local)
-                .or_insert_with(|| class_name.clone());
+            self.insert_class_binding_target_if_absent(local, class_name.clone());
         }
     }
 
-    fn resolve_bound_object_name(&self, object: &str) -> Option<String> {
+    fn resolve_bound_object_name(&self, object: &str) -> Option<BindingTarget> {
         if let Some(target_name) = self.binding_target_names.get(object) {
             return Some(target_name.clone());
         }
@@ -751,10 +1513,9 @@ impl ModuleInfoExtractor {
             .iter()
             .filter_map(|(binding, target_name)| {
                 let suffix = object.strip_prefix(binding.as_str())?.strip_prefix('.')?;
-                if target_name.starts_with(crate::FACTORY_CALL_SENTINEL) {
-                    return None;
-                }
-                Some((binding.len(), format!("{target_name}.{suffix}")))
+                target_name
+                    .class_with_suffix(suffix)
+                    .map(|object_name| (binding.len(), BindingTarget::Class(object_name)))
             })
             .max_by_key(|(len, _)| *len)
             .map(|(_, object_name)| object_name)
@@ -764,23 +1525,39 @@ impl ModuleInfoExtractor {
         if self.binding_target_names.is_empty() {
             return;
         }
-        let additional_accesses: Vec<MemberAccess> = self
-            .member_accesses
-            .iter()
-            .filter_map(|access| {
-                self.resolve_bound_object_name(&access.object)
-                    .map(|object| MemberAccess {
-                        object,
-                        member: access.member.clone(),
-                    })
-            })
-            .collect();
+        let mut additional_accesses = Vec::new();
+        let mut additional_facts = Vec::new();
+        for access in &self.member_accesses {
+            let Some(target) = self.resolve_bound_object_name(&access.object) else {
+                continue;
+            };
+            match target {
+                BindingTarget::Class(object) => additional_accesses.push(MemberAccess {
+                    object,
+                    member: access.member.clone(),
+                }),
+                BindingTarget::FactoryCall {
+                    callee_object,
+                    callee_method,
+                } => additional_facts.push((callee_object, callee_method, access.member.clone())),
+            }
+        }
         let additional_whole: Vec<String> = self
             .whole_object_uses
             .iter()
             .filter_map(|name| self.resolve_bound_object_name(name))
+            .filter_map(|target| {
+                if let BindingTarget::Class(name) = target {
+                    Some(name)
+                } else {
+                    None
+                }
+            })
             .collect();
         self.member_accesses.extend(additional_accesses);
+        for (callee_object, callee_method, member) in additional_facts {
+            self.record_factory_call_member_fact(callee_object, callee_method, member);
+        }
         self.whole_object_uses.extend(additional_whole);
     }
 
@@ -828,8 +1605,8 @@ impl ModuleInfoExtractor {
             StructuralCallArgument::Binding(binding) => self
                 .binding_target_names
                 .get(binding.as_str())
-                .filter(|target| !target.starts_with(crate::FACTORY_CALL_SENTINEL))
-                .cloned(),
+                .and_then(BindingTarget::class_name)
+                .map(str::to_string),
         }
     }
 
@@ -857,6 +1634,9 @@ impl ModuleInfoExtractor {
         }
         let mut aliases = Vec::new();
         for (binding_path, target_name) in &self.binding_target_names {
+            let Some(target_name) = target_name.class_name() else {
+                continue;
+            };
             if !self
                 .namespace_binding_names
                 .iter()
@@ -878,7 +1658,7 @@ impl ModuleInfoExtractor {
                 aliases.push(plow_types::extract::NamespaceObjectAlias {
                     via_export_name: canonical_name,
                     suffix: suffix.to_string(),
-                    namespace_local: target_name.clone(),
+                    namespace_local: target_name.to_string(),
                 });
             }
         }
@@ -891,11 +1671,40 @@ impl ModuleInfoExtractor {
             local_name: Some(name.to_string()),
             is_type_only: true,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span,
             members: vec![],
             is_side_effect_used: false,
             super_class: None,
         });
+    }
+
+    /// Run every finalize/resolve pass shared by `into_module_info` and
+    /// `merge_into`, returning the collected namespace object aliases.
+    fn finalize_resolution_phase(&mut self) -> Vec<plow_types::extract::NamespaceObjectAlias> {
+        self.resolve_typed_destructure_bindings();
+        self.resolve_pending_local_export_specifiers();
+        self.enrich_local_class_exports();
+        self.enrich_store_exports();
+        self.finalize_di_key_sites();
+        // Before `record_exported_instance_bindings` / `resolve_object_binding_candidates`,
+        // which read `binding_target_names`, so a factory-return-bound local also
+        // propagates through object literals and exported-instance bindings (parity
+        // with the during-the-walk `new Class()` binding). See issue #1441.
+        // Aliases first: promote `useApi(){ return api }` to a factory-return via
+        // the typed local, so the `const x = useApi()` candidate below resolves.
+        self.resolve_factory_return_aliases();
+        self.resolve_factory_return_candidates();
+        self.record_exported_instance_bindings();
+        self.resolve_object_binding_candidates();
+        self.resolve_factory_call_candidates();
+        self.resolve_playwright_factory_call_definitions();
+        self.resolve_structural_class_calls();
+        self.resolve_bound_member_accesses();
+        self.map_local_signature_refs_to_exports();
+        self.apply_side_effect_registrations();
+        self.resolve_typed_react_props();
+        self.collect_namespace_object_aliases()
     }
 
     pub(crate) fn into_module_info(
@@ -908,20 +1717,8 @@ impl ModuleInfoExtractor {
             suppressions,
             unknown_kinds,
         } = parsed;
-        self.resolve_typed_destructure_bindings();
-        self.resolve_pending_local_export_specifiers();
-        self.enrich_local_class_exports();
-        self.enrich_store_exports();
-        self.finalize_di_key_sites();
-        self.record_exported_instance_bindings();
-        self.resolve_object_binding_candidates();
-        self.resolve_factory_call_candidates();
-        self.resolve_playwright_factory_call_definitions();
-        self.resolve_structural_class_calls();
-        self.resolve_bound_member_accesses();
-        self.map_local_signature_refs_to_exports();
-        self.apply_side_effect_registrations();
-        let namespace_object_aliases = self.collect_namespace_object_aliases();
+        let namespace_object_aliases = self.finalize_resolution_phase();
+        let exported_factory_returns = self.collect_exported_factory_returns();
         ModuleInfo {
             file_id,
             exports: self.exports,
@@ -930,9 +1727,10 @@ impl ModuleInfoExtractor {
             dynamic_imports: self.dynamic_imports,
             dynamic_import_patterns: self.dynamic_import_patterns,
             require_calls: self.require_calls,
-            package_path_references: self.package_path_references,
+            package_path_references: self.package_path_references.into_boxed_slice(),
             member_accesses: self.member_accesses,
-            whole_object_uses: self.whole_object_uses,
+            semantic_facts: self.semantic_facts.into_boxed_slice(),
+            whole_object_uses: self.whole_object_uses.into_boxed_slice(),
             has_cjs_exports: self.has_cjs_exports,
             has_angular_component_template_url: self.has_angular_component_template_url,
             content_hash,
@@ -945,6 +1743,7 @@ impl ModuleInfoExtractor {
             complexity: Vec::new(),
             flag_uses: Vec::new(),
             class_heritage: self.class_heritage,
+            exported_factory_returns: exported_factory_returns.into_boxed_slice(),
             injection_tokens: self.injection_tokens,
             local_type_declarations: self.local_type_declarations,
             public_signature_type_references: self.public_signature_type_references,
@@ -962,6 +1761,7 @@ impl ModuleInfoExtractor {
             security_control_sites: self.security_control_sites,
             callee_uses: self.callee_uses,
             misplaced_directives: self.misplaced_directives,
+            inline_server_action_exports: self.inline_server_action_exports,
             di_key_sites: self.di_key_sites,
             has_dynamic_provide: self.has_dynamic_provide,
             // Populated in `release_resolution_payload`; empty at construction.
@@ -972,9 +1772,33 @@ impl ModuleInfoExtractor {
             has_define_model: false,
             has_unharvestable_props: false,
             component_emits: Vec::new(),
+            angular_inputs: self.angular_inputs,
+            angular_outputs: self.angular_outputs,
+            angular_component_selectors: self.angular_component_selectors,
+            registered_custom_elements: self.registered_custom_elements,
+            used_custom_element_tags: {
+                let mut tags: Vec<String> = self.used_custom_element_tags.into_iter().collect();
+                tags.sort_unstable();
+                tags
+            },
+            angular_used_selectors: self.angular_used_selectors,
+            angular_entry_component_refs: self.angular_entry_component_refs,
+            has_dynamic_component_render: self.has_dynamic_component_render,
             has_unharvestable_emits: false,
             has_dynamic_emit: false,
             has_emit_whole_object_use: false,
+            load_return_keys: self.load_return_keys,
+            has_unharvestable_load: self.has_unharvestable_load,
+            has_load_data_whole_use: self.has_load_data_whole_use,
+            // Derived in `release_resolution_payload` from `whole_object_uses`.
+            has_page_data_store_whole_use: false,
+            component_functions: self.component_functions,
+            react_props: self.react_props,
+            hook_uses: self.hook_uses,
+            render_edges: self.render_edges,
+            svelte_dispatched_events: self.svelte_dispatched_events,
+            svelte_listened_events: Vec::new(),
+            has_dynamic_dispatch: self.has_dynamic_dispatch,
         }
     }
 
@@ -986,56 +1810,89 @@ impl ModuleInfoExtractor {
              Angular content here, plumb inline_template_findings into the \
              merge step before relying on this assertion"
         );
-        self.resolve_typed_destructure_bindings();
-        self.resolve_pending_local_export_specifiers();
-        self.enrich_local_class_exports();
-        self.enrich_store_exports();
-        self.finalize_di_key_sites();
-        self.record_exported_instance_bindings();
-        self.resolve_object_binding_candidates();
-        self.resolve_factory_call_candidates();
-        self.resolve_playwright_factory_call_definitions();
-        self.resolve_structural_class_calls();
-        self.resolve_bound_member_accesses();
-        self.map_local_signature_refs_to_exports();
-        self.apply_side_effect_registrations();
-        let namespace_object_aliases = self.collect_namespace_object_aliases();
-        info.imports.extend(self.imports);
-        info.exports.extend(self.exports);
-        info.re_exports.extend(self.re_exports);
-        info.dynamic_imports.extend(self.dynamic_imports);
+        let namespace_object_aliases = self.finalize_resolution_phase();
+        self.merge_module_graph(info, namespace_object_aliases);
+        self.merge_security_info(info);
+        self.merge_framework_info(info);
+    }
+
+    fn merge_module_graph(
+        &mut self,
+        info: &mut ModuleInfo,
+        mut namespace_object_aliases: Vec<plow_types::extract::NamespaceObjectAlias>,
+    ) {
+        // Compute before `self.exports` is drained below; the join reads exports.
+        let mut exported_factory_returns = self.collect_exported_factory_returns();
+        info.imports.append(&mut self.imports);
+        info.exports.append(&mut self.exports);
+        info.re_exports.append(&mut self.re_exports);
+        info.dynamic_imports.append(&mut self.dynamic_imports);
         info.dynamic_import_patterns
-            .extend(self.dynamic_import_patterns);
-        info.require_calls.extend(self.require_calls);
-        info.package_path_references
-            .extend(self.package_path_references);
-        info.member_accesses.extend(self.member_accesses);
-        info.whole_object_uses.extend(self.whole_object_uses);
+            .append(&mut self.dynamic_import_patterns);
+        info.require_calls.append(&mut self.require_calls);
+        let mut package_path_references =
+            std::mem::take(&mut info.package_path_references).into_vec();
+        package_path_references.append(&mut self.package_path_references);
+        info.package_path_references = package_path_references.into_boxed_slice();
+        info.member_accesses.append(&mut self.member_accesses);
+        let mut whole_object_uses = std::mem::take(&mut info.whole_object_uses).into_vec();
+        whole_object_uses.append(&mut self.whole_object_uses);
+        info.whole_object_uses = whole_object_uses.into_boxed_slice();
         info.has_cjs_exports |= self.has_cjs_exports;
         info.has_angular_component_template_url |= self.has_angular_component_template_url;
-        info.class_heritage.extend(self.class_heritage);
-        info.injection_tokens.extend(self.injection_tokens);
+        info.class_heritage.append(&mut self.class_heritage);
+        if !exported_factory_returns.is_empty() {
+            let mut merged = std::mem::take(&mut info.exported_factory_returns).into_vec();
+            merged.append(&mut exported_factory_returns);
+            info.exported_factory_returns = merged.into_boxed_slice();
+        }
+        info.injection_tokens.append(&mut self.injection_tokens);
         info.local_type_declarations
-            .extend(self.local_type_declarations);
+            .append(&mut self.local_type_declarations);
         info.public_signature_type_references
-            .extend(self.public_signature_type_references);
+            .append(&mut self.public_signature_type_references);
         info.namespace_object_aliases
-            .extend(namespace_object_aliases);
-        info.directives.extend(self.directives);
+            .append(&mut namespace_object_aliases);
+        info.directives.append(&mut self.directives);
         info.client_only_dynamic_import_spans
-            .extend(self.client_only_dynamic_import_spans);
-        info.security_sinks.extend(self.security_sinks);
+            .append(&mut self.client_only_dynamic_import_spans);
+        info.callee_uses.append(&mut self.callee_uses);
+    }
+
+    fn merge_security_info(&mut self, info: &mut ModuleInfo) {
+        info.security_sinks.append(&mut self.security_sinks);
         info.security_sinks_skipped += self.security_sinks_skipped;
         info.security_unresolved_callee_sites
-            .extend(self.security_unresolved_callee_sites);
-        info.tainted_bindings.extend(self.tainted_bindings);
-        info.sanitized_sink_args.extend(self.sanitized_sink_args);
+            .append(&mut self.security_unresolved_callee_sites);
+        info.tainted_bindings.append(&mut self.tainted_bindings);
+        info.sanitized_sink_args
+            .append(&mut self.sanitized_sink_args);
         info.security_control_sites
-            .extend(self.security_control_sites);
-        info.callee_uses.extend(self.callee_uses);
-        info.misplaced_directives.extend(self.misplaced_directives);
-        info.di_key_sites.extend(self.di_key_sites);
-        info.has_dynamic_provide = info.has_dynamic_provide || self.has_dynamic_provide;
+            .append(&mut self.security_control_sites);
+    }
+
+    fn merge_framework_info(&mut self, info: &mut ModuleInfo) {
+        info.misplaced_directives
+            .append(&mut self.misplaced_directives);
+        info.inline_server_action_exports
+            .append(&mut self.inline_server_action_exports);
+        info.di_key_sites.append(&mut self.di_key_sites);
+        info.has_dynamic_provide |= self.has_dynamic_provide;
+        info.load_return_keys.append(&mut self.load_return_keys);
+        info.has_unharvestable_load |= self.has_unharvestable_load;
+        info.has_load_data_whole_use |= self.has_load_data_whole_use;
+        info.angular_inputs.append(&mut self.angular_inputs);
+        info.angular_outputs.append(&mut self.angular_outputs);
+        info.angular_component_selectors
+            .append(&mut self.angular_component_selectors);
+        info.angular_used_selectors
+            .append(&mut self.angular_used_selectors);
+        info.angular_entry_component_refs
+            .append(&mut self.angular_entry_component_refs);
+        info.has_dynamic_component_render |= self.has_dynamic_component_render;
+        info.svelte_dispatched_events
+            .append(&mut self.svelte_dispatched_events);
+        info.has_dynamic_dispatch |= self.has_dynamic_dispatch;
     }
 }
 
@@ -1192,63 +2049,67 @@ fn try_extract_import_then_callback(expr: &CallExpression<'_>) -> Option<ImportT
     let source = lit.value.to_string();
     let import_span = import_expr.span;
 
-    let first_arg = expr.arguments.first()?;
-
-    match first_arg {
-        Argument::ArrowFunctionExpression(arrow) => {
-            let param = arrow.params.items.first()?;
-            match &param.pattern {
-                BindingPattern::ObjectPattern(obj_pat) => Some(ImportThenCallback {
-                    source,
-                    import_span,
-                    destructured_names: extract_destructured_names(obj_pat),
-                    local_name: None,
-                }),
-                BindingPattern::BindingIdentifier(id) => {
-                    let param_name = id.name.to_string();
-
-                    if arrow.expression
-                        && let Some(Statement::ExpressionStatement(expr_stmt)) =
-                            arrow.body.statements.first()
-                        && let Some(names) =
-                            extract_member_names_from_expr(&expr_stmt.expression, &param_name)
-                    {
-                        return Some(ImportThenCallback {
-                            source,
-                            import_span,
-                            destructured_names: names,
-                            local_name: None,
-                        });
-                    }
-
-                    Some(ImportThenCallback {
-                        source,
-                        import_span,
-                        destructured_names: Vec::new(),
-                        local_name: Some(param_name),
-                    })
-                }
-                _ => None,
-            }
-        }
+    match expr.arguments.first()? {
+        Argument::ArrowFunctionExpression(arrow) => arrow_then_callback(arrow, source, import_span),
         Argument::FunctionExpression(func) => {
             let param = func.params.items.first()?;
-            match &param.pattern {
-                BindingPattern::ObjectPattern(obj_pat) => Some(ImportThenCallback {
-                    source,
-                    import_span,
-                    destructured_names: extract_destructured_names(obj_pat),
-                    local_name: None,
-                }),
-                BindingPattern::BindingIdentifier(id) => Some(ImportThenCallback {
-                    source,
-                    import_span,
-                    destructured_names: Vec::new(),
-                    local_name: Some(id.name.to_string()),
-                }),
-                _ => None,
-            }
+            then_callback_from_pattern(&param.pattern, source, import_span)
         }
+        _ => None,
+    }
+}
+
+/// Build an `ImportThenCallback` from a `.then()` arrow callback, handling the
+/// expression-body member-access shape before falling back to the bare param.
+fn arrow_then_callback(
+    arrow: &oxc_ast::ast::ArrowFunctionExpression<'_>,
+    source: String,
+    import_span: Span,
+) -> Option<ImportThenCallback> {
+    let param = arrow.params.items.first()?;
+    if let BindingPattern::BindingIdentifier(id) = &param.pattern {
+        let param_name = id.name.to_string();
+        if arrow.expression
+            && let Some(Statement::ExpressionStatement(expr_stmt)) = arrow.body.statements.first()
+            && let Some(names) = extract_member_names_from_expr(&expr_stmt.expression, &param_name)
+        {
+            return Some(ImportThenCallback {
+                source,
+                import_span,
+                destructured_names: names,
+                local_name: None,
+            });
+        }
+        return Some(ImportThenCallback {
+            source,
+            import_span,
+            destructured_names: Vec::new(),
+            local_name: Some(param_name),
+        });
+    }
+    then_callback_from_pattern(&param.pattern, source, import_span)
+}
+
+/// Build an `ImportThenCallback` from a callback param pattern: object pattern
+/// yields destructured names, a bare identifier yields a namespace local.
+fn then_callback_from_pattern(
+    pattern: &BindingPattern<'_>,
+    source: String,
+    import_span: Span,
+) -> Option<ImportThenCallback> {
+    match pattern {
+        BindingPattern::ObjectPattern(obj_pat) => Some(ImportThenCallback {
+            source,
+            import_span,
+            destructured_names: extract_destructured_names(obj_pat),
+            local_name: None,
+        }),
+        BindingPattern::BindingIdentifier(id) => Some(ImportThenCallback {
+            source,
+            import_span,
+            destructured_names: Vec::new(),
+            local_name: Some(id.name.to_string()),
+        }),
         _ => None,
     }
 }

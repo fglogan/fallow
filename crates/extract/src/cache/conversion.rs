@@ -64,6 +64,7 @@ fn cached_exports_to_module(exports: &[CachedExport]) -> Vec<crate::ExportInfo> 
                 5 => VisibilityTag::ExpectedUnused,
                 _ => VisibilityTag::None,
             },
+            expected_unused_reason: export.expected_unused_reason.clone(),
             span: Span::new(export.span_start, export.span_end),
             members: export
                 .members
@@ -184,6 +185,7 @@ fn cached_suppressions_to_module(
                 line: suppression.line,
                 comment_line: suppression.comment_line,
                 target,
+                reason: suppression.reason.clone(),
             }
         })
         .collect()
@@ -198,6 +200,7 @@ fn cached_unknown_suppressions_to_module(
             comment_line: unknown.comment_line,
             is_file_level: unknown.is_file_level,
             token: unknown.token.clone(),
+            reason: unknown.reason.clone(),
         })
         .collect()
 }
@@ -252,6 +255,7 @@ fn module_exports_to_cached(exports: &[crate::ExportInfo]) -> Vec<CachedExport> 
             is_type_only: export.is_type_only,
             is_side_effect_used: export.is_side_effect_used,
             visibility: export.visibility as u8,
+            expected_unused_reason: export.expected_unused_reason.clone(),
             local_name: export.local_name.clone(),
             span_start: export.span.start,
             span_end: export.span.end,
@@ -384,6 +388,7 @@ fn module_suppressions_to_cached(
                 kind,
                 policy_pack,
                 policy_rule_id,
+                reason: suppression.reason.clone(),
             }
         })
         .collect()
@@ -398,6 +403,7 @@ fn module_unknown_suppressions_to_cached(
             comment_line: unknown.comment_line,
             is_file_level: unknown.is_file_level,
             token: unknown.token.clone(),
+            reason: unknown.reason.clone(),
         })
         .collect()
 }
@@ -462,6 +468,7 @@ pub fn cached_to_module_opts(
         require_calls: cached_require_calls_to_module(&cached.require_calls),
         package_path_references: cached.package_path_references.clone(),
         member_accesses: cached.member_accesses.clone(),
+        semantic_facts: cached.semantic_facts.clone().unwrap_or_default(),
         whole_object_uses: cached.whole_object_uses.clone(),
         has_cjs_exports: cached.has_cjs_exports,
         has_angular_component_template_url: cached.has_angular_component_template_url,
@@ -481,6 +488,7 @@ pub fn cached_to_module_opts(
         },
         flag_uses: cached.flag_uses.clone(),
         class_heritage: cached.class_heritage.clone(),
+        exported_factory_returns: cached.exported_factory_returns.clone().unwrap_or_default(),
         injection_tokens: cached.injection_tokens.clone(),
         local_type_declarations: cached_local_types_to_module(&cached.local_type_declarations),
         public_signature_type_references: cached_signature_refs_to_module(
@@ -502,6 +510,7 @@ pub fn cached_to_module_opts(
         security_control_sites: cached.security_control_sites.clone(),
         callee_uses: cached.callee_uses.clone(),
         misplaced_directives: cached.misplaced_directives.clone(),
+        inline_server_action_exports: cached.inline_server_action_exports.clone(),
         di_key_sites: cached.di_key_sites.clone(),
         has_dynamic_provide: cached.has_dynamic_provide,
         // Derived in `release_resolution_payload` from `imports` + `unused_import_bindings`
@@ -513,27 +522,46 @@ pub fn cached_to_module_opts(
         has_define_model: cached.has_define_model,
         has_unharvestable_props: cached.has_unharvestable_props,
         component_emits: cached.component_emits.clone(),
+        angular_inputs: cached.angular_inputs.clone(),
+        angular_outputs: cached.angular_outputs.clone(),
+        angular_component_selectors: cached.angular_component_selectors.clone(),
+        registered_custom_elements: cached.registered_custom_elements.clone(),
+        used_custom_element_tags: cached.used_custom_element_tags.clone(),
+        angular_used_selectors: cached.angular_used_selectors.clone(),
+        angular_entry_component_refs: cached.angular_entry_component_refs.clone(),
+        has_dynamic_component_render: cached.has_dynamic_component_render,
         has_unharvestable_emits: cached.has_unharvestable_emits,
         has_dynamic_emit: cached.has_dynamic_emit,
         has_emit_whole_object_use: cached.has_emit_whole_object_use,
+        load_return_keys: cached.load_return_keys.clone(),
+        has_unharvestable_load: cached.has_unharvestable_load,
+        has_load_data_whole_use: cached.has_load_data_whole_use,
+        // Derived in `release_resolution_payload` from `whole_object_uses`.
+        has_page_data_store_whole_use: false,
+        component_functions: cached.component_functions.clone(),
+        react_props: cached.react_props.clone(),
+        hook_uses: cached.hook_uses.clone(),
+        render_edges: cached.render_edges.clone(),
+        svelte_dispatched_events: cached.svelte_dispatched_events.clone(),
+        svelte_listened_events: cached.svelte_listened_events.clone(),
+        has_dynamic_dispatch: cached.has_dynamic_dispatch,
     }
 }
 
 /// Convert a [`ModuleInfo`](crate::ModuleInfo) to a [`CachedModule`] for storage.
 ///
-/// `mtime_secs` and `file_size` come from `std::fs::metadata()` at parse time
-/// and enable fast cache validation on subsequent runs (skip file read when
-/// mtime+size match).
+/// The [`SourceFingerprint`](plow_types::source_fingerprint::SourceFingerprint)
+/// comes from `std::fs::metadata()` at parse time and enables fast cache
+/// validation on subsequent runs.
 #[must_use]
 pub fn module_to_cached(
     module: &crate::ModuleInfo,
-    mtime_secs: u64,
-    file_size: u64,
+    fingerprint: plow_types::source_fingerprint::SourceFingerprint,
 ) -> CachedModule {
     CachedModule {
         content_hash: module.content_hash,
-        mtime_secs,
-        file_size,
+        mtime_ns: fingerprint.mtime_ns,
+        file_size: fingerprint.file_size,
         last_access_secs: current_unix_seconds(),
         exports: module_exports_to_cached(&module.exports),
         imports: module_imports_to_cached(&module.imports),
@@ -542,6 +570,7 @@ pub fn module_to_cached(
         require_calls: module_require_calls_to_cached(&module.require_calls),
         package_path_references: module.package_path_references.clone(),
         member_accesses: module.member_accesses.clone(),
+        semantic_facts: (!module.semantic_facts.is_empty()).then(|| module.semantic_facts.clone()),
         whole_object_uses: module.whole_object_uses.clone(),
         dynamic_import_patterns: module_dynamic_patterns_to_cached(&module.dynamic_import_patterns),
         has_cjs_exports: module.has_cjs_exports,
@@ -557,6 +586,8 @@ pub fn module_to_cached(
         complexity: module.complexity.clone(),
         flag_uses: module.flag_uses.clone(),
         class_heritage: module.class_heritage.clone(),
+        exported_factory_returns: (!module.exported_factory_returns.is_empty())
+            .then(|| module.exported_factory_returns.clone()),
         injection_tokens: module.injection_tokens.clone(),
         local_type_declarations: module_local_types_to_cached(&module.local_type_declarations),
         public_signature_type_references: module_signature_refs_to_cached(
@@ -578,6 +609,7 @@ pub fn module_to_cached(
         security_control_sites: module.security_control_sites.clone(),
         callee_uses: module.callee_uses.clone(),
         misplaced_directives: module.misplaced_directives.clone(),
+        inline_server_action_exports: module.inline_server_action_exports.clone(),
         di_key_sites: module.di_key_sites.clone(),
         has_dynamic_provide: module.has_dynamic_provide,
         component_props: module.component_props.clone(),
@@ -586,8 +618,43 @@ pub fn module_to_cached(
         has_define_model: module.has_define_model,
         has_unharvestable_props: module.has_unharvestable_props,
         component_emits: module.component_emits.clone(),
+        angular_inputs: module.angular_inputs.clone(),
+        angular_outputs: module.angular_outputs.clone(),
+        angular_component_selectors: module.angular_component_selectors.clone(),
+        registered_custom_elements: module.registered_custom_elements.clone(),
+        used_custom_element_tags: module.used_custom_element_tags.clone(),
+        angular_used_selectors: module.angular_used_selectors.clone(),
+        angular_entry_component_refs: module.angular_entry_component_refs.clone(),
+        has_dynamic_component_render: module.has_dynamic_component_render,
         has_unharvestable_emits: module.has_unharvestable_emits,
         has_dynamic_emit: module.has_dynamic_emit,
         has_emit_whole_object_use: module.has_emit_whole_object_use,
+        load_return_keys: module.load_return_keys.clone(),
+        has_unharvestable_load: module.has_unharvestable_load,
+        has_load_data_whole_use: module.has_load_data_whole_use,
+        component_functions: module.component_functions.clone(),
+        react_props: module.react_props.clone(),
+        hook_uses: module.hook_uses.clone(),
+        render_edges: module.render_edges.clone(),
+        svelte_dispatched_events: module.svelte_dispatched_events.clone(),
+        svelte_listened_events: module.svelte_listened_events.clone(),
+        has_dynamic_dispatch: module.has_dynamic_dispatch,
     }
+}
+
+/// Convert a module to a cache entry from explicit source-fingerprint parts.
+///
+/// Kept for tests that need literal invalidation inputs without filesystem
+/// metadata.
+#[cfg(test)]
+#[must_use]
+pub fn module_to_cached_from_parts(
+    module: &crate::ModuleInfo,
+    mtime_ns: u64,
+    file_size: u64,
+) -> CachedModule {
+    module_to_cached(
+        module,
+        plow_types::source_fingerprint::SourceFingerprint::new(mtime_ns, file_size),
+    )
 }

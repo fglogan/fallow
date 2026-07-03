@@ -1,5 +1,4 @@
 import * as child_process from "node:child_process";
-import * as fs from "node:fs";
 import * as path from "node:path";
 // VS Code injects this module into the extension host at runtime.
 // plow-ignore-next-line unlisted-dependency
@@ -39,7 +38,7 @@ import {
 } from "./analysisBackoff.js";
 import { buildAuditArgs, parseAuditOutput } from "./audit-utils.js";
 import { showBinarySkewToastOnce } from "./binary-skew.js";
-import { findBinaryInPath, findLocalBinary, getExecutableExtension } from "./binary-utils.js";
+import { findBinaryInPath, findLocalBinary, resolveConfiguredBinaryPath } from "./binary-utils.js";
 import {
   downloadCliBinary,
   getBinaryVersion,
@@ -61,6 +60,7 @@ import type {
   PlowCheckResult,
   PlowCombinedResult,
   PlowDupesResult,
+  PlowInspectResult,
   PlowFixResult,
   FixAction,
   HealthOutput,
@@ -71,10 +71,12 @@ import type {
 export const findCliBinary = async (context: vscode.ExtensionContext): Promise<string | null> => {
   const lspPath = getLspPath();
   if (lspPath) {
-    const dir = path.dirname(lspPath);
-    const cliPath = path.join(dir, `plow${getExecutableExtension()}`);
-    if (fs.existsSync(cliPath)) {
-      return cliPath;
+    // Resolve the `plow` CLI sibling of the configured `plow.lspPath`,
+    // tolerating a directory or an extensionless Windows path the same way the
+    // LSP resolver does, so a manually set lspPath also locates the CLI.
+    const sibling = resolveConfiguredBinaryPath(lspPath, "plow");
+    if (sibling) {
+      return sibling;
     }
   }
 
@@ -370,10 +372,70 @@ const execAnalysisTolerant = async (
   }
 };
 
+const execInspectWithManagedFallback = async (
+  context: vscode.ExtensionContext,
+  initialBinary: string | null,
+  args: ReadonlyArray<string>,
+  cwd: string,
+  outputChannel?: vscode.OutputChannel,
+): Promise<string> => {
+  try {
+    return await execPlow(initialBinary, args, cwd);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!parseUnknownSubcommand(message, "inspect")) {
+      throw err;
+    }
+
+    if (getAutoDownload()) {
+      const managed =
+        (await getInstalledCliPath(context, outputChannel)) ?? (await downloadCliBinary(context));
+      if (managed && managed !== initialBinary) {
+        outputChannel?.appendLine(
+          "Plow: resolved CLI does not support inspect; switched to the managed CLI.",
+        );
+        return execPlow(managed, args, cwd);
+      }
+    }
+
+    throw new Error(
+      "The resolved plow CLI does not support `plow inspect`. Update the plow binary, or enable plow.autoDownload so the extension can use the managed CLI.",
+      { cause: err },
+    );
+  }
+};
+
 export interface RunAnalysisOptions {
   readonly force?: boolean;
   readonly backoff?: AnalysisFailureBackoff;
 }
+
+export interface InspectArgsOptions {
+  readonly filePath: string;
+  readonly production: boolean | undefined;
+  readonly workspace: string;
+  readonly configPath: string;
+}
+
+export const buildInspectArgs = (options: InspectArgsOptions): string[] => {
+  const args = ["inspect", "--file", options.filePath, "--format", "json", "--quiet"];
+
+  if (options.workspace) {
+    args.push("--workspace", options.workspace);
+  }
+
+  if (options.production === true) {
+    args.push("--production");
+  } else if (options.production === false) {
+    args.push("--no-production");
+  }
+
+  if (options.configPath) {
+    args.push("--config", options.configPath);
+  }
+
+  return args;
+};
 
 const analysisBackoff = new AnalysisFailureBackoff();
 
@@ -416,6 +478,11 @@ const filterCheckResult = (result: PlowCheckResult): PlowCheckResult => {
     circular_dependencies: types["circular-dependencies"] ? result.circular_dependencies : [],
     re_export_cycles: types["re-export-cycles"] ? result.re_export_cycles : [],
     boundary_violations: types["boundary-violation"] ? result.boundary_violations : [],
+    boundary_coverage_violations: types["boundary-violation"]
+      ? result.boundary_coverage_violations
+      : [],
+    boundary_call_violations: types["boundary-violation"] ? result.boundary_call_violations : [],
+    policy_violations: types["policy-violation"] ? result.policy_violations : [],
     stale_suppressions: types["stale-suppressions"] ? result.stale_suppressions : [],
     unused_catalog_entries: types["unused-catalog-entries"] ? result.unused_catalog_entries : [],
     // Intentionally ungateable: there is no `empty-catalog-groups` key in
@@ -454,6 +521,9 @@ const filterCheckResult = (result: PlowCheckResult): PlowCheckResult => {
     circular_dependencies: filtered.circular_dependencies?.length ?? 0,
     re_export_cycles: filtered.re_export_cycles?.length ?? 0,
     boundary_violations: filtered.boundary_violations?.length ?? 0,
+    boundary_coverage_violations: filtered.boundary_coverage_violations?.length ?? 0,
+    boundary_call_violations: filtered.boundary_call_violations?.length ?? 0,
+    policy_violations: filtered.policy_violations?.length ?? 0,
     stale_suppressions: filtered.stale_suppressions?.length ?? 0,
     unused_catalog_entries: filtered.unused_catalog_entries?.length ?? 0,
     empty_catalog_groups: filtered.empty_catalog_groups?.length ?? 0,
@@ -781,6 +851,95 @@ export const runAudit = async (
   }
 };
 
+const activeEditorInspectTarget = (): {
+  readonly document: vscode.TextDocument;
+  readonly root: string;
+  readonly filePath: string;
+} | null => {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    void vscode.window.showWarningMessage("Plow: no active editor to inspect.");
+    return null;
+  }
+
+  if (editor.document.uri.scheme !== "file") {
+    void vscode.window.showWarningMessage("Plow: active editor is not a file on disk.");
+    return null;
+  }
+
+  const folder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
+  const root = folder?.uri.fsPath ?? getWorkspaceRoot();
+  if (!root) {
+    void vscode.window.showWarningMessage("Plow: no workspace folder open.");
+    return null;
+  }
+
+  const relative = path.relative(root, editor.document.uri.fsPath);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    void vscode.window.showWarningMessage("Plow: active editor is outside the workspace.");
+    return null;
+  }
+
+  return {
+    document: editor.document,
+    root,
+    filePath: relative.split(path.sep).join(path.posix.sep),
+  };
+};
+
+export const runInspectActiveFile = async (
+  context: vscode.ExtensionContext,
+  outputChannel?: vscode.OutputChannel,
+): Promise<PlowInspectResult | null> => {
+  const target = activeEditorInspectTarget();
+  if (!target) {
+    return null;
+  }
+
+  try {
+    if (target.document.isDirty) {
+      const saved = await target.document.save();
+      if (!saved) {
+        void vscode.window.showWarningMessage(
+          `Plow inspect cancelled because ${target.filePath} could not be saved.`,
+        );
+        return null;
+      }
+    }
+
+    const { binary } = await resolveCliForRun(context, outputChannel);
+    const args = buildInspectArgs({
+      filePath: target.filePath,
+      production: getProductionOverride(),
+      workspace: resolveActiveWorkspaceScope(context),
+      configPath: getResolvedConfigPath(target.root),
+    });
+
+    const output = await execInspectWithManagedFallback(
+      context,
+      binary,
+      args,
+      target.root,
+      outputChannel,
+    );
+    if (output.trim().length === 0) {
+      void vscode.window.showWarningMessage("Plow inspect returned no output.");
+      return null;
+    }
+
+    const result = JSON.parse(output) as PlowInspectResult;
+    outputChannel?.appendLine(`Plow inspect: ${target.filePath}`);
+    outputChannel?.appendLine(JSON.stringify(result, null, 2));
+    outputChannel?.show();
+    void vscode.window.showInformationMessage(`Plow inspect complete: ${target.filePath}`);
+    return result;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    void vscode.window.showErrorMessage(`Plow inspect failed: ${message}`);
+    return null;
+  }
+};
+
 export const runFix = async (
   context: vscode.ExtensionContext,
   dryRun: boolean,
@@ -889,7 +1048,7 @@ export const runHealthAnalysis = async (
       complexityBreakdown: breakdownEnabled,
     });
 
-    const output = await execPlow(binary, args, root);
+    const output = await execAnalysisTolerant(args, root, binary, outputChannel);
 
     if (output.trim().length === 0) {
       // A successful exit with empty stdout means there was nothing to report.

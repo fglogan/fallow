@@ -230,6 +230,73 @@ fn ignore_imports_removes_import_only_clones() {
     );
 }
 
+#[test]
+fn ignore_imports_removes_module_wiring_clones() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let src = dir.path().join("src");
+    for rel in ["a", "b", "c", "d"] {
+        std::fs::create_dir_all(src.join(rel)).expect("create source dir");
+    }
+
+    let re_exports = "export { alpha } from './alpha';\n\
+                      export { beta } from './beta';\n\
+                      export * as gamma from './gamma';\n\
+                      export * from './delta';\n";
+    let requires = "const alpha = require('./alpha');\n\
+                    const { beta } = require('./beta');\n\
+                    var gamma = require('./gamma');\n\
+                    let delta = require('./delta');\n";
+
+    let files = [
+        ("src/a/index.ts", re_exports),
+        ("src/b/index.ts", re_exports),
+        ("src/c/index.js", requires),
+        ("src/d/index.js", requires),
+    ];
+    for (rel, source) in files {
+        std::fs::write(dir.path().join(rel), source).expect("write fixture file");
+    }
+    std::fs::write(dir.path().join("package.json"), r#"{"name": "test"}"#)
+        .expect("write package.json");
+
+    let discovered: Vec<_> = files
+        .into_iter()
+        .enumerate()
+        .map(|(idx, (rel, source))| DiscoveredFile {
+            id: FileId(idx as u32),
+            path: dir.path().join(rel),
+            size_bytes: source.len() as u64,
+        })
+        .collect();
+
+    let config_with_wiring = plow_core::duplicates::DuplicatesConfig {
+        min_tokens: 5,
+        min_lines: 3,
+        ignore_imports: false,
+        ..Default::default()
+    };
+    let report_with =
+        plow_core::duplicates::find_duplicates(dir.path(), &discovered, &config_with_wiring);
+    assert!(
+        report_with.clone_groups.len() >= 2,
+        "With ignore_imports=false, re-export and require wiring blocks should be detected as clones"
+    );
+
+    let config_ignore = plow_core::duplicates::DuplicatesConfig {
+        min_tokens: 5,
+        min_lines: 3,
+        ignore_imports: true,
+        ..Default::default()
+    };
+    let report_without =
+        plow_core::duplicates::find_duplicates(dir.path(), &discovered, &config_ignore);
+    assert!(
+        report_without.clone_groups.is_empty(),
+        "With ignore_imports=true, module-wiring clones should be eliminated, but found {} groups",
+        report_without.clone_groups.len()
+    );
+}
+
 fn default_ignore_fixture_files(root: &std::path::Path) -> Vec<DiscoveredFile> {
     ["src/foo.ts", "lib/foo.js", ".next/static/chunks/foo.js"]
         .into_iter()
@@ -329,4 +396,36 @@ fn duplicate_ignore_defaults_false_replaces_defaults_with_user_ignore() {
         ".next should be analyzed when ignoreDefaults is false"
     );
     assert_eq!(skips.total, 0);
+}
+
+/// CSS program Phase 4: a near-miss / value-drifted CSS clone (two rule blocks
+/// with the same recipe but `0`/`0px` and `#fff`/`#ffffff` drift) now forms a
+/// clone group, where the pre-change character-naive tokenizer produced different
+/// token streams and reported nothing. Proves the CSS-aware canonicalization
+/// reaches the SA-IS engine end to end.
+#[test]
+fn fuzzy_css_clones_surface_via_value_canonicalization() {
+    let root = fixture_path("css-fuzzy-clones");
+    let config = create_config(root.clone());
+    let files = plow_core::discover::discover_files(&config);
+
+    let dupes_config = plow_core::duplicates::DuplicatesConfig {
+        min_tokens: 20,
+        min_lines: 3,
+        ..plow_core::duplicates::DuplicatesConfig::default()
+    };
+
+    let report = plow_core::duplicates::find_duplicates(&root, &files, &dupes_config);
+
+    let cloned_files: FxHashSet<String> = report
+        .clone_groups
+        .iter()
+        .flat_map(|g| g.instances.iter())
+        .map(|inst| inst.file.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+
+    assert!(
+        cloned_files.contains("card.css") && cloned_files.contains("panel.css"),
+        "value-drifted CSS recipe should form a cross-file clone group: {cloned_files:?}"
+    );
 }

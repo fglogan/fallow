@@ -24,6 +24,42 @@ mod api;
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
 pub mod audit;
+/// `plow audit --brief` (alias `plow review`): deterministic, always-exit-0
+/// rendering mode layered over the audit analysis. Public so the schema-emit
+/// binary can derive the `ReviewBriefOutput` envelope.
+#[allow(
+    dead_code,
+    unused_imports,
+    reason = "shared CLI library compiles bin-oriented support modules for reuse"
+)]
+pub mod audit_brief;
+/// Decision-surface extractor (stage 6 / 6.G): the apex of the review brief.
+/// Public so the schema-emit binary can derive the `DecisionSurface` types.
+#[allow(
+    dead_code,
+    unused_imports,
+    reason = "shared CLI library compiles bin-oriented support modules for reuse"
+)]
+pub mod audit_decision_surface;
+/// Weighted focus map (stage 4): the composite attention score per review unit
+/// plus the no-skip labels, confidence flags, and escape hatch. Public so the
+/// schema-emit binary can derive the `FocusMap` types.
+#[allow(
+    dead_code,
+    unused_imports,
+    reason = "shared CLI library compiles bin-oriented support modules for reuse"
+)]
+pub mod audit_focus;
+/// Agent-contract loop (the codiff pattern, graph-extended): the walkthrough
+/// guide (digest + schema + graph-snapshot pin) and the `--walkthrough-file`
+/// post-validation against the live graph. Public so the schema-emit binary can
+/// derive the guide + validation envelopes.
+#[allow(
+    dead_code,
+    unused_imports,
+    reason = "shared CLI library compiles bin-oriented support modules for reuse"
+)]
+pub mod audit_walkthrough;
 #[allow(
     dead_code,
     unused_imports,
@@ -35,7 +71,13 @@ mod base_worktree;
     unused_imports,
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
-mod baseline;
+pub mod walkthrough_state;
+#[allow(
+    dead_code,
+    unused_imports,
+    reason = "shared CLI library compiles bin-oriented support modules for reuse"
+)]
+use plow_engine::baseline;
 #[allow(
     dead_code,
     unused_imports,
@@ -49,7 +91,7 @@ mod cache_notice;
 )]
 mod check;
 /// CODEOWNERS file parser and ownership lookup.
-pub mod codeowners;
+pub use plow_engine::codeowners;
 #[allow(
     dead_code,
     unused_imports,
@@ -64,7 +106,9 @@ mod combined;
 mod dupes;
 
 /// Structured error output for CLI and JSON formats.
-pub mod error;
+pub mod error {
+    pub use plow_engine::emit_error;
+}
 
 #[allow(
     dead_code,
@@ -89,17 +133,12 @@ pub mod explain;
 )]
 mod health;
 /// Health / complexity analysis report types.
-pub mod health_types;
 #[allow(
     dead_code,
     unused_imports,
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
 mod license;
-/// Typed wrapper envelopes for duplication findings emitted by
-/// `plow dupes --format json`. Lives here (rather than in `plow-types`)
-/// because the bare findings live in `plow-core` and `crates/cli/src/report/dupes_grouping.rs`.
-pub mod output_dupes;
 #[allow(
     dead_code,
     unused_imports,
@@ -107,13 +146,12 @@ pub mod output_dupes;
 )]
 mod telemetry;
 
-/// Typed envelope structs for the JSON output contract. Live here rather
-/// than in `plow-types` because the body fields reach into `plow-core`
-/// and into this crate's own `health_types`.
+/// Test-only coverage for the JSON output contract aliases.
+#[cfg(test)]
+mod architecture_boundaries;
+#[cfg(test)]
 pub mod output_envelope;
-
-/// Programmatic Rust API reused by the NAPI bindings.
-pub mod programmatic;
+pub(crate) mod output_runtime;
 
 /// Cross-platform path classification helpers (POSIX-style root + Windows
 /// drive prefix detection that `Path::is_absolute()` misclassifies).
@@ -170,8 +208,10 @@ mod task_matrix;
     unused_imports,
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
-mod validate;
-mod vital_signs;
+use plow_engine::validate;
+use plow_engine::vital_signs;
 
 pub use runtime_support::{AnalysisKind, GroupBy};
-pub(crate) use runtime_support::{build_ownership_resolver, load_config_for_analysis};
+pub(crate) use runtime_support::{
+    ConfigLoadOptions, build_ownership_resolver, load_config_for_analysis,
+};

@@ -11,7 +11,7 @@ use std::time::SystemTime;
 
 use colored::Colorize as _;
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use plow_core::git_env::clear_ambient_git_env;
+use plow_engine::clear_ambient_git_env;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 

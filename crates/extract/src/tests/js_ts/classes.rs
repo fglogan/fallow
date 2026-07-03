@@ -1,6 +1,21 @@
-use plow_types::extract::{ExportName, MemberKind};
+use plow_types::extract::{ExportName, FactoryCallMemberAccessFact, MemberKind, SemanticFact};
 
 use crate::tests::parse_ts as parse_source;
+
+fn factory_call_member_facts(
+    info: &plow_types::extract::ModuleInfo,
+) -> Vec<&FactoryCallMemberAccessFact> {
+    info.semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            if let SemanticFact::FactoryCallMemberAccess(access) = fact {
+                Some(access)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
 
 #[test]
 fn enum_with_string_values_extracts_members() {
@@ -1174,23 +1189,19 @@ fn instance_method_with_new_this_return_not_flagged() {
 }
 
 #[test]
-fn static_factory_binding_emits_sentinel_member_access() {
+fn static_factory_binding_emits_typed_member_fact() {
     let info = parse_source(
         r"import { MyClass } from './my-class';
         const myInstance = MyClass.getInstance();
         myInstance.getData();",
     );
-    let sentinel_access = info
-        .member_accesses
-        .iter()
-        .find(|a| a.object.starts_with(crate::FACTORY_CALL_SENTINEL))
-        .expect("sentinel-prefixed access should be emitted for the factory call result");
-    assert_eq!(sentinel_access.member, "getData");
-    assert!(
-        sentinel_access.object.ends_with("MyClass:getInstance"),
-        "sentinel should encode the call shape, got: {}",
-        sentinel_access.object
-    );
+    let fact = factory_call_member_facts(&info)
+        .into_iter()
+        .next()
+        .expect("typed factory call fact should be emitted");
+    assert_eq!(fact.callee_object, "MyClass");
+    assert_eq!(fact.callee_method, "getInstance");
+    assert_eq!(fact.member, "getData");
 }
 
 #[test]
@@ -1210,14 +1221,7 @@ fn static_factory_binding_same_file_emits_direct_access() {
         "same-file factory call should expand `myInstance.getData` to `MyClass.getData`, found: {:?}",
         info.member_accesses
     );
-    assert!(
-        !info
-            .member_accesses
-            .iter()
-            .any(|a| a.object.starts_with(crate::FACTORY_CALL_SENTINEL)),
-        "same-file case must not emit a sentinel access: {:?}",
-        info.member_accesses
-    );
+    assert!(factory_call_member_facts(&info).is_empty());
 }
 
 #[test]
@@ -1277,14 +1281,7 @@ fn factory_call_candidate_with_unknown_object_is_dropped() {
         r"const n = Math.floor(1.5);
         n.toString();",
     );
-    assert!(
-        !info
-            .member_accesses
-            .iter()
-            .any(|a| a.object.starts_with(crate::FACTORY_CALL_SENTINEL)),
-        "calls on globals must not produce a sentinel binding: {:?}",
-        info.member_accesses
-    );
+    assert!(factory_call_member_facts(&info).is_empty());
 }
 
 /// Regression test for issue #839: `declare` ambient class properties must not

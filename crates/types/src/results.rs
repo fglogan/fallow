@@ -8,20 +8,25 @@ use crate::extract::{
     MemberKind, SecurityControlKind, SecurityUrlShape, SkippedSecurityCalleeExpressionKind,
     SkippedSecurityCalleeReason,
 };
-use crate::output::IssueAction;
+use crate::output::{
+    FixAction, FixActionType, IssueAction, SuppressLineAction, SuppressLineKind, SuppressLineScope,
+};
 use crate::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
-    CircularDependencyFinding, DuplicateExportFinding, DynamicSegmentNameConflictFinding,
-    EmptyCatalogGroupFinding, InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
-    MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PolicyViolationFinding,
-    PrivateTypeLeakFinding, ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
-    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
-    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
-    UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
-    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    CircularDependencyFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
+    DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding, InvalidClientExportFinding,
+    MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
+    MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
+    PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
+    TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
+    UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
+    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
+    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
+    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
+    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
     UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
-    UnusedTypeFinding,
+    UnusedSvelteEventFinding, UnusedTypeFinding,
 };
 use crate::serde_path;
 use crate::suppress::{IssueKind, closest_known_kind_name};
@@ -38,6 +43,172 @@ pub struct EntryPointSummary {
     /// Breakdown by source category (e.g., "package.json" -> 3, "plugin" -> 12).
     /// Sorted by key for deterministic output.
     pub by_source: Vec<(String, usize)>,
+}
+
+/// Per-component render fan-in counts plus the precomputed concentration
+/// aggregates.
+///
+/// DESCRIPTIVE blast-radius signal (NOT a rule, finding, or threshold): the
+/// component-graph analogue of module-level fan-in. Module fan-in counts
+/// importing MODULES; render fan-in counts JSX render CALL SITES (a shared
+/// `<Button>` is rendered in far more places than it is imported).
+///
+/// `per_component` is the internal carrier (keyed for hotspot path annotation),
+/// `#[serde(skip)]` on [`AnalysisResults`] so it never appears under bare
+/// `plow` / `audit`; the aggregates feed the descriptive `VitalSigns` block
+/// (`p95_render_fan_in` / `render_fan_in_high_pct` / `max_render_fan_in`).
+///
+/// UNDERCOUNT is the documented safe direction: a child rendered via a JSX
+/// spread, a dynamic / `createElement(var)` form, or a member-expression tag
+/// (`<Lib.Button/>`) is not resolved by the shared `ChildResolver` and so
+/// increments no component's fan-in. A true high-fan-in component can only be
+/// undersold, never falsely flagged. A rare name-collision over-credit is
+/// possible via the default-import sole-component fallback (inherited verbatim
+/// from the prop-drilling / thin-wrapper resolver); low-harm for a descriptive,
+/// non-gating metric.
+#[derive(Debug, Clone, Default)]
+pub struct RenderFanInMetric {
+    /// Per-component render-site + distinct-parent counts. Keyed by
+    /// `(component file path, component name)` so the hotspot surface can map a
+    /// file back to its top component's fan-in. Components rendered nowhere ARE
+    /// included as a real `0` so the percentile distribution is not skewed.
+    pub per_component: Vec<RenderFanInComponent>,
+    /// 95th-percentile DISTINCT-PARENTS render fan-in across components (the
+    /// per-component distribution analogue of the module-fan-in p95). `None` on
+    /// an empty population. Mirrors `compute_coupling_concentration`.
+    pub p95_distinct_parents: Option<u32>,
+    /// Percentage of components whose distinct-parents render fan-in exceeds the
+    /// `max(p95, 10)` threshold (the same floor coupling concentration uses).
+    /// `None` on an empty population.
+    pub high_pct: Option<f64>,
+    /// The single highest DISTINCT-PARENTS count across all components (the
+    /// headline blast-radius number: the most distinct render LOCATIONS any one
+    /// component is rendered from, the honest edit-ripple count). `None` on an
+    /// empty population. `render_sites` (incl. repeats) is secondary per-component
+    /// context, never the headline.
+    pub max_distinct_parents: Option<u32>,
+}
+
+/// One component's render fan-in detail: how many JSX render SITES target it and
+/// how many DISTINCT parent components render it.
+#[derive(Debug, Clone)]
+pub struct RenderFanInComponent {
+    /// Absolute path of the file declaring the component.
+    pub file: PathBuf,
+    /// The component name.
+    pub component: String,
+    /// Total JSX render SITES that resolve to this component across the project
+    /// (each capitalized / member JSX tag is one site). SECONDARY context ("incl.
+    /// repeats"): a single parent rendering one child five times is five sites but
+    /// one distinct parent, so render_sites overcounts blast radius.
+    pub render_sites: u32,
+    /// Distinct `(parent_file, parent_component)` keys that render this
+    /// component. The HEADLINE blast-radius axis: the honest count of distinct
+    /// render LOCATIONS, the percentiled distribution analogue of "distinct
+    /// importers".
+    pub distinct_parents: u32,
+}
+
+/// Per-kind hook counts for a React component, summarized from `hook_uses`.
+/// DESCRIPTIVE editor context (the LSP code-lens hook breakdown), never a
+/// finding, severity, or `total_issues` input. `custom` collects every
+/// `use*`-named call that is not one of the four built-ins.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReactHookSummary {
+    /// `useState(...)` call count.
+    pub state: u16,
+    /// `useEffect(...)` call count.
+    pub effect: u16,
+    /// `useMemo(...)` call count.
+    pub memo: u16,
+    /// `useCallback(...)` call count.
+    pub callback: u16,
+    /// Count of any other `use*`-named call (a custom hook).
+    pub custom: u16,
+}
+
+/// A prop-drilling trace for a prop at the ROOT of a forwarding chain.
+/// DESCRIPTIVE ambient editor context (the LSP per-prop hover): the prop is
+/// forwarded unchanged through `depth` components before a component
+/// substantively consumes it. Reuses the `prop-drilling` chain machinery's
+/// abstain ladder (spread / `cloneElement` / dynamic / provider-in-subtree drop
+/// the whole chain), so the trace is honest. NOT a finding (the opt-in
+/// `prop-drilling` rule owns the finding); this rides the `#[serde(skip)]`
+/// `ReactComponentIntel` carrier.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReactPropDrill {
+    /// The chain depth = number of components the prop is forwarded THROUGH
+    /// (source + intermediates + consumer), matching `PropDrillingChain.depth`.
+    pub depth: u32,
+    /// The ordered component names from source to consumer (`hops[0]` owns the
+    /// prop, the last consumes it).
+    pub hops: Vec<String>,
+}
+
+/// Per-prop usage intelligence for one React component prop. DESCRIPTIVE editor
+/// context (the LSP per-prop hover): whether the prop is read in the component
+/// body and how many render sites pass it. NOT a finding (the
+/// `unused-component-prop` React arm owns the deadness rule); this is ambient
+/// signal. `anchor_line` / `anchor_col` follow the same convention the React
+/// `unused-component-prop` findings use (1-based line, byte-derived col from
+/// `byte_offset_to_line_col`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReactPropIntel {
+    /// The declared prop name.
+    pub name: String,
+    /// 1-based line of the prop declaration (anchors the hover).
+    pub anchor_line: u32,
+    /// Column of the prop declaration (byte-derived, matching the React
+    /// `unused-component-prop` finding convention).
+    pub anchor_col: u32,
+    /// Whether the prop is referenced in the component body (`used_in_script`
+    /// for the React arm: a resolved reference to the destructured local).
+    pub used_in_body: bool,
+    /// Count of render sites (test/spec/story/fixture files excluded) whose
+    /// passed-attribute set contains this prop name.
+    pub passed_from_sites: u32,
+    /// A prop-drilling trace, present only when this prop is the ROOT of a
+    /// forwarding chain that reaches a consumer through `>= N` pass-through
+    /// components. `None` for an ordinary prop. Test/spec/story/fixture source
+    /// components never carry a drill trace.
+    pub drill: Option<ReactPropDrill>,
+}
+
+/// Per-component render + prop + hook intelligence for one React component.
+/// DESCRIPTIVE ambient editor context surfaced by the LSP (a component summary
+/// code lens plus per-prop hovers), NOT a finding, IssueKind, severity, or
+/// `total_issues` input. Carried in-process on the `#[serde(skip)]`
+/// `AnalysisResults::react_component_intel` field (like
+/// [`RenderFanInMetric`]); never serialized, so bare `plow` / `audit` and the
+/// JSON / schema surface are untouched.
+///
+/// Counts are HONEST: test/spec/story/fixture render sites are excluded from
+/// `render_sites`, `distinct_parents`, and per-prop `passed_from_sites`, and
+/// `distinct_parents` (not the repeat-inflated `render_sites`) is the headline,
+/// mirroring the render-fan-in metric's discipline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReactComponentIntel {
+    /// Absolute path of the file declaring the component.
+    pub path: PathBuf,
+    /// The component name.
+    pub component_name: String,
+    /// 1-based line of the component definition (anchors the code lens).
+    pub anchor_line: u32,
+    /// Column of the component definition (byte-derived).
+    pub anchor_col: u32,
+    /// Total JSX render SITES that resolve to this component (each capitalized /
+    /// member JSX tag is one site). SECONDARY context: a single parent rendering
+    /// the child five times is five sites but one distinct parent.
+    pub render_sites: u32,
+    /// Distinct `(parent_file, parent_component)` keys rendering this component.
+    /// The HEADLINE blast-radius count (never the repeat-inflated site count).
+    pub distinct_parents: u32,
+    /// Number of declared props on this component.
+    pub prop_count: u16,
+    /// Per-kind hook counts.
+    pub hooks: ReactHookSummary,
+    /// Per-prop usage intelligence (one entry per declared prop).
+    pub props: Vec<ReactPropIntel>,
 }
 
 /// Complete analysis results.
@@ -160,7 +331,8 @@ pub struct AnalysisResults {
     /// `actions` array natively.
     #[serde(default)]
     pub boundary_call_violations: Vec<BoundaryCallViolationFinding>,
-    /// Banned calls and banned imports matched by declarative rule packs
+    /// Banned calls, imports, and catalogue-derived effects matched by
+    /// declarative rule packs
     /// (`rulePacks` config). Wrapped in [`PolicyViolationFinding`] so each
     /// entry carries a typed `actions` array natively. Each finding carries
     /// its effective per-rule severity.
@@ -169,22 +341,23 @@ pub struct AnalysisResults {
     /// Suppression comments or JSDoc tags that no longer match any issue.
     #[serde(default)]
     pub stale_suppressions: Vec<StaleSuppression>,
-    /// Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not
-    /// referenced by any workspace package via the catalog: protocol. Wrapped
-    /// in [`UnusedCatalogEntryFinding`] so each entry carries a typed
+    /// Entries in package manager catalog sections not referenced by any
+    /// workspace package via the catalog: protocol. Supports
+    /// `pnpm-workspace.yaml` catalogs and Bun root `package.json` catalogs.
+    /// Wrapped in [`UnusedCatalogEntryFinding`] so each entry carries a typed
     /// `actions` array natively, with per-instance `auto_fixable` derived
-    /// from `hardcoded_consumers`.
+    /// from `hardcoded_consumers` and the catalog source file.
     #[serde(default)]
     pub unused_catalog_entries: Vec<UnusedCatalogEntryFinding>,
-    /// Named groups under pnpm-workspace.yaml's catalogs: section that declare
-    /// no package entries. The top-level catalog: map is not reported. Wrapped
-    /// in [`EmptyCatalogGroupFinding`].
+    /// Named groups under package manager catalogs sections that declare no
+    /// package entries. The top-level catalog: map is not reported. Wrapped in
+    /// [`EmptyCatalogGroupFinding`].
     #[serde(default)]
     pub empty_catalog_groups: Vec<EmptyCatalogGroupFinding>,
     /// Workspace package.json references to catalogs (`catalog:` or
-    /// `catalog:<name>`) that do not declare the consumed package. pnpm install
-    /// will error until the named catalog grows to include the package or the
-    /// reference is switched / removed. Wrapped in
+    /// `catalog:<name>`) that do not declare the consumed package. The package
+    /// manager install will error until the named catalog grows to include the
+    /// package or the reference is switched / removed. Wrapped in
     /// [`UnresolvedCatalogReferenceFinding`] with the discriminated
     /// `add-catalog-entry` / `update-catalog-reference` primary at position 0.
     #[serde(default)]
@@ -246,8 +419,8 @@ pub struct AnalysisResults {
     /// carries a typed `actions` array natively. Default severity is `warn`.
     #[serde(default)]
     pub dynamic_segment_name_conflicts: Vec<DynamicSegmentNameConflictFinding>,
-    /// Vue `<script setup>` `defineProps` props referenced nowhere in their own
-    /// SFC (neither `<script>` nor `<template>`). Wrapped in
+    /// Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, and React props
+    /// referenced nowhere in their own component. Wrapped in
     /// [`UnusedComponentPropFinding`] so each entry carries a typed `actions`
     /// array natively. Default severity is `warn`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -258,6 +431,25 @@ pub struct AnalysisResults {
     /// `warn`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unused_component_emits: Vec<UnusedComponentEmitFinding>,
+    /// Angular `@Input()` / signal `input()` / `model()` inputs read nowhere in
+    /// their own component (neither the template nor the class body). Wrapped in
+    /// [`UnusedComponentInputFinding`] so each entry carries a typed `actions`
+    /// array natively. Default severity is `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_component_inputs: Vec<UnusedComponentInputFinding>,
+    /// Angular `@Output()` / signal `output()` outputs emitted nowhere in their
+    /// own component (no `this.<output>.emit(...)`). Wrapped in
+    /// [`UnusedComponentOutputFinding`] so each entry carries a typed `actions`
+    /// array natively. Default severity is `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_component_outputs: Vec<UnusedComponentOutputFinding>,
+    /// Svelte components dispatching a custom event via `createEventDispatcher()`
+    /// whose event name is listened to nowhere project-wide (cross-file
+    /// dead-output direction). Wrapped in [`UnusedSvelteEventFinding`] so each
+    /// entry carries a typed `actions` array natively. Default severity is
+    /// `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_svelte_events: Vec<UnusedSvelteEventFinding>,
     /// Next.js Server Actions (exports of `"use server"` files) that no code in
     /// the project references. Reclassified out of `unused_exports` for
     /// `"use server"` files. Wrapped in [`UnusedServerActionFinding`] so each
@@ -265,11 +457,55 @@ pub struct AnalysisResults {
     /// `warn`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unused_server_actions: Vec<UnusedServerActionFinding>,
+    /// SvelteKit `+page.{ts,server.ts,js,server.js}` `load()` return-object keys
+    /// read by no consumer. Wrapped in [`UnusedLoadDataKeyFinding`] so each entry
+    /// carries a typed `actions` array natively. Default severity is `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_load_data_keys: Vec<UnusedLoadDataKeyFinding>,
+    /// `true` when the `unused-load-data-key` detector abstained project-wide
+    /// because a whole-object use of `page.data` / `$page.data` was seen
+    /// somewhere (S1 observability: an empty `unused_load_data_keys` with this
+    /// flag set is NOT a clean bill, it means the rule could not run safely).
+    /// Serialized only when `true` so the default JSON contract is unchanged.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unused_load_data_keys_global_abstain: bool,
+    /// React/Preact props forwarded unchanged through `>= N` intermediate
+    /// pass-through components until a consumer (located per-chain records).
+    /// Wrapped in [`PropDrillingChainFinding`] so each entry carries a typed
+    /// `actions` array natively. Health signal: the rule defaults to `off`
+    /// (opt-in), so this is dormant and populated ONLY when the user enables it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prop_drilling_chains: Vec<PropDrillingChainFinding>,
+    /// React/Preact components whose entire body is a single spread-forwarded
+    /// child render (`return <Child {...props}/>`): pure structural indirection,
+    /// a candidate for inlining at call sites. Wrapped in [`ThinWrapperFinding`]
+    /// so each entry carries a typed `actions` array natively. Health signal: the
+    /// rule defaults to `off` (opt-in), so this is dormant and populated ONLY
+    /// when the user enables it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub thin_wrappers: Vec<ThinWrapperFinding>,
+    /// React/Preact components that participate in a duplicate-prop-shape group:
+    /// three or more components across two or more files whose statically-known
+    /// prop NAME set is identical after stripping ubiquitous DOM / passthrough
+    /// names (a missing shared `Props` type / base component). Wrapped in
+    /// [`DuplicatePropShapeFinding`] so each entry carries a typed `actions`
+    /// array and its sibling roster natively. Health signal: the rule defaults to
+    /// `off` (opt-in), so this is dormant and populated ONLY when the user
+    /// enables it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub duplicate_prop_shapes: Vec<DuplicatePropShapeFinding>,
     /// Number of suppression entries that matched an issue during analysis.
     /// Human output uses this for the suppression footer; it is skipped in
     /// machine output to avoid changing the public JSON issue contract.
     #[serde(skip)]
     pub suppression_count: usize,
+    /// Number of component props exempted from `unused-component-props` this run
+    /// because their local destructure binding name matched
+    /// `unusedComponentProps.ignorePattern`. Drives a human-output note so a
+    /// typo'd pattern (matching nothing) is not a silent no-op; skipped in
+    /// machine output, like [`Self::suppression_count`].
+    #[serde(skip)]
+    pub unused_component_props_exempted: usize,
     /// Suppression comments present in analyzed files this run (every present
     /// marker, all kinds, not only consumed ones). Internal: read in-process by
     /// `plow impact` to distinguish a genuinely resolved finding from one
@@ -320,7 +556,313 @@ pub struct AnalysisResults {
     /// Skipped during serialization: rendered separately in JSON output.
     #[serde(skip)]
     pub entry_point_summary: Option<EntryPointSummary>,
+    /// Per-component render fan-in (JSX render SITES + distinct parents) plus the
+    /// precomputed concentration aggregates. DESCRIPTIVE blast-radius signal, not
+    /// an issue type: the component-graph analogue of module fan-in. `None` on
+    /// non-React projects (the dep gate fails and `render_edges` is empty).
+    /// Skipped during serialization (internal carrier, like
+    /// [`Self::export_usages`]); the public surface is the `VitalSigns`
+    /// aggregate, so bare `plow` / `audit` never serialize it. See
+    /// [`RenderFanInMetric`].
+    #[serde(skip)]
+    pub render_fan_in: Option<RenderFanInMetric>,
+    /// Per-component React render/prop/hook intelligence. DESCRIPTIVE ambient
+    /// editor context (LSP code lens + per-prop hover), NOT an issue type: it is
+    /// never in `total_issues`. Empty on non-React projects (the dep gate fails
+    /// and `component_functions` is empty). Skipped during serialization
+    /// (in-process LSP carrier, like [`Self::render_fan_in`]); bare `plow` /
+    /// `audit` never serialize it and the JSON / schema surface is unchanged.
+    /// See [`ReactComponentIntel`].
+    #[serde(skip)]
+    pub react_component_intel: Vec<ReactComponentIntel>,
 }
+
+struct AnalysisResultsCoreMergeParts {
+    unused_files: Vec<UnusedFileFinding>,
+    unused_exports: Vec<UnusedExportFinding>,
+    unused_types: Vec<UnusedTypeFinding>,
+    private_type_leaks: Vec<PrivateTypeLeakFinding>,
+    unused_enum_members: Vec<UnusedEnumMemberFinding>,
+    unused_class_members: Vec<UnusedClassMemberFinding>,
+    unused_store_members: Vec<UnusedStoreMemberFinding>,
+    unresolved_imports: Vec<UnresolvedImportFinding>,
+    boundary_violations: Vec<BoundaryViolationFinding>,
+    boundary_coverage_violations: Vec<BoundaryCoverageViolationFinding>,
+    boundary_call_violations: Vec<BoundaryCallViolationFinding>,
+    policy_violations: Vec<PolicyViolationFinding>,
+    stale_suppressions: Vec<StaleSuppression>,
+}
+
+struct AnalysisResultsGraphMergeParts {
+    unused_dependencies: Vec<UnusedDependencyFinding>,
+    unused_dev_dependencies: Vec<UnusedDevDependencyFinding>,
+    unused_optional_dependencies: Vec<UnusedOptionalDependencyFinding>,
+    unlisted_dependencies: Vec<UnlistedDependencyFinding>,
+    duplicate_exports: Vec<DuplicateExportFinding>,
+    type_only_dependencies: Vec<TypeOnlyDependencyFinding>,
+    test_only_dependencies: Vec<TestOnlyDependencyFinding>,
+    circular_dependencies: Vec<CircularDependencyFinding>,
+    re_export_cycles: Vec<ReExportCycleFinding>,
+}
+
+struct AnalysisResultsWorkspaceMergeParts {
+    unused_catalog_entries: Vec<UnusedCatalogEntryFinding>,
+    empty_catalog_groups: Vec<EmptyCatalogGroupFinding>,
+    unresolved_catalog_references: Vec<UnresolvedCatalogReferenceFinding>,
+    unused_dependency_overrides: Vec<UnusedDependencyOverrideFinding>,
+    misconfigured_dependency_overrides: Vec<MisconfiguredDependencyOverrideFinding>,
+}
+
+struct AnalysisResultsFrameworkMergeParts {
+    invalid_client_exports: Vec<InvalidClientExportFinding>,
+    mixed_client_server_barrels: Vec<MixedClientServerBarrelFinding>,
+    misplaced_directives: Vec<MisplacedDirectiveFinding>,
+    unprovided_injects: Vec<UnprovidedInjectFinding>,
+    unrendered_components: Vec<UnrenderedComponentFinding>,
+    route_collisions: Vec<RouteCollisionFinding>,
+    dynamic_segment_name_conflicts: Vec<DynamicSegmentNameConflictFinding>,
+    unused_component_props: Vec<UnusedComponentPropFinding>,
+    unused_component_emits: Vec<UnusedComponentEmitFinding>,
+    unused_component_inputs: Vec<UnusedComponentInputFinding>,
+    unused_component_outputs: Vec<UnusedComponentOutputFinding>,
+    unused_svelte_events: Vec<UnusedSvelteEventFinding>,
+    unused_server_actions: Vec<UnusedServerActionFinding>,
+    unused_load_data_keys: Vec<UnusedLoadDataKeyFinding>,
+    unused_load_data_keys_global_abstain: bool,
+    prop_drilling_chains: Vec<PropDrillingChainFinding>,
+    thin_wrappers: Vec<ThinWrapperFinding>,
+    duplicate_prop_shapes: Vec<DuplicatePropShapeFinding>,
+}
+
+struct AnalysisResultsMetadataMergeParts {
+    suppression_count: usize,
+    unused_component_props_exempted: usize,
+    active_suppressions: Vec<ActiveSuppression>,
+    feature_flags: Vec<FeatureFlag>,
+    security_findings: Vec<SecurityFinding>,
+    security_unresolved_edge_files: usize,
+    security_unresolved_callee_sites: usize,
+    security_unresolved_callee_diagnostics: Vec<SecurityUnresolvedCalleeDiagnostic>,
+    export_usages: Vec<ExportUsage>,
+    entry_point_summary: Option<EntryPointSummary>,
+    render_fan_in: Option<RenderFanInMetric>,
+    react_component_intel: Vec<ReactComponentIntel>,
+}
+
+/// Exhaustively destructure `other` into the five grouped merge-part structs.
+///
+/// The single exhaustive `let Self { .. }` lives here so that adding a field to
+/// [`AnalysisResults`] becomes a compile error (a field must be routed into one
+/// of the part structs) instead of being silently dropped during a merge. See
+/// issue #444.
+#[expect(
+    clippy::too_many_lines,
+    reason = "irreducible single exhaustive field-routing: the one `let Self { .. }` destructure must name every field so a newly added field is a compile error (issue #444); splitting it would defeat that exhaustiveness guarantee"
+)]
+fn split_merge_parts(
+    other: AnalysisResults,
+) -> (
+    AnalysisResultsCoreMergeParts,
+    AnalysisResultsGraphMergeParts,
+    AnalysisResultsWorkspaceMergeParts,
+    AnalysisResultsFrameworkMergeParts,
+    AnalysisResultsMetadataMergeParts,
+) {
+    let AnalysisResults {
+        unused_files,
+        unused_exports,
+        unused_types,
+        private_type_leaks,
+        unused_dependencies,
+        unused_dev_dependencies,
+        unused_optional_dependencies,
+        unused_enum_members,
+        unused_class_members,
+        unused_store_members,
+        unresolved_imports,
+        unlisted_dependencies,
+        duplicate_exports,
+        type_only_dependencies,
+        test_only_dependencies,
+        circular_dependencies,
+        re_export_cycles,
+        boundary_violations,
+        boundary_coverage_violations,
+        boundary_call_violations,
+        policy_violations,
+        stale_suppressions,
+        unused_catalog_entries,
+        empty_catalog_groups,
+        unresolved_catalog_references,
+        unused_dependency_overrides,
+        misconfigured_dependency_overrides,
+        invalid_client_exports,
+        mixed_client_server_barrels,
+        misplaced_directives,
+        unprovided_injects,
+        unrendered_components,
+        route_collisions,
+        dynamic_segment_name_conflicts,
+        unused_component_props,
+        unused_component_emits,
+        unused_component_inputs,
+        unused_component_outputs,
+        unused_svelte_events,
+        unused_server_actions,
+        unused_load_data_keys,
+        unused_load_data_keys_global_abstain,
+        prop_drilling_chains,
+        thin_wrappers,
+        duplicate_prop_shapes,
+        suppression_count,
+        unused_component_props_exempted,
+        active_suppressions,
+        feature_flags,
+        security_findings,
+        security_unresolved_edge_files,
+        security_unresolved_callee_sites,
+        security_unresolved_callee_diagnostics,
+        export_usages,
+        entry_point_summary,
+        render_fan_in,
+        react_component_intel,
+    } = other;
+
+    (
+        AnalysisResultsCoreMergeParts {
+            unused_files,
+            unused_exports,
+            unused_types,
+            private_type_leaks,
+            unused_enum_members,
+            unused_class_members,
+            unused_store_members,
+            unresolved_imports,
+            boundary_violations,
+            boundary_coverage_violations,
+            boundary_call_violations,
+            policy_violations,
+            stale_suppressions,
+        },
+        AnalysisResultsGraphMergeParts {
+            unused_dependencies,
+            unused_dev_dependencies,
+            unused_optional_dependencies,
+            unlisted_dependencies,
+            duplicate_exports,
+            type_only_dependencies,
+            test_only_dependencies,
+            circular_dependencies,
+            re_export_cycles,
+        },
+        AnalysisResultsWorkspaceMergeParts {
+            unused_catalog_entries,
+            empty_catalog_groups,
+            unresolved_catalog_references,
+            unused_dependency_overrides,
+            misconfigured_dependency_overrides,
+        },
+        AnalysisResultsFrameworkMergeParts {
+            invalid_client_exports,
+            mixed_client_server_barrels,
+            misplaced_directives,
+            unprovided_injects,
+            unrendered_components,
+            route_collisions,
+            dynamic_segment_name_conflicts,
+            unused_component_props,
+            unused_component_emits,
+            unused_component_inputs,
+            unused_component_outputs,
+            unused_svelte_events,
+            unused_server_actions,
+            unused_load_data_keys,
+            unused_load_data_keys_global_abstain,
+            prop_drilling_chains,
+            thin_wrappers,
+            duplicate_prop_shapes,
+        },
+        AnalysisResultsMetadataMergeParts {
+            suppression_count,
+            unused_component_props_exempted,
+            active_suppressions,
+            feature_flags,
+            security_findings,
+            security_unresolved_edge_files,
+            security_unresolved_callee_sites,
+            security_unresolved_callee_diagnostics,
+            export_usages,
+            entry_point_summary,
+            render_fan_in,
+            react_component_intel,
+        },
+    )
+}
+
+macro_rules! counted_analysis_result_fields {
+    ($callback:ident $(, $arg:expr)? ) => {
+        $callback! {
+            $($arg,)?
+            unused_files => "unused_files",
+            unused_exports => "unused_exports",
+            unused_types => "unused_types",
+            private_type_leaks => "private_type_leaks",
+            unused_dependencies => "unused_dependencies",
+            unused_dev_dependencies => "unused_dev_dependencies",
+            unused_optional_dependencies => "unused_optional_dependencies",
+            unused_enum_members => "unused_enum_members",
+            unused_class_members => "unused_class_members",
+            unused_store_members => "unused_store_members",
+            unresolved_imports => "unresolved_imports",
+            unlisted_dependencies => "unlisted_dependencies",
+            duplicate_exports => "duplicate_exports",
+            type_only_dependencies => "type_only_dependencies",
+            test_only_dependencies => "test_only_dependencies",
+            circular_dependencies => "circular_dependencies",
+            re_export_cycles => "re_export_cycles",
+            boundary_violations => "boundary_violations",
+            boundary_coverage_violations => "boundary_coverage_violations",
+            boundary_call_violations => "boundary_call_violations",
+            policy_violations => "policy_violations",
+            stale_suppressions => "stale_suppressions",
+            unused_catalog_entries => "unused_catalog_entries",
+            empty_catalog_groups => "empty_catalog_groups",
+            unresolved_catalog_references => "unresolved_catalog_references",
+            unused_dependency_overrides => "unused_dependency_overrides",
+            misconfigured_dependency_overrides => "misconfigured_dependency_overrides",
+            invalid_client_exports => "invalid_client_exports",
+            mixed_client_server_barrels => "mixed_client_server_barrels",
+            misplaced_directives => "misplaced_directives",
+            unprovided_injects => "unprovided_injects",
+            unrendered_components => "unrendered_components",
+            route_collisions => "route_collisions",
+            dynamic_segment_name_conflicts => "dynamic_segment_name_conflicts",
+            unused_component_props => "unused_component_props",
+            unused_component_emits => "unused_component_emits",
+            unused_component_inputs => "unused_component_inputs",
+            unused_component_outputs => "unused_component_outputs",
+            unused_svelte_events => "unused_svelte_events",
+            unused_server_actions => "unused_server_actions",
+            unused_load_data_keys => "unused_load_data_keys",
+        }
+    };
+}
+
+macro_rules! counted_result_key_slice {
+    ($($field:ident => $key:literal,)+) => {
+        &[$($key),+]
+    };
+}
+
+macro_rules! counted_result_field_sum {
+    ($results:expr, $($field:ident => $key:literal,)+) => {
+        0 $(+ ($results).$field.len())+
+    };
+}
+
+/// Serialized `AnalysisResults` arrays that contribute to [`AnalysisResults::total_issues`].
+pub const TOTAL_ISSUE_RESULT_KEYS: &[&str] =
+    counted_analysis_result_fields!(counted_result_key_slice);
 
 impl AnalysisResults {
     /// Total number of issues found.
@@ -355,43 +897,7 @@ impl AnalysisResults {
     /// ```
     #[must_use]
     pub const fn total_issues(&self) -> usize {
-        self.unused_files.len()
-            + self.unused_exports.len()
-            + self.unused_types.len()
-            + self.private_type_leaks.len()
-            + self.unused_dependencies.len()
-            + self.unused_dev_dependencies.len()
-            + self.unused_optional_dependencies.len()
-            + self.unused_enum_members.len()
-            + self.unused_class_members.len()
-            + self.unused_store_members.len()
-            + self.unresolved_imports.len()
-            + self.unlisted_dependencies.len()
-            + self.duplicate_exports.len()
-            + self.type_only_dependencies.len()
-            + self.test_only_dependencies.len()
-            + self.circular_dependencies.len()
-            + self.re_export_cycles.len()
-            + self.boundary_violations.len()
-            + self.boundary_coverage_violations.len()
-            + self.boundary_call_violations.len()
-            + self.policy_violations.len()
-            + self.stale_suppressions.len()
-            + self.unused_catalog_entries.len()
-            + self.empty_catalog_groups.len()
-            + self.unresolved_catalog_references.len()
-            + self.unused_dependency_overrides.len()
-            + self.misconfigured_dependency_overrides.len()
-            + self.invalid_client_exports.len()
-            + self.mixed_client_server_barrels.len()
-            + self.misplaced_directives.len()
-            + self.unprovided_injects.len()
-            + self.unrendered_components.len()
-            + self.route_collisions.len()
-            + self.dynamic_segment_name_conflicts.len()
-            + self.unused_component_props.len()
-            + self.unused_component_emits.len()
-            + self.unused_server_actions.len()
+        counted_analysis_result_fields!(counted_result_field_sum, self)
     }
 
     /// Whether any issues were found.
@@ -413,112 +919,113 @@ impl AnalysisResults {
     /// sums; `entry_point_summary` keeps `self`'s value when present and
     /// otherwise adopts `other`'s.
     pub fn merge_into(&mut self, other: Self) {
-        let Self {
-            unused_files,
-            unused_exports,
-            unused_types,
-            private_type_leaks,
-            unused_dependencies,
-            unused_dev_dependencies,
-            unused_optional_dependencies,
-            unused_enum_members,
-            unused_class_members,
-            unused_store_members,
-            unresolved_imports,
-            unlisted_dependencies,
-            duplicate_exports,
-            type_only_dependencies,
-            test_only_dependencies,
-            circular_dependencies,
-            re_export_cycles,
-            boundary_violations,
-            boundary_coverage_violations,
-            boundary_call_violations,
-            policy_violations,
-            stale_suppressions,
-            unused_catalog_entries,
-            empty_catalog_groups,
-            unresolved_catalog_references,
-            unused_dependency_overrides,
-            misconfigured_dependency_overrides,
-            invalid_client_exports,
-            mixed_client_server_barrels,
-            misplaced_directives,
-            unprovided_injects,
-            unrendered_components,
-            route_collisions,
-            dynamic_segment_name_conflicts,
-            unused_component_props,
-            unused_component_emits,
-            unused_server_actions,
-            suppression_count,
-            active_suppressions,
-            feature_flags,
-            security_findings,
-            security_unresolved_edge_files,
-            security_unresolved_callee_sites,
-            security_unresolved_callee_diagnostics,
-            export_usages,
-            entry_point_summary,
-        } = other;
+        let (core, graph, workspace, framework, metadata) = split_merge_parts(other);
+        self.merge_core_findings(core);
+        self.merge_dependency_and_graph_findings(graph);
+        self.merge_workspace_findings(workspace);
+        self.merge_framework_findings(framework);
+        self.merge_metadata_and_security(metadata);
+    }
 
-        self.unused_files.extend(unused_files);
-        self.unused_exports.extend(unused_exports);
-        self.unused_types.extend(unused_types);
-        self.private_type_leaks.extend(private_type_leaks);
-        self.unused_dependencies.extend(unused_dependencies);
-        self.unused_dev_dependencies.extend(unused_dev_dependencies);
-        self.unused_optional_dependencies
-            .extend(unused_optional_dependencies);
-        self.unused_enum_members.extend(unused_enum_members);
-        self.unused_class_members.extend(unused_class_members);
-        self.unused_store_members.extend(unused_store_members);
-        self.unresolved_imports.extend(unresolved_imports);
-        self.unlisted_dependencies.extend(unlisted_dependencies);
-        self.duplicate_exports.extend(duplicate_exports);
-        self.type_only_dependencies.extend(type_only_dependencies);
-        self.test_only_dependencies.extend(test_only_dependencies);
-        self.circular_dependencies.extend(circular_dependencies);
-        self.re_export_cycles.extend(re_export_cycles);
-        self.boundary_violations.extend(boundary_violations);
+    fn merge_core_findings(&mut self, parts: AnalysisResultsCoreMergeParts) {
+        self.unused_files.extend(parts.unused_files);
+        self.unused_exports.extend(parts.unused_exports);
+        self.unused_types.extend(parts.unused_types);
+        self.private_type_leaks.extend(parts.private_type_leaks);
+        self.unused_enum_members.extend(parts.unused_enum_members);
+        self.unused_class_members.extend(parts.unused_class_members);
+        self.unused_store_members.extend(parts.unused_store_members);
+        self.unresolved_imports.extend(parts.unresolved_imports);
+        self.boundary_violations.extend(parts.boundary_violations);
         self.boundary_coverage_violations
-            .extend(boundary_coverage_violations);
+            .extend(parts.boundary_coverage_violations);
         self.boundary_call_violations
-            .extend(boundary_call_violations);
-        self.policy_violations.extend(policy_violations);
-        self.stale_suppressions.extend(stale_suppressions);
-        self.unused_catalog_entries.extend(unused_catalog_entries);
-        self.empty_catalog_groups.extend(empty_catalog_groups);
+            .extend(parts.boundary_call_violations);
+        self.policy_violations.extend(parts.policy_violations);
+        self.stale_suppressions.extend(parts.stale_suppressions);
+    }
+
+    fn merge_dependency_and_graph_findings(&mut self, parts: AnalysisResultsGraphMergeParts) {
+        self.unused_dependencies.extend(parts.unused_dependencies);
+        self.unused_dev_dependencies
+            .extend(parts.unused_dev_dependencies);
+        self.unused_optional_dependencies
+            .extend(parts.unused_optional_dependencies);
+        self.unlisted_dependencies
+            .extend(parts.unlisted_dependencies);
+        self.duplicate_exports.extend(parts.duplicate_exports);
+        self.type_only_dependencies
+            .extend(parts.type_only_dependencies);
+        self.test_only_dependencies
+            .extend(parts.test_only_dependencies);
+        self.circular_dependencies
+            .extend(parts.circular_dependencies);
+        self.re_export_cycles.extend(parts.re_export_cycles);
+    }
+
+    fn merge_workspace_findings(&mut self, parts: AnalysisResultsWorkspaceMergeParts) {
+        self.unused_catalog_entries
+            .extend(parts.unused_catalog_entries);
+        self.empty_catalog_groups.extend(parts.empty_catalog_groups);
         self.unresolved_catalog_references
-            .extend(unresolved_catalog_references);
+            .extend(parts.unresolved_catalog_references);
         self.unused_dependency_overrides
-            .extend(unused_dependency_overrides);
+            .extend(parts.unused_dependency_overrides);
         self.misconfigured_dependency_overrides
-            .extend(misconfigured_dependency_overrides);
-        self.invalid_client_exports.extend(invalid_client_exports);
+            .extend(parts.misconfigured_dependency_overrides);
+    }
+
+    fn merge_framework_findings(&mut self, parts: AnalysisResultsFrameworkMergeParts) {
+        self.invalid_client_exports
+            .extend(parts.invalid_client_exports);
         self.mixed_client_server_barrels
-            .extend(mixed_client_server_barrels);
-        self.misplaced_directives.extend(misplaced_directives);
-        self.unprovided_injects.extend(unprovided_injects);
-        self.unrendered_components.extend(unrendered_components);
-        self.route_collisions.extend(route_collisions);
+            .extend(parts.mixed_client_server_barrels);
+        self.misplaced_directives.extend(parts.misplaced_directives);
+        self.unprovided_injects.extend(parts.unprovided_injects);
+        self.unrendered_components
+            .extend(parts.unrendered_components);
+        self.route_collisions.extend(parts.route_collisions);
         self.dynamic_segment_name_conflicts
-            .extend(dynamic_segment_name_conflicts);
-        self.unused_component_props.extend(unused_component_props);
-        self.unused_component_emits.extend(unused_component_emits);
-        self.unused_server_actions.extend(unused_server_actions);
-        self.feature_flags.extend(feature_flags);
-        self.security_findings.extend(security_findings);
-        self.security_unresolved_edge_files += security_unresolved_edge_files;
-        self.security_unresolved_callee_sites += security_unresolved_callee_sites;
+            .extend(parts.dynamic_segment_name_conflicts);
+        self.unused_component_props
+            .extend(parts.unused_component_props);
+        self.unused_component_emits
+            .extend(parts.unused_component_emits);
+        self.unused_component_inputs
+            .extend(parts.unused_component_inputs);
+        self.unused_component_outputs
+            .extend(parts.unused_component_outputs);
+        self.unused_svelte_events.extend(parts.unused_svelte_events);
+        self.unused_server_actions
+            .extend(parts.unused_server_actions);
+        self.unused_load_data_keys
+            .extend(parts.unused_load_data_keys);
+        self.unused_load_data_keys_global_abstain |= parts.unused_load_data_keys_global_abstain;
+        self.prop_drilling_chains.extend(parts.prop_drilling_chains);
+        self.thin_wrappers.extend(parts.thin_wrappers);
+        self.duplicate_prop_shapes
+            .extend(parts.duplicate_prop_shapes);
+    }
+
+    fn merge_metadata_and_security(&mut self, parts: AnalysisResultsMetadataMergeParts) {
+        self.feature_flags.extend(parts.feature_flags);
+        self.security_findings.extend(parts.security_findings);
+        self.security_unresolved_edge_files += parts.security_unresolved_edge_files;
+        self.security_unresolved_callee_sites += parts.security_unresolved_callee_sites;
         self.security_unresolved_callee_diagnostics
-            .extend(security_unresolved_callee_diagnostics);
-        self.export_usages.extend(export_usages);
-        self.active_suppressions.extend(active_suppressions);
-        self.suppression_count += suppression_count;
+            .extend(parts.security_unresolved_callee_diagnostics);
+        self.export_usages.extend(parts.export_usages);
+        self.active_suppressions.extend(parts.active_suppressions);
+        self.suppression_count += parts.suppression_count;
+        self.unused_component_props_exempted += parts.unused_component_props_exempted;
         if self.entry_point_summary.is_none() {
-            self.entry_point_summary = entry_point_summary;
+            self.entry_point_summary = parts.entry_point_summary;
         }
+        if self.render_fan_in.is_none() {
+            self.render_fan_in = parts.render_fan_in;
+        }
+        self.react_component_intel
+            .extend(parts.react_component_intel);
     }
 
     /// Sort all result arrays for deterministic output ordering.
@@ -537,6 +1044,13 @@ impl AnalysisResults {
     }
 
     fn sort_core_findings(&mut self) {
+        self.sort_core_declaration_findings();
+        self.sort_core_member_findings();
+        self.sort_core_framework_findings();
+        self.sort_core_route_and_load_findings();
+    }
+
+    fn sort_core_declaration_findings(&mut self) {
         self.unused_files
             .sort_by(|a, b| a.file.path.cmp(&b.file.path));
 
@@ -588,7 +1102,9 @@ impl AnalysisResults {
                 .then(a.dep.line.cmp(&b.dep.line))
                 .then(a.dep.package_name.cmp(&b.dep.package_name))
         });
+    }
 
+    fn sort_core_member_findings(&mut self) {
         self.unused_enum_members.sort_by(|a, b| {
             a.member
                 .path
@@ -624,7 +1140,9 @@ impl AnalysisResults {
                 .then(a.import.col.cmp(&b.import.col))
                 .then(a.import.specifier.cmp(&b.import.specifier))
         });
+    }
 
+    fn sort_core_framework_findings(&mut self) {
         self.invalid_client_exports.sort_by(|a, b| {
             a.export
                 .path
@@ -668,7 +1186,9 @@ impl AnalysisResults {
                 .then(a.component.col.cmp(&b.component.col))
                 .then(a.component.component_name.cmp(&b.component.component_name))
         });
+    }
 
+    fn sort_core_route_and_load_findings(&mut self) {
         self.route_collisions.sort_by(|a, b| {
             a.collision
                 .path
@@ -699,6 +1219,30 @@ impl AnalysisResults {
                 .then(a.emit.emit_name.cmp(&b.emit.emit_name))
         });
 
+        self.unused_component_inputs.sort_by(|a, b| {
+            a.input
+                .path
+                .cmp(&b.input.path)
+                .then(a.input.line.cmp(&b.input.line))
+                .then(a.input.input_name.cmp(&b.input.input_name))
+        });
+
+        self.unused_component_outputs.sort_by(|a, b| {
+            a.output
+                .path
+                .cmp(&b.output.path)
+                .then(a.output.line.cmp(&b.output.line))
+                .then(a.output.output_name.cmp(&b.output.output_name))
+        });
+
+        self.unused_svelte_events.sort_by(|a, b| {
+            a.event
+                .path
+                .cmp(&b.event.path)
+                .then(a.event.line.cmp(&b.event.line))
+                .then(a.event.event_name.cmp(&b.event.event_name))
+        });
+
         self.unused_server_actions.sort_by(|a, b| {
             a.action
                 .path
@@ -706,6 +1250,58 @@ impl AnalysisResults {
                 .then(a.action.line.cmp(&b.action.line))
                 .then(a.action.col.cmp(&b.action.col))
                 .then(a.action.action_name.cmp(&b.action.action_name))
+        });
+
+        self.unused_load_data_keys.sort_by(|a, b| {
+            a.key
+                .path
+                .cmp(&b.key.path)
+                .then(a.key.line.cmp(&b.key.line))
+                .then(a.key.col.cmp(&b.key.col))
+                .then(a.key.key_name.cmp(&b.key.key_name))
+        });
+    }
+
+    /// Sort prop-drilling chains by their source hop (first hop): file, line,
+    /// prop, depth, for deterministic output. Split out of `sort_core_findings`
+    /// to keep that function under the unit-size ceiling.
+    fn sort_prop_drilling_chains(&mut self) {
+        self.prop_drilling_chains.sort_by(|a, b| {
+            let a_src = a.chain.hops.first();
+            let b_src = b.chain.hops.first();
+            let a_file = a_src.map(|h| &h.file);
+            let b_file = b_src.map(|h| &h.file);
+            a_file
+                .cmp(&b_file)
+                .then_with(|| a_src.map(|h| h.line).cmp(&b_src.map(|h| h.line)))
+                .then(a.chain.prop.cmp(&b.chain.prop))
+                .then(a.chain.depth.cmp(&b.chain.depth))
+        });
+    }
+
+    /// Sort thin-wrapper findings by file, line, then component for
+    /// deterministic output.
+    fn sort_thin_wrappers(&mut self) {
+        self.thin_wrappers.sort_by(|a, b| {
+            a.wrapper
+                .file
+                .cmp(&b.wrapper.file)
+                .then(a.wrapper.line.cmp(&b.wrapper.line))
+                .then(a.wrapper.component.cmp(&b.wrapper.component))
+        });
+    }
+
+    /// Sort duplicate-prop-shape findings by the shared shape first (so a
+    /// group's members stay adjacent), then file, line, and component, for
+    /// deterministic output.
+    fn sort_duplicate_prop_shapes(&mut self) {
+        self.duplicate_prop_shapes.sort_by(|a, b| {
+            a.shape
+                .shape
+                .cmp(&b.shape.shape)
+                .then(a.shape.file.cmp(&b.shape.file))
+                .then(a.shape.line.cmp(&b.shape.line))
+                .then(a.shape.component.cmp(&b.shape.component))
         });
     }
 
@@ -853,6 +1449,10 @@ impl AnalysisResults {
     }
 
     fn sort_metadata_findings(&mut self) {
+        self.sort_prop_drilling_chains();
+        self.sort_thin_wrappers();
+        self.sort_duplicate_prop_shapes();
+
         self.misconfigured_dependency_overrides.sort_by(|a, b| {
             a.entry
                 .path
@@ -1061,6 +1661,31 @@ pub struct UnusedServerAction {
     pub col: u32,
 }
 
+/// A SvelteKit `+page.{ts,server.ts,js,server.js}` `load()` return-object key
+/// read by no consumer: not off the sibling `+page.svelte`'s `data.<key>`, nor
+/// project-wide via `page.data.<key>` / `$page.data.<key>`. A dead load key runs
+/// a real server/DB fetch cost on every request for data nothing renders. The
+/// fix is a human call (delete the key, or wire a consumer): a load fetch may
+/// have side effects, so there is no safe auto-fix.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedLoadDataKey {
+    /// The producer `+page.{ts,server.ts,js,server.js}` file declaring the key.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The returned-object key name read by no consumer.
+    pub key_name: String,
+    /// 1-based line number of the key in the return object.
+    pub line: u32,
+    /// 0-based byte column offset of the key.
+    pub col: u32,
+    /// The route directory relative to the project root (`src/routes/blog`), for
+    /// agent remediation and per-route trend aggregation. `None` when not
+    /// determinable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_dir: Option<String>,
+}
+
 /// A Vue/Svelte single-file component (the default export of a `.vue`/`.svelte`
 /// file) that is reachable in the module graph but rendered NOWHERE in the
 /// project: no `<Tag>`, no `:is`/`this=` binding, no `components`/`app.component`
@@ -1073,9 +1698,13 @@ pub struct UnrenderedComponent {
     /// The component file that is reachable but rendered nowhere.
     #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
-    /// The component name (the `.vue`/`.svelte` file stem, PascalCase).
+    /// The component name. For `"vue"` / `"svelte"` / `"astro"` this is the SFC
+    /// file stem (PascalCase); for `"angular"` it is the component class name; for
+    /// `"lit"` it is the registered custom-element TAG (e.g. `x-foo`), not a file
+    /// stem. Use `path` to anchor the file across all frameworks.
     pub component_name: String,
-    /// Which framework this component belongs to: `"vue"` or `"svelte"`.
+    /// Which framework this component belongs to: `"vue"`, `"svelte"`, `"astro"`,
+    /// `"angular"`, or `"lit"`.
     pub framework: String,
     /// A barrel/file that re-exports this component, kept for the remediation
     /// trace ("reachable via X, rendered nowhere"). Absolute in memory,
@@ -1092,17 +1721,17 @@ pub struct UnrenderedComponent {
     pub col: u32,
 }
 
-/// A Vue `<script setup>` `defineProps` declared prop that is referenced NOWHERE
-/// inside its own single-file component (neither `<script>` nor `<template>`).
-/// Single-file finding, zero-FP doctrine: the whole file abstains on any
-/// fallthrough / expose / model / unharvestable-type signal.
+/// A Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, or React declared
+/// prop that is referenced NOWHERE inside its own component. Single-component
+/// finding, zero-FP doctrine: the component abstains on any opaque public or
+/// fallthrough signal.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedComponentProp {
-    /// The `.vue` SFC declaring the unused prop.
+    /// The component file declaring the unused prop.
     #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
-    /// The component name (the `.vue` file stem).
+    /// The component name.
     pub component_name: String,
     /// The declared prop name that is never referenced.
     pub prop_name: String,
@@ -1129,6 +1758,186 @@ pub struct UnusedComponentEmit {
     /// 1-based line number of the emit declaration.
     pub line: u32,
     /// 0-based byte column offset of the emit declaration.
+    pub col: u32,
+}
+
+/// A Svelte component dispatching a custom event via `createEventDispatcher()`
+/// whose event name is listened to NOWHERE in the analyzed project. Cross-file
+/// dead-output direction: the component fires an event nothing handles.
+/// Zero-FP doctrine: the whole component abstains on any dynamic-dispatch or
+/// whole-`dispatch`-value signal, and a listener on ANY component anywhere
+/// credits the event name (the liberal over-credit direction).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedSvelteEvent {
+    /// The `.svelte` component dispatching the unlistened event.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The component name (the `.svelte` file stem).
+    pub component_name: String,
+    /// The dispatched event name that is listened to nowhere.
+    pub event_name: String,
+    /// 1-based line number of the `dispatch('<name>')` call.
+    pub line: u32,
+    /// 0-based byte column offset of the `dispatch('<name>')` call.
+    pub col: u32,
+}
+
+/// One hop in a prop-drilling chain: a component that received the prop and
+/// passed it along (or, at the chain ends, the source that owns it and the
+/// consumer that substantively reads it).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PropDrillHop {
+    /// The file containing this hop's component.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub file: PathBuf,
+    /// 1-based line of the component definition (or the prop declaration at the
+    /// source hop). Anchors a jump-to-source for the agent.
+    pub line: u32,
+    /// The component name at this hop.
+    pub component: String,
+}
+
+/// A located prop-drilling chain: a received prop forwarded unchanged through
+/// `>= N` intermediate pass-through components, each of which only re-passes it,
+/// until a component that substantively consumes it. The high-confidence signal
+/// is "the received identifier is used ONLY as the root of forwarded child-JSX
+/// attribute values", not the attribute name matching. Health signal (rule
+/// defaults to `off`, opt-in): a small capped penalty plus a `health --hotspots`
+/// surface, and located per-chain records so CI / an agent can act ("colocate or
+/// lift to context at hop B"). Zero-FP doctrine: any spread / `cloneElement` /
+/// element-as-prop / render-prop / context-provider / dynamic shape in the path
+/// abstains the whole chain.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PropDrillingChain {
+    /// The drilled prop name as declared at the chain SOURCE.
+    pub prop: String,
+    /// The chain depth = the number of components the prop is forwarded THROUGH
+    /// (source + intermediates + consumer = `hops.len()`). Always `>= N`.
+    pub depth: u32,
+    /// The ordered hop trail from source to consumer. The first hop owns the
+    /// prop, the middle hops are pass-throughs, the last hop consumes it. The
+    /// finding anchor is the first hop (`path` / `line` for suppression + CI).
+    pub hops: Vec<PropDrillHop>,
+}
+
+/// A located thin-wrapper / passthrough component: a React/Preact component
+/// whose entire body is `return <Child {...props}/>` (a single spread-forwarded
+/// child render, no host wrapper, no own value-add). It is pure structural
+/// indirection, a CANDIDATE for inlining at call sites or deleting. Health
+/// signal (rule defaults to `off`, opt-in): never a correctness error. Zero-FP
+/// doctrine: `forwardRef` / `memo` / exported / context-provider /
+/// `cloneElement` / render-prop / named-attr / unresolved-child wrappers all
+/// abstain (each is an intentional indirection or unprovable shape).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ThinWrapper {
+    /// The file containing the wrapper component.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub file: PathBuf,
+    /// 1-based line of the wrapper component definition (the finding anchor for
+    /// jump-to-source and line-level suppression).
+    pub line: u32,
+    /// The wrapper component name.
+    pub component: String,
+    /// The single child component the wrapper forwards its props to (as written
+    /// at the render site).
+    pub child_component: String,
+}
+
+/// One member of a duplicate-prop-shape group: the OTHER components that share
+/// the same significant prop-name set, listed in each member's
+/// `sharing_components`. Path-sorted for stable output. A located reference (no
+/// `shape`, which is carried once on the owning [`DuplicatePropShape`]).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DuplicatePropShapeMember {
+    /// The file containing the sibling component.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub file: PathBuf,
+    /// 1-based line of the sibling component definition.
+    pub line: u32,
+    /// The sibling component name.
+    pub component: String,
+}
+
+/// A React/Preact component that participates in a duplicate-prop-shape GROUP:
+/// three or more distinct components across two or more files whose
+/// statically-harvested, fully-known prop NAME set is byte-for-byte IDENTICAL
+/// after excluding a fixed denylist of ubiquitous DOM / render-passthrough prop
+/// names, with the REMAINING significant set holding four or more members. This
+/// is a structural-refactor health signal (extract a shared `Props` type or a
+/// base component), never a correctness error and never an auto-fix. One finding
+/// is emitted per participating component; `sharing_components` lists the other
+/// members of the same group. Health signal: the rule defaults to `off`
+/// (opt-in), so this is dormant until enabled. Exact full-set identity only: a
+/// superset / subset relationship does NOT group (so the finding always fits one
+/// extracted shared type).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DuplicatePropShape {
+    /// The file containing this component.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub file: PathBuf,
+    /// 1-based line of this component definition (the finding anchor for
+    /// jump-to-source and line-level suppression).
+    pub line: u32,
+    /// This component name.
+    pub component: String,
+    /// The shared SIGNIFICANT prop-name set (sorted, denylist-stripped). The
+    /// unit being grouped; identical across every member of the group.
+    pub shape: Vec<String>,
+    /// The total number of components in this group (this one plus every
+    /// sibling).
+    pub group_size: u32,
+    /// The OTHER components sharing this exact prop shape (path-sorted). A
+    /// file-level-suppressed member drops from its own finding but still appears
+    /// here, because the group is real regardless of suppression.
+    pub sharing_components: Vec<DuplicatePropShapeMember>,
+}
+
+/// An Angular `@Input()` / signal `input()` / `model()` declared input that is
+/// read NOWHERE inside its own component (neither the inline/external template
+/// nor the class body). Single-file dead-input direction; the Angular analogue
+/// of [`UnusedComponentProp`]. The whole component abstains on an unresolved
+/// `extends` heritage clause (a base class in another file may read `this.foo`).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedComponentInput {
+    /// The Angular component/directive `.ts` file declaring the unused input.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The component name (the `.ts` file stem).
+    pub component_name: String,
+    /// The declared input name that is never read.
+    pub input_name: String,
+    /// 1-based line number of the input declaration.
+    pub line: u32,
+    /// 0-based byte column offset of the input declaration.
+    pub col: u32,
+}
+
+/// An Angular `@Output()` / signal `output()` declared output that is EMITTED
+/// nowhere inside its own component (no `this.<output>.emit(...)`). Single-file
+/// dead-output direction; the Angular analogue of [`UnusedComponentEmit`]. A
+/// `model()` is recorded as an input only, so its framework-driven `update:`
+/// emit is never flagged here. The whole component abstains on an unresolved
+/// `extends` heritage clause.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedComponentOutput {
+    /// The Angular component/directive `.ts` file declaring the unused output.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The component name (the `.ts` file stem).
+    pub component_name: String,
+    /// The declared output name that is never emitted.
+    pub output_name: String,
+    /// 1-based line number of the output declaration.
+    pub line: u32,
+    /// 0-based byte column offset of the output declaration.
     pub col: u32,
 }
 
@@ -1339,7 +2148,7 @@ pub struct TypeOnlyDependency {
 
 /// The kind of security candidate. Findings are CANDIDATES for downstream agent
 /// verification, NOT verified vulnerabilities.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum SecurityFindingKind {
@@ -1353,7 +2162,7 @@ pub enum SecurityFindingKind {
 }
 
 /// The role a hop plays in a security finding's structural import trace.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum TraceHopRole {
@@ -1383,7 +2192,7 @@ pub enum TraceHopRole {
 /// One hop in a security finding's structural trace. Stored as an absolute path
 /// internally; JSON serialization strips the project root via
 /// `serde_path::serialize`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TraceHop {
     /// File on this hop of the import chain.
@@ -1405,7 +2214,7 @@ pub struct TraceHop {
 /// [`SecurityReachability::reachable_from_untrusted_source`] is true. Neither
 /// value proves exploitability; both are ranking signals (issue #885 doctrine:
 /// rank, never gate).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum TaintConfidence {
@@ -1427,7 +2236,7 @@ pub enum TaintConfidence {
 ///
 /// This is a relative-ordering signal, NOT a `confidence` or `signal_strength`
 /// score: plow does not prove the path is exploitable.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityReachability {
     /// Whether the anchor module is reachable from a runtime/application entry
@@ -1470,7 +2279,7 @@ pub struct SecurityReachability {
 
 /// Dead-code cross-link attached to a security candidate when plow's dead-code
 /// pass reports the same anchor as removable code.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityDeadCodeContext {
     /// Dead-code issue kind that matched the security candidate.
@@ -1486,7 +2295,7 @@ pub struct SecurityDeadCodeContext {
 }
 
 /// Dead-code issue kind linked to a security candidate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum SecurityDeadCodeKind {
@@ -1498,7 +2307,7 @@ pub enum SecurityDeadCodeKind {
 
 /// Internal row for a security sink-shaped callee that extraction could not
 /// flatten to a static catalogue path.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityUnresolvedCalleeDiagnostic {
     /// File containing the skipped callee. Absolute internally.
@@ -1519,7 +2328,7 @@ pub struct SecurityUnresolvedCalleeDiagnostic {
 /// the catalogue `category`/`cwe` and the captured `callee`, so an agent can act
 /// on `candidate.sink` in isolation (e.g. after fanning a finding out to a
 /// sub-agent) without reading the parent finding.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityCandidateSink {
     /// File of the sink site. Absolute internally; JSON strips the project root
@@ -1554,7 +2363,7 @@ pub struct SecurityCandidateSink {
 
 /// A declared architecture-zone crossing, recovered by correlating a finding's
 /// anchor against the run's architecture-boundary violations.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityZoneCrossing {
     /// Zone the importing side belongs to.
@@ -1574,7 +2383,7 @@ pub struct SecurityZoneCrossing {
 /// cross an npm-package edge?). Both need new graph derivation that does not
 /// exist today; emitting them as `false` would misreport "we checked and it does
 /// not cross" when plow has not checked at all.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityCandidateBoundary {
     /// Whether the finding crosses a client/server boundary (a `"use client"`
@@ -1596,7 +2405,7 @@ pub struct SecurityCandidateBoundary {
 /// network-category candidates. A consuming agent uses it to triage exfil
 /// (dynamic / untrusted destination) from intended auth (a literal provider
 /// host) without re-reading source.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityNetworkContext {
     /// The network call's destination as a static URL string literal, or absent
@@ -1614,7 +2423,7 @@ pub struct SecurityNetworkContext {
 /// agent's job. A perpetually-null `impact` key would only train consumers to
 /// ignore it. The agent reads this record, then writes its own impact verdict
 /// downstream.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityCandidate {
     /// The kind of untrusted input that reaches the sink, as a stable catalogue
@@ -1639,7 +2448,7 @@ pub struct SecurityCandidate {
 }
 
 /// One endpoint (source or sink node) of a [`SecurityTaintFlow`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TaintEndpoint {
     /// File of the endpoint. Absolute internally; JSON strips the project root.
@@ -1655,7 +2464,7 @@ pub struct TaintEndpoint {
 /// here: it lives on [`SecurityReachability::untrusted_source_trace`]. This
 /// carries only the flow's structural summary (intra-module flow plus the
 /// cross-module hop count) so consumers do not parse two copies of the hops.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TaintPath {
     /// Whether the source and sink sit in the same module (no import hop between
@@ -1670,7 +2479,7 @@ pub struct TaintPath {
 /// import-reachable to the sink (`reachability.reachable_from_untrusted_source`).
 /// The `{ source, sink, path }` shape matches the model agent SAST tooling
 /// expects (cf. Semgrep `taint_source` / `taint_sink`, SARIF `threadFlows`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityTaintFlow {
     /// The untrusted-source endpoint (first hop of the reachability trace).
@@ -1684,7 +2493,7 @@ pub struct SecurityTaintFlow {
 
 /// Runtime coverage state for the function enclosing a security sink.
 /// This is production-observation evidence, not an exploitability verdict.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum SecurityRuntimeState {
@@ -1707,7 +2516,7 @@ pub enum SecurityRuntimeState {
 
 /// Runtime coverage context attached to a security candidate when
 /// `plow security --runtime-coverage` is supplied.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityRuntimeContext {
     /// Runtime state for the enclosing function.
@@ -1729,7 +2538,7 @@ pub struct SecurityRuntimeContext {
 
 /// Verification-priority tier for a security candidate. This is ranking, not an
 /// exploitability verdict.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum SecuritySeverity {
@@ -1742,7 +2551,7 @@ pub enum SecuritySeverity {
 }
 
 /// Defensive control found on an attack-surface path.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityDefensiveControl {
     /// Control family.
@@ -1759,7 +2568,7 @@ pub struct SecurityDefensiveControl {
 }
 
 /// Agent-facing defensive-boundary verification context for one surface path.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityDefensiveBoundary {
     /// Known controls detected along this path.
@@ -1770,7 +2579,7 @@ pub struct SecurityDefensiveBoundary {
 }
 
 /// One untrusted entry to reachable sink path for `plow security --surface`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityAttackSurfaceEntry {
     /// The untrusted-source endpoint.
@@ -1789,7 +2598,7 @@ pub struct SecurityAttackSurfaceEntry {
 /// or the `audit` gate. There is deliberately no `confidence` or
 /// `signal_strength` field: plow does not prove exploitability, so the trace
 /// (its hops and length) is the only honest signal.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityFinding {
     /// Stable per-finding correlation id, identical across runs for the same
@@ -1886,23 +2695,25 @@ pub struct SecurityFinding {
     pub attack_surface: Option<SecurityAttackSurfaceEntry>,
 }
 
-/// A pnpm catalog entry declared in pnpm-workspace.yaml that no workspace package
-/// references via the `catalog:` protocol.
+/// A package manager catalog entry that no workspace package references via
+/// the `catalog:` protocol.
 ///
-/// The default catalog (top-level `catalog:` key) uses `catalog_name: "default"`.
-/// Named catalogs (under `catalogs.<name>:`) use their declared name.
+/// The default catalog uses `catalog_name: "default"`. Named catalogs
+/// (`catalogs.<name>`) use their declared name. The source file is
+/// `pnpm-workspace.yaml` for pnpm catalogs or root `package.json` for Bun
+/// catalogs.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedCatalogEntry {
     /// Package name declared in the catalog (e.g. `"react"`, `"@scope/lib"`).
     pub entry_name: String,
-    /// Catalog group: `"default"` for the top-level `catalog:` map, or the
-    /// named catalog key for entries declared under `catalogs.<name>:`.
+    /// Catalog group: `"default"` for the default catalog map, or the named
+    /// catalog key for entries declared under `catalogs.<name>`.
     pub catalog_name: String,
-    /// Path to `pnpm-workspace.yaml`, relative to the analyzed root.
+    /// Path to the catalog source file, relative to the analyzed root.
     #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
-    /// 1-based line number of the catalog entry within `pnpm-workspace.yaml`.
+    /// 1-based line number of the catalog entry within the source file.
     pub line: u32,
     /// Workspace `package.json` files that declare the same package with a
     /// hardcoded version range instead of `catalog:`. Empty when no consumer
@@ -1916,29 +2727,28 @@ pub struct UnusedCatalogEntry {
     pub hardcoded_consumers: Vec<PathBuf>,
 }
 
-/// A named `catalogs.<name>:` group in `pnpm-workspace.yaml` with no package entries.
+/// A named `catalogs.<name>` group with no package entries.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct EmptyCatalogGroup {
-    /// Catalog group name declared under the top-level `catalogs:` map.
+    /// Catalog group name declared under the `catalogs` map.
     pub catalog_name: String,
-    /// Path to `pnpm-workspace.yaml`, relative to the analyzed root.
+    /// Path to the catalog source file, relative to the analyzed root.
     #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
-    /// 1-based line number of the empty group header within `pnpm-workspace.yaml`.
+    /// 1-based line number of the empty group header within the source file.
     pub line: u32,
 }
 
 /// A workspace package.json reference (`catalog:` or `catalog:<name>`) that points
 /// at a catalog which does not declare the consumed package.
 ///
-/// `pnpm install` errors at install time with `ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL`
-/// when this happens. plow surfaces it statically so the failure is caught at
-/// `plow dead-code` time, before any install.
+/// Package manager installs error when this happens. plow surfaces it
+/// statically so the failure is caught at `plow dead-code` time, before any
+/// install.
 ///
-/// The default catalog (bare `catalog:` references the top-level `catalog:` map)
-/// uses `catalog_name: "default"`. Named catalogs (`catalog:react17`) use the
-/// declared catalog name.
+/// The default catalog (bare `catalog:`) uses `catalog_name: "default"`.
+/// Named catalogs (`catalog:react17`) use the declared catalog name.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnresolvedCatalogReference {
@@ -1957,10 +2767,10 @@ pub struct UnresolvedCatalogReference {
     pub path: PathBuf,
     /// 1-based line number of the dependency entry in the consumer `package.json`.
     pub line: u32,
-    /// Other catalogs (in the same `pnpm-workspace.yaml`) that DO declare this
-    /// package. Empty when no catalog has the package. Sorted lexicographically.
-    /// Lets agents and humans decide whether to switch the reference to a
-    /// different catalog or to add the entry to the named catalog.
+    /// Other catalogs in the same catalog source that DO declare this package.
+    /// Empty when no catalog has the package. Sorted lexicographically. Lets
+    /// agents and humans decide whether to switch the reference to a different
+    /// catalog or to add the entry to the named catalog.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub available_in_catalogs: Vec<String>,
 }
@@ -2107,7 +2917,7 @@ pub struct MisconfiguredDependencyOverride {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TestOnlyDependency {
-    /// Production dependency that is only imported by test files — consider
+    /// Production dependency that is only imported by test files, consider
     /// moving to devDependencies.
     pub package_name: String,
     /// Path to the package.json where the dependency is listed.
@@ -2284,6 +3094,8 @@ pub enum PolicyRuleKind {
     BannedCall,
     /// An import or re-export specifier matched a `banned-import` rule.
     BannedImport,
+    /// A call site matched a catalogue-derived `banned-effect` rule.
+    BannedEffect,
 }
 
 /// Effective severity of a single [`PolicyViolation`]. Per-rule `severity`
@@ -2300,15 +3112,15 @@ pub enum PolicyViolationSeverity {
     Warn,
 }
 
-/// A banned call or banned import matched by a declarative rule pack
-/// (`rulePacks` config). Banned-call findings report one entry per unique
-/// callee path per file (first occurrence wins, matching
-/// `boundary_call_violations`); banned-import findings anchor at each
-/// matching import or re-export declaration.
+/// A banned call, banned import, or banned effect matched by a declarative rule
+/// pack (`rulePacks` config). Banned-call and banned-effect findings report
+/// one entry per unique callee path per file (first occurrence wins, matching
+/// `boundary_call_violations`); banned-import findings anchor at each matching
+/// import or re-export declaration.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PolicyViolation {
-    /// The source file containing the banned call or import.
+    /// The source file containing the banned call, import, or effectful usage.
     #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
     /// 1-based line number of the call site or import declaration.
@@ -2323,8 +3135,8 @@ pub struct PolicyViolation {
     /// Which rule kind matched.
     pub kind: PolicyRuleKind,
     /// What matched: the written callee path for `banned-call` (e.g.
-    /// `cp.exec`), or the raw import specifier for `banned-import` (e.g.
-    /// `moment/locale/nl`).
+    /// `cp.exec`), the raw import specifier for `banned-import` (e.g.
+    /// `moment/locale/nl`), or `<effect>: <callee>` for `banned-effect`.
     pub matched: String,
     /// Effective severity for this finding (per-rule `severity`, else the
     /// `rules."policy-violation"` master).
@@ -2344,6 +3156,9 @@ pub enum SuppressionOrigin {
         /// The issue kind token from the comment (e.g., "unused-exports"), or None for blanket.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         issue_kind: Option<String>,
+        /// Human-authored reason after `--`, when present.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
         /// Whether this was a file-level suppression.
         is_file_level: bool,
         /// Whether `issue_kind` parses to a known `IssueKind`. False when the
@@ -2359,6 +3174,9 @@ pub enum SuppressionOrigin {
     JsdocTag {
         /// The name of the export that was tagged.
         export_name: String,
+        /// Human-authored reason after `--`, when present.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
     },
 }
 
@@ -2408,15 +3226,58 @@ pub struct StaleSuppression {
     pub col: u32,
     /// The origin and details of the stale suppression.
     pub origin: SuppressionOrigin,
+    /// True when `rules.require-suppression-reason` reported a suppression
+    /// comment or tag that has no reason.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub missing_reason: bool,
+    /// Suggested next steps. Always emitted.
+    pub actions: Vec<IssueAction>,
 }
 
 impl StaleSuppression {
+    /// Build the typed action list for this suppression finding.
+    #[must_use]
+    pub fn actions_for(missing_reason: bool) -> Vec<IssueAction> {
+        let (kind, description) = if missing_reason {
+            (
+                FixActionType::AddSuppressionReason,
+                "Add a human-authored reason after `--` on the suppression",
+            )
+        } else {
+            (
+                FixActionType::RemoveStaleSuppression,
+                "Remove or update the stale suppression",
+            )
+        };
+        let mut actions = vec![IssueAction::Fix(FixAction {
+            kind,
+            auto_fixable: false,
+            description: description.to_string(),
+            note: None,
+            available_in_catalogs: None,
+            suggested_target: None,
+        })];
+        if !missing_reason {
+            actions.push(IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description:
+                    "Suppress this stale suppression finding with a comment above the suppression"
+                        .to_string(),
+                comment: "// plow-ignore-next-line stale-suppression".to_string(),
+                scope: Some(SuppressLineScope::PerLocation),
+            }));
+        }
+        actions
+    }
+
     /// Produce a human-readable description of this stale suppression.
     #[must_use]
     pub fn description(&self) -> String {
         match &self.origin {
             SuppressionOrigin::Comment {
                 issue_kind,
+                reason,
                 is_file_level,
                 ..
             } => {
@@ -2426,13 +3287,23 @@ impl StaleSuppression {
                     "plow-ignore-next-line"
                 };
                 match issue_kind {
-                    Some(kind) => format!("// {directive} {kind}"),
-                    None => format!("// {directive}"),
+                    Some(kind) => match reason {
+                        Some(reason) => format!("// {directive} {kind} -- {reason}"),
+                        None => format!("// {directive} {kind}"),
+                    },
+                    None => match reason {
+                        Some(reason) => format!("// {directive} -- {reason}"),
+                        None => format!("// {directive}"),
+                    },
                 }
             }
-            SuppressionOrigin::JsdocTag { export_name } => {
-                format!("@expected-unused on {export_name}")
-            }
+            SuppressionOrigin::JsdocTag {
+                export_name,
+                reason,
+            } => match reason {
+                Some(reason) => format!("@expected-unused on {export_name} -- {reason}"),
+                None => format!("@expected-unused on {export_name}"),
+            },
         }
     }
 
@@ -2449,7 +3320,11 @@ impl StaleSuppression {
                 issue_kind,
                 is_file_level,
                 kind_known,
+                ..
             } => {
+                if self.missing_reason {
+                    return "suppression is missing a reason".to_string();
+                }
                 let scope = if *is_file_level {
                     "in this file"
                 } else {
@@ -2468,7 +3343,10 @@ impl StaleSuppression {
                     None => format!("no issues found {scope}"),
                 }
             }
-            SuppressionOrigin::JsdocTag { export_name } => {
+            SuppressionOrigin::JsdocTag { export_name, .. } => {
+                if self.missing_reason {
+                    return "suppression is missing a reason".to_string();
+                }
                 format!("{export_name} is now used")
             }
         }
@@ -2502,6 +3380,11 @@ impl StaleSuppression {
             SuppressionOrigin::Comment {
                 kind_known: false, ..
             } => format!("{} ({})", self.description(), self.explanation()),
+            SuppressionOrigin::Comment { .. } | SuppressionOrigin::JsdocTag { .. }
+                if self.missing_reason =>
+            {
+                format!("{} ({})", self.description(), self.explanation())
+            }
             SuppressionOrigin::Comment { .. } | SuppressionOrigin::JsdocTag { .. } => {
                 self.description()
             }
@@ -2532,6 +3415,8 @@ pub struct ActiveSuppression {
     /// Whether this is a `plow-ignore-file` (file-level) marker rather than a
     /// `plow-ignore-next-line` marker.
     pub is_file_level: bool,
+    /// Human-authored reason after `--`, when present.
+    pub reason: Option<String>,
 }
 
 /// The detection method used to identify a feature flag.
@@ -2680,6 +3565,62 @@ mod tests {
             }));
         assert_eq!(results.total_issues(), 1);
         assert!(results.has_issues());
+    }
+
+    #[test]
+    fn merge_into_appends_counts_and_preserves_existing_optional_metadata() {
+        let mut target = AnalysisResults {
+            unused_files: vec![UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("a.ts"),
+            })],
+            suppression_count: 2,
+            security_unresolved_edge_files: 1,
+            security_unresolved_callee_sites: 3,
+            entry_point_summary: Some(EntryPointSummary {
+                total: 1,
+                by_source: vec![("existing".to_string(), 1)],
+            }),
+            ..AnalysisResults::default()
+        };
+        let source = AnalysisResults {
+            unused_files: vec![UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("b.ts"),
+            })],
+            suppression_count: 4,
+            security_unresolved_edge_files: 5,
+            security_unresolved_callee_sites: 6,
+            unused_load_data_keys_global_abstain: true,
+            entry_point_summary: Some(EntryPointSummary {
+                total: 1,
+                by_source: vec![("incoming".to_string(), 1)],
+            }),
+            render_fan_in: Some(RenderFanInMetric::default()),
+            ..AnalysisResults::default()
+        };
+
+        target.merge_into(source);
+
+        assert_eq!(target.unused_files.len(), 2);
+        assert_eq!(target.suppression_count, 6);
+        assert_eq!(target.security_unresolved_edge_files, 6);
+        assert_eq!(target.security_unresolved_callee_sites, 9);
+        assert!(target.unused_load_data_keys_global_abstain);
+        assert_eq!(
+            target
+                .entry_point_summary
+                .as_ref()
+                .map(|summary| summary.total),
+            Some(1)
+        );
+        assert_eq!(
+            target
+                .entry_point_summary
+                .as_ref()
+                .and_then(|summary| summary.by_source.first())
+                .map(|(name, _)| name.as_str()),
+            Some("existing")
+        );
+        assert!(target.render_fan_in.is_some());
     }
 
     fn test_unused_export(path: &str, export_name: &str, is_type_only: bool) -> UnusedExport {

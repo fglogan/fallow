@@ -12,12 +12,16 @@ crates/
   types/    -- Shared type definitions (discover, extract, results, suppress, serde_path)
   extract/  -- AST extraction engine (visitor.rs, complexity.rs, sfc.rs, astro.rs, mdx.rs, css.rs, parse.rs, cache.rs, suppress.rs, tests/)
   graph/    -- Module graph construction (graph/), import resolution (resolve.rs), project state (project.rs)
+  output/   -- Typed output contracts, serializers, schemas, and TS contract generation
   license/  -- Offline Ed25519 JWT verification for paid features (alg pinned, file+env load precedence, 7/30/hard-fail grace ladder)
   v8-coverage/ -- V8 ScriptCoverage parser + byte-offset-to-line/col mapper + Istanbul normalizer (open-source layer of Phase-2 runtime coverage)
   core/     -- Analysis orchestration: discovery, plugins, scripts, duplicates, cross-reference, caching, progress
     analyze/    -- Dead code detection (mod.rs orchestration, predicates.rs, unused_files/exports/deps/members.rs)
     plugins/    -- Plugin system + tooling.rs (general tooling dependency detection)
     duplicates/ -- Clone detection (families, normalize, tokenize)
+  engine/   -- Command-neutral analysis runners and typed engine results
+  api/      -- Programmatic API boundary for JS/native callers
+  napi/     -- napi-rs native Node addon (cdylib, #[napi] bindings) behind the @plow/node package
   cli/      -- CLI binary, split into per-command modules
     audit.rs, check.rs, dupes.rs, health/, watch.rs, fix/, init.rs, list.rs, schema.rs, validate.rs, regression/, impact.rs, security.rs
     license/    -- `plow license {activate, status, refresh, deactivate}` with offline JWT verify plus live trial / refresh flows
@@ -26,7 +30,7 @@ crates/
     migrate/    -- Config migration (mod.rs, knip.rs, jscpd.rs)
   lsp/      -- LSP server, split into modules
     main.rs, diagnostics/, code_actions/, code_lens.rs, hover.rs
-  mcp/      -- MCP server for AI agent integration (stdio transport, wraps CLI)
+  mcp/      -- MCP server for AI agent integration (stdio transport, API-backed analysis with CLI fallback)
 editors/
   vscode/   -- VS Code extension (LSP client, tree views, status bar, auto-download)
 npm/

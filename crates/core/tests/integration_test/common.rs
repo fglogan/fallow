@@ -29,6 +29,7 @@ pub fn create_config(root: PathBuf) -> plow_config::ResolvedConfig {
         ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
+        unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
         duplicates: plow_config::DuplicatesConfig::default(),
         health: plow_config::HealthConfig::default(),
         rules: RulesConfig::default(),
@@ -54,6 +55,21 @@ pub fn create_config(root: PathBuf) -> plow_config::ResolvedConfig {
     .resolve(root, OutputFormat::Human, 4, true, true, None)
 }
 
+/// A config with `unusedComponentProps.ignorePattern` set, used to exercise the
+/// opt-in prop-exemption knob. Everything else defaults.
+pub fn create_config_with_unused_props_ignore(
+    root: PathBuf,
+    ignore_pattern: &str,
+) -> plow_config::ResolvedConfig {
+    PlowConfig {
+        unused_component_props: plow_config::UnusedComponentPropsConfig {
+            ignore_pattern: Some(ignore_pattern.to_string()),
+        },
+        ..Default::default()
+    }
+    .resolve(root, OutputFormat::Human, 4, true, true, None)
+}
+
 pub fn create_config_with_cache(
     root: PathBuf,
     cache_dir: std::path::PathBuf,
@@ -73,6 +89,7 @@ pub fn create_config_with_cache(
         ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
+        unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
         duplicates: plow_config::DuplicatesConfig::default(),
         health: plow_config::HealthConfig::default(),
         rules: RulesConfig::default(),
@@ -121,6 +138,7 @@ where
         ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
+        unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
         duplicates: plow_config::DuplicatesConfig::default(),
         health: plow_config::HealthConfig::default(),
         rules,
@@ -172,6 +190,7 @@ pub fn create_config_with_overrides(
         ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
+        unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
         duplicates: plow_config::DuplicatesConfig::default(),
         health: plow_config::HealthConfig::default(),
         rules: RulesConfig::default(),
@@ -216,6 +235,7 @@ pub fn create_config_with_ignore_decorators(
         ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators,
+        unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
         duplicates: plow_config::DuplicatesConfig::default(),
         health: plow_config::HealthConfig::default(),
         rules: RulesConfig::default(),

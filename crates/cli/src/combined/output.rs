@@ -1,9 +1,12 @@
 use crate::report::sink::outln;
 use std::io::IsTerminal;
+use std::path::Path;
 use std::process::ExitCode;
 
 use colored::Colorize;
+use plow_api::{CombinedCheckJsonSection, CombinedJsonOutputInput, DupesReportPayload};
 use plow_config::OutputFormat;
+use plow_output::{CodeClimateIssue, codeclimate_issues_to_value};
 
 use crate::check::CheckResult;
 use crate::dupes::DupesResult;
@@ -32,93 +35,113 @@ pub(super) fn print_combined_report(
     let resolver =
         crate::build_ownership_resolver(opts.group_by, opts.root, codeowners_cfg, opts.output)?;
 
+    if let Some(code) = print_machine_combined_report(
+        opts,
+        check_result,
+        dupes_result,
+        health_result,
+        total_elapsed,
+    )? {
+        return Ok(code);
+    }
+
+    Ok(print_human_sections(
+        opts,
+        check_result,
+        dupes_result,
+        health_result,
+        resolver,
+    ))
+}
+
+fn print_machine_combined_report(
+    opts: &CombinedOptions<'_>,
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+    total_elapsed: std::time::Duration,
+) -> Result<Option<u8>, ExitCode> {
     match opts.output {
         OutputFormat::Json => {
-            let code = print_combined_json(
+            let code = print_combined_json(CombinedJsonPrintInput {
                 check_result,
                 dupes_result,
                 health_result,
-                opts.root,
-                total_elapsed,
-                opts.explain,
-                opts.config_path.is_some()
+                root: opts.root,
+                elapsed: total_elapsed,
+                explain: opts.explain,
+                config_fixable: opts.config_path.is_some()
                     || plow_config::PlowConfig::find_config_path(opts.root).is_some(),
-            );
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
+            });
+            combined_machine_success(code)
         }
         OutputFormat::Sarif => {
             let code = print_combined_sarif(check_result, dupes_result, health_result);
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
+            combined_machine_success(code)
         }
         OutputFormat::CodeClimate => {
             let code = print_combined_codeclimate(check_result, dupes_result, health_result);
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
+            combined_machine_success(code)
         }
         OutputFormat::PrCommentGithub => {
-            let issues =
-                build_combined_codeclimate_issues(check_result, dupes_result, health_result);
-            let code = report::ci::pr_comment::print_pr_comment_from_codeclimate_issues(
-                "combined",
-                report::ci::pr_comment::Provider::Github,
-                &issues,
-            );
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
+            print_combined_pr_comment(check_result, dupes_result, health_result, true)
         }
         OutputFormat::PrCommentGitlab => {
-            let issues =
-                build_combined_codeclimate_issues(check_result, dupes_result, health_result);
-            let code = report::ci::pr_comment::print_pr_comment_from_codeclimate_issues(
-                "combined",
-                report::ci::pr_comment::Provider::Gitlab,
-                &issues,
-            );
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
+            print_combined_pr_comment(check_result, dupes_result, health_result, false)
         }
         OutputFormat::ReviewGithub => {
-            let issues =
-                build_combined_codeclimate_issues(check_result, dupes_result, health_result);
-            let code = report::ci::review::print_review_envelope_from_codeclimate_issues(
-                "combined",
-                report::ci::pr_comment::Provider::Github,
-                &issues,
-            );
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
+            print_combined_review(check_result, dupes_result, health_result, true)
         }
         OutputFormat::ReviewGitlab => {
-            let issues =
-                build_combined_codeclimate_issues(check_result, dupes_result, health_result);
-            let code = report::ci::review::print_review_envelope_from_codeclimate_issues(
-                "combined",
-                report::ci::pr_comment::Provider::Gitlab,
-                &issues,
-            );
-            if code != ExitCode::SUCCESS {
-                return Err(code);
-            }
+            print_combined_review(check_result, dupes_result, health_result, false)
         }
-        _ => {
-            return Ok(print_human_sections(
-                opts,
-                check_result,
-                dupes_result,
-                health_result,
-                resolver,
-            ));
-        }
+        _ => Ok(None),
     }
-    Ok(0)
+}
+
+fn combined_machine_success(code: ExitCode) -> Result<Option<u8>, ExitCode> {
+    if code != ExitCode::SUCCESS {
+        return Err(code);
+    }
+    Ok(Some(0))
+}
+
+fn combined_provider(github: bool) -> report::ci::pr_comment::Provider {
+    if github {
+        report::ci::pr_comment::Provider::Github
+    } else {
+        report::ci::pr_comment::Provider::Gitlab
+    }
+}
+
+fn print_combined_pr_comment(
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+    github: bool,
+) -> Result<Option<u8>, ExitCode> {
+    let issues = build_combined_codeclimate_issues(check_result, dupes_result, health_result);
+    let code = report::ci::pr_comment::print_pr_comment_from_codeclimate_issues(
+        "combined",
+        combined_provider(github),
+        &issues,
+    );
+    combined_machine_success(code)
+}
+
+fn print_combined_review(
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+    github: bool,
+) -> Result<Option<u8>, ExitCode> {
+    let issues = build_combined_codeclimate_issues(check_result, dupes_result, health_result);
+    let code = report::ci::review::print_review_envelope_from_codeclimate_issues(
+        "combined",
+        combined_provider(github),
+        &issues,
+    );
+    combined_machine_success(code)
 }
 
 /// Print human/compact/markdown sections with optional section headers.
@@ -143,97 +166,146 @@ fn print_human_sections(
     let has_any_findings = check_result.is_some_and(|result| result.results.total_issues() > 0)
         || dupes_result.is_some_and(|result| !result.report.clone_groups.is_empty())
         || health_result.is_some_and(|result| !result.report.findings.is_empty());
-    if show_headers
-        && has_any_findings
-        && std::io::stdout().is_terminal()
-        && !crate::report::sink::is_redirected()
-    {
-        println!(
-            "{}",
-            "Tip: run `plow explain <issue label>`; spaces and hyphens both work, e.g. `plow explain unused files`."
-                .dimmed()
-        );
-        println!();
+    print_combined_hints(
+        opts,
+        check_result,
+        dupes_result,
+        health_result,
+        show_headers,
+        has_any_findings,
+    );
 
-        let dupes_payload = dupes_result
-            .map(|result| crate::output_dupes::DupesReportPayload::from_report(&result.report));
-        if let Some(step) = crate::report::suggestions::top_combined_next_step(
-            check_result.map(|result| &result.results),
-            dupes_payload.as_ref(),
-            health_result.map(|result| &result.report),
-            opts.root,
-        ) {
-            println!(
-                "{}",
-                format!("Next: {}  ({})", step.command, step.reason).dimmed()
-            );
-            println!();
-        }
-    }
-
-    if let Some(result) = check_result {
-        if show_headers {
-            eprintln!();
-            eprintln!("── Dead Code ──────────────────────────────────────");
-        }
-        let code = crate::check::print_check_result(
-            result,
-            crate::check::PrintCheckOptions {
-                quiet: opts.quiet,
-                explain: opts.explain,
-                regression_json: false,
-                group_by: resolver,
-                top: None,
-                summary: opts.summary,
-                summary_heading: !show_headers,
-                show_explain_tip: false,
-            },
-        );
-        max_exit = max_exit.max(exit_code_to_u8(code));
-    }
-
-    if let Some(result) = dupes_result {
-        if show_headers {
-            eprintln!();
-            eprintln!("── Duplication ────────────────────────────────────");
-        }
-        let code = crate::dupes::print_dupes_result(
-            result,
-            opts.quiet,
-            opts.explain,
-            opts.summary,
-            !show_headers,
-            false,
-        );
-        max_exit = max_exit.max(exit_code_to_u8(code));
-    }
-
-    if let Some(result) = health_result {
-        if show_headers {
-            eprintln!();
-            eprintln!("── Complexity ─────────────────────────────────────");
-        }
-        if let Some(ref timings) = result.timings {
-            report::print_health_performance(timings, opts.output);
-        }
-        let code = crate::health::print_health_result(
-            result,
-            crate::health::HealthPrintOptions {
-                quiet: opts.quiet,
-                explain: opts.explain,
-                min_score: None,
-                min_severity: None,
-                report_only: false,
-                summary: opts.summary,
-                summary_heading: !show_headers,
-                show_explain_tip: false,
-                skip_score_and_trend: true,
-            },
-        );
-        max_exit = max_exit.max(exit_code_to_u8(code));
-    }
+    max_exit = max_exit.max(print_check_section(
+        opts,
+        check_result,
+        resolver,
+        show_headers,
+    ));
+    max_exit = max_exit.max(print_dupes_section(opts, dupes_result, show_headers));
+    max_exit = max_exit.max(print_health_section(opts, health_result, show_headers));
 
     max_exit
+}
+
+fn print_combined_hints(
+    opts: &CombinedOptions<'_>,
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+    show_headers: bool,
+    has_any_findings: bool,
+) {
+    if !show_headers
+        || !has_any_findings
+        || !std::io::stdout().is_terminal()
+        || crate::report::sink::is_redirected()
+    {
+        return;
+    }
+
+    println!(
+        "{}",
+        "Tip: run `plow explain <issue label>`; spaces and hyphens both work, e.g. `plow explain unused files`."
+            .dimmed()
+    );
+    println!();
+
+    let dupes_payload = dupes_result.map(|result| DupesReportPayload::from_report(&result.report));
+    if let Some(step) = crate::report::suggestions::top_combined_next_step(
+        check_result.map(|result| &result.results),
+        dupes_payload.as_ref(),
+        health_result.map(|result| &result.report),
+        opts.root,
+    ) {
+        println!(
+            "{}",
+            format!("Next: {}  ({})", step.command, step.reason).dimmed()
+        );
+        println!();
+    }
+}
+
+fn print_check_section(
+    opts: &CombinedOptions<'_>,
+    check_result: Option<&CheckResult>,
+    resolver: Option<report::OwnershipResolver>,
+    show_headers: bool,
+) -> u8 {
+    let Some(result) = check_result else {
+        return 0;
+    };
+    if show_headers {
+        eprintln!();
+        eprintln!("── Dead Code ──────────────────────────────────────");
+    }
+    let code = crate::check::print_check_result(
+        result,
+        crate::check::PrintCheckOptions {
+            quiet: opts.quiet,
+            explain: opts.explain,
+            regression_json: false,
+            group_by: resolver,
+            top: None,
+            summary: opts.summary,
+            summary_heading: !show_headers,
+            show_explain_tip: false,
+        },
+    );
+    exit_code_to_u8(code)
+}
+
+fn print_dupes_section(
+    opts: &CombinedOptions<'_>,
+    dupes_result: Option<&DupesResult>,
+    show_headers: bool,
+) -> u8 {
+    let Some(result) = dupes_result else {
+        return 0;
+    };
+    if show_headers {
+        eprintln!();
+        eprintln!("── Duplication ────────────────────────────────────");
+    }
+    let code = crate::dupes::print_dupes_result(
+        result,
+        opts.quiet,
+        opts.explain,
+        opts.summary,
+        !show_headers,
+        false,
+    );
+    exit_code_to_u8(code)
+}
+
+fn print_health_section(
+    opts: &CombinedOptions<'_>,
+    health_result: Option<&HealthResult>,
+    show_headers: bool,
+) -> u8 {
+    let Some(result) = health_result else {
+        return 0;
+    };
+    if show_headers {
+        eprintln!();
+        eprintln!("── Complexity ─────────────────────────────────────");
+    }
+    if let Some(ref timings) = result.timings {
+        report::print_health_performance(timings, opts.output);
+    }
+    let code = crate::health::print_health_result(
+        result,
+        crate::health::HealthPrintOptions {
+            quiet: opts.quiet,
+            explain: opts.explain,
+            gates: plow_engine::HealthGateOptions::default(),
+            summary: opts.summary,
+            summary_heading: !show_headers,
+            show_explain_tip: false,
+            skip_score_and_trend: true,
+            css_requested: false,
+        },
+    );
+    exit_code_to_u8(code)
 }
 
 /// Handle regression outcome and print failure summary.
@@ -263,26 +335,31 @@ pub(super) fn handle_regression_and_summary(
 
 /// Print a summary line listing which analyses had failures.
 fn print_failure_summary(
-    root: &std::path::Path,
+    root: &Path,
     check_result: Option<&CheckResult>,
     dupes_result: Option<&DupesResult>,
     health_result: Option<&HealthResult>,
 ) {
+    let parts = failure_summary_parts(check_result, dupes_result, health_result);
+    if parts.is_empty() {
+        return;
+    }
+
+    let nudge = health_failure_nudge(root, health_result);
+    eprintln!("\nFailed: {}{nudge}", parts.join(", "));
+    print_failure_followups(root);
+}
+
+fn failure_summary_parts(
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+) -> Vec<String> {
     let mut parts = Vec::new();
-    if let Some(r) = check_result {
-        let issues = r.results.total_issues();
-        if issues > 0 {
-            let delta_suffix = r.baseline_deltas.as_ref().map_or_else(String::new, |d| {
-                match d.total_delta.cmp(&0) {
-                    std::cmp::Ordering::Greater => {
-                        format!(", +{} since baseline", d.total_delta)
-                    }
-                    std::cmp::Ordering::Less => format!(", {} since baseline", d.total_delta),
-                    std::cmp::Ordering::Equal => ", \u{00b1}0 since baseline".to_string(),
-                }
-            });
-            parts.push(format!("dead-code ({issues} issues{delta_suffix})"));
-        }
+    if let Some(r) = check_result
+        && let Some(part) = check_failure_summary_part(r)
+    {
+        parts.push(part);
     }
     if let Some(r) = dupes_result {
         let groups = r.report.clone_groups.len();
@@ -296,213 +373,137 @@ fn print_failure_summary(
             parts.push(format!("health ({above} above threshold)"));
         }
     }
-    if !parts.is_empty() {
-        let nudge = health_result
-            .filter(|r| !r.report.targets.is_empty())
-            .map(|r| {
-                if let Some(top) = r.report.targets.iter().find(|t| !is_test_path(&t.path)) {
-                    let name = report::format_display_path(&top.path, root);
-                    format!(": start with {name}")
-                } else {
-                    String::new()
-                }
-            })
-            .unwrap_or_default();
-        eprintln!("\nFailed: {}{nudge}", parts.join(", "));
+    parts
+}
 
-        // Periodic value digest: prose counterpart of the `impact-report`
-        // next-step, at most weekly (the cadence stamp lives in the impact
-        // store) and only with non-zero numbers. Shares the caller's quiet
-        // gate; CI and disabled suggestions suppress it inside the peek.
-        if let Some(digest) = crate::report::suggestions::due_impact_digest(root) {
-            eprintln!(
-                "{}",
-                crate::report::suggestions::impact_digest_line(digest).dimmed()
-            );
-        }
+fn check_failure_summary_part(result: &CheckResult) -> Option<String> {
+    let issues = result.results.total_issues();
+    if issues == 0 {
+        return None;
+    }
 
-        // First-contact setup hint: prose counterpart of the `setup`
-        // next-step, printed after the failure summary so it is the last
-        // thing a human reads on a big first run instead of scrolling away
-        // with the header. Deliberately not TTY-gated (agents reading piped
-        // human output are a primary audience); quiet is gated by the caller,
-        // and CI, configured projects, suggestions off, and a recorded
-        // decline (`plow init --decline`) suppress it here.
-        if crate::report::suggestions::suggestions_enabled()
-            && crate::report::suggestions::setup_pointer_applicable(root)
-        {
-            eprintln!("{}", crate::report::suggestions::SETUP_HINT.dimmed());
-        }
+    let delta_suffix = result
+        .baseline_deltas
+        .as_ref()
+        .map_or_else(String::new, |d| match d.total_delta.cmp(&0) {
+            std::cmp::Ordering::Greater => format!(", +{} since baseline", d.total_delta),
+            std::cmp::Ordering::Less => format!(", {} since baseline", d.total_delta),
+            std::cmp::Ordering::Equal => ", \u{00b1}0 since baseline".to_string(),
+        });
+    Some(format!("dead-code ({issues} issues{delta_suffix})"))
+}
+
+fn health_failure_nudge(root: &Path, health_result: Option<&HealthResult>) -> String {
+    health_result
+        .filter(|r| !r.report.targets.is_empty())
+        .map(|r| {
+            if let Some(top) = r.report.targets.iter().find(|t| !is_test_path(&t.path)) {
+                let name = report::format_display_path(&top.path, root);
+                format!(": start with {name}")
+            } else {
+                String::new()
+            }
+        })
+        .unwrap_or_default()
+}
+
+fn print_failure_followups(root: &Path) {
+    // Periodic value digest: prose counterpart of the `impact-report`
+    // next-step, at most weekly (the cadence stamp lives in the impact
+    // store) and only with non-zero numbers. Shares the caller's quiet
+    // gate; CI and disabled suggestions suppress it inside the peek.
+    if let Some(digest) = crate::report::suggestions::due_impact_digest(root) {
+        eprintln!(
+            "{}",
+            crate::report::suggestions::impact_digest_line(digest).dimmed()
+        );
+    }
+
+    // First-contact setup hint: prose counterpart of the `setup`
+    // next-step, printed after the failure summary so it is the last
+    // thing a human reads on a big first run instead of scrolling away
+    // with the header. Deliberately not TTY-gated (agents reading piped
+    // human output are a primary audience); quiet is gated by the caller,
+    // and CI, configured projects, suggestions off, and a recorded
+    // decline (`plow init --decline`) suppress it here.
+    if crate::report::suggestions::suggestions_enabled()
+        && crate::report::suggestions::setup_pointer_applicable(root)
+    {
+        eprintln!("{}", crate::report::suggestions::SETUP_HINT.dimmed());
     }
 }
 
 /// Print combined JSON output wrapping check, dupes, and health results.
-fn print_combined_json(
-    check: Option<&CheckResult>,
-    dupes: Option<&DupesResult>,
-    health: Option<&HealthResult>,
-    root: &std::path::Path,
+#[derive(Clone, Copy)]
+struct CombinedJsonPrintInput<'a> {
+    check_result: Option<&'a CheckResult>,
+    dupes_result: Option<&'a DupesResult>,
+    health_result: Option<&'a HealthResult>,
+    root: &'a std::path::Path,
     elapsed: std::time::Duration,
     explain: bool,
     config_fixable: bool,
-) -> ExitCode {
-    let mut combined = match combined_json_root(elapsed) {
-        Ok(combined) => combined,
+}
+
+fn print_combined_json(input: CombinedJsonPrintInput<'_>) -> ExitCode {
+    let output = match build_combined_json_output(input) {
+        Ok(output) => output,
         Err(code) => return code,
     };
-    let root_prefix = format!("{}/", root.display());
-
-    if let Some(result) = check
-        && let Err(code) = insert_combined_check_json(&mut combined, result, config_fixable)
-    {
-        return code;
-    }
-
-    let dupes_payload =
-        dupes.map(|result| crate::output_dupes::DupesReportPayload::from_report(&result.report));
-    if let Err(code) = insert_combined_dupes_json(&mut combined, dupes_payload.as_ref(), root) {
-        return code;
-    }
-    if let Err(code) = insert_combined_health_json(&mut combined, health, &root_prefix) {
-        return code;
-    }
-    if let Err(code) =
-        insert_combined_next_steps(&mut combined, check, dupes_payload.as_ref(), health, root)
-    {
-        return code;
-    }
-
-    emit_combined_json_output(combined, check, dupes, health, explain)
+    emit_combined_json_output(&output)
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "elapsed milliseconds won't exceed u64::MAX"
-)]
-fn combined_json_root(
-    elapsed: std::time::Duration,
-) -> Result<serde_json::Map<String, serde_json::Value>, ExitCode> {
-    let envelope = crate::output_envelope::CombinedOutput {
-        schema_version: plow_types::envelope::SchemaVersion(crate::report::SCHEMA_VERSION),
-        version: plow_types::envelope::ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: plow_types::envelope::ElapsedMs(elapsed.as_millis() as u64),
-        meta: None,
-        check: None,
-        dupes: None,
-        health: None,
-        // Aggregated and injected into the map below, after the sub-blocks.
-        next_steps: Vec::new(),
-    };
-    match crate::output_envelope::serialize_root_output(
-        crate::output_envelope::PlowOutput::Combined(envelope),
-    ) {
-        Ok(serde_json::Value::Object(map)) => Ok(map),
-        Ok(_) => unreachable!("CombinedOutput serializes as a JSON object"),
-        Err(e) => Err(emit_error(
-            &format!("JSON serialization error: {e}"),
-            2,
-            OutputFormat::Json,
-        )),
-    }
+fn build_combined_json_output(
+    input: CombinedJsonPrintInput<'_>,
+) -> Result<serde_json::Value, ExitCode> {
+    let dupes_payload = input
+        .dupes_result
+        .map(|result| DupesReportPayload::from_report(&result.report));
+    let next_steps = combined_next_steps(
+        input.check_result,
+        dupes_payload.as_ref(),
+        input.health_result,
+        input.root,
+    );
+
+    plow_api::serialize_combined_json(CombinedJsonOutputInput {
+        check: input.check_result.map(|result| CombinedCheckJsonSection {
+            results: &result.results,
+            root: &result.config.root,
+            elapsed: result.elapsed,
+            config_fixable: input.config_fixable,
+            extras: check_json_extras_for_combined(result),
+        }),
+        dupes: dupes_payload.as_ref(),
+        health: input.health_result.map(|result| &result.report),
+        root: input.root,
+        elapsed: input.elapsed,
+        explain: input.explain,
+        next_steps,
+        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
+        telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+    })
+    .map_err(|err| json_output_error(&err))
 }
 
-fn insert_combined_dupes_json(
-    combined: &mut serde_json::Map<String, serde_json::Value>,
-    dupes_payload: Option<&crate::output_dupes::DupesReportPayload>,
-    root: &std::path::Path,
-) -> Result<(), ExitCode> {
-    let root_prefix = format!("{}/", root.display());
-    if let Some(payload) = dupes_payload {
-        match serde_json::to_value(payload) {
-            Ok(mut json) => {
-                report::strip_root_prefix(&mut json, &root_prefix);
-                combined.insert("dupes".into(), json);
-            }
-            Err(e) => {
-                return Err(emit_error(
-                    &format!("JSON serialization error: {e}"),
-                    2,
-                    OutputFormat::Json,
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn insert_combined_health_json(
-    combined: &mut serde_json::Map<String, serde_json::Value>,
-    health: Option<&HealthResult>,
-    root_prefix: &str,
-) -> Result<(), ExitCode> {
-    if let Some(result) = health {
-        match serde_json::to_value(&result.report) {
-            Ok(mut json) => {
-                report::strip_root_prefix(&mut json, root_prefix);
-                combined.insert("health".into(), json);
-            }
-            Err(e) => {
-                return Err(emit_error(
-                    &format!("JSON serialization error: {e}"),
-                    2,
-                    OutputFormat::Json,
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn insert_combined_next_steps(
-    combined: &mut serde_json::Map<String, serde_json::Value>,
+fn combined_next_steps(
     check: Option<&CheckResult>,
-    dupes_payload: Option<&crate::output_dupes::DupesReportPayload>,
+    dupes_payload: Option<&DupesReportPayload>,
     health: Option<&HealthResult>,
     root: &std::path::Path,
-) -> Result<(), ExitCode> {
-    let next_steps = crate::report::suggestions::build_combined_next_steps(
+) -> Vec<plow_types::output::NextStep> {
+    crate::report::suggestions::build_combined_next_steps(
         check.map(|result| &result.results),
         dupes_payload,
         health.map(|result| &result.report),
         root,
         crate::report::suggestions::setup_pointer_applicable(root),
         crate::report::suggestions::due_impact_digest(root),
-    );
-    if !next_steps.is_empty() {
-        match serde_json::to_value(&next_steps) {
-            Ok(value) => {
-                combined.insert("next_steps".into(), value);
-            }
-            Err(e) => {
-                return Err(emit_error(
-                    &format!("JSON serialization error: {e}"),
-                    2,
-                    OutputFormat::Json,
-                ));
-            }
-        }
-    }
-    Ok(())
+    )
 }
 
-fn emit_combined_json_output(
-    combined: serde_json::Map<String, serde_json::Value>,
-    check: Option<&CheckResult>,
-    dupes: Option<&DupesResult>,
-    health: Option<&HealthResult>,
-    explain: bool,
-) -> ExitCode {
-    let mut output = serde_json::Value::Object(combined);
-    if explain && let serde_json::Value::Object(ref mut map) = output {
-        map.insert(
-            "_meta".to_string(),
-            crate::explain::combined_meta(check.is_some(), dupes.is_some(), health.is_some()),
-        );
-    }
-    report::harmonize_multi_kind_suppress_line_actions(&mut output);
-    crate::output_envelope::attach_telemetry_meta(&mut output);
-
-    match serde_json::to_string_pretty(&output) {
+fn emit_combined_json_output(output: &serde_json::Value) -> ExitCode {
+    match serde_json::to_string_pretty(output) {
         Ok(json) => {
             outln!("{json}");
             ExitCode::SUCCESS
@@ -515,51 +516,21 @@ fn emit_combined_json_output(
     }
 }
 
-fn insert_combined_check_json(
-    combined: &mut serde_json::Map<String, serde_json::Value>,
-    result: &CheckResult,
-    config_fixable: bool,
-) -> Result<(), ExitCode> {
-    let mut json = report::build_check_json_payload_with_config_fixable(
-        &result.results,
-        &result.config.root,
-        result.elapsed,
-        config_fixable,
+fn check_json_extras_for_combined(result: &CheckResult) -> plow_api::CheckJsonExtraOutputs {
+    let baseline_deltas = result.baseline_deltas.as_ref().map(|deltas| {
+        report::build_baseline_deltas_output(
+            deltas.total_delta,
+            deltas
+                .per_category
+                .iter()
+                .map(|(cat, delta)| (cat.as_str(), delta.current, delta.baseline, delta.delta)),
+        )
+    });
+    report::check_json_extras(
+        result.regression.as_ref(),
+        baseline_deltas,
+        result.baseline_matched,
     )
-    .map_err(|error| json_output_error(&error))?;
-    attach_combined_check_extras(&mut json, result);
-    combined.insert("check".into(), json);
-    Ok(())
-}
-
-fn attach_combined_check_extras(json: &mut serde_json::Value, result: &CheckResult) {
-    let serde_json::Value::Object(map) = json else {
-        return;
-    };
-    if let Some(ref outcome) = result.regression {
-        map.insert("regression".to_string(), outcome.to_json());
-    }
-    if let Some(ref deltas) = result.baseline_deltas {
-        map.insert(
-            "baseline_deltas".to_string(),
-            report::build_baseline_deltas_json(
-                deltas.total_delta,
-                deltas
-                    .per_category
-                    .iter()
-                    .map(|(cat, delta)| (cat.as_str(), delta.current, delta.baseline, delta.delta)),
-            ),
-        );
-    }
-    if let Some((entries, matched)) = result.baseline_matched {
-        map.insert(
-            "baseline".to_string(),
-            serde_json::json!({
-                "entries": entries,
-                "matched": matched,
-            }),
-        );
-    }
 }
 
 fn json_output_error(error: &serde_json::Error) -> ExitCode {
@@ -579,7 +550,8 @@ fn print_combined_sarif(
     let mut all_runs = Vec::new();
 
     if let Some(result) = check {
-        let sarif = report::build_sarif(&result.results, &result.config.root, &result.config.rules);
+        let sarif =
+            report::api_sarif_document(&result.results, &result.config.root, &result.config.rules);
         if let Some(runs) = sarif.get("runs").and_then(|r| r.as_array()) {
             all_runs.extend(runs.iter().cloned());
         }
@@ -607,7 +579,7 @@ fn print_combined_sarif(
     }
 
     if let Some(result) = health {
-        let sarif = report::build_health_sarif(&result.report, &result.config.root);
+        let sarif = report::api_health_sarif_document(&result.report, &result.config.root);
         if let Some(runs) = sarif.get("runs").and_then(|r| r.as_array()) {
             all_runs.extend(runs.iter().cloned());
         }
@@ -652,27 +624,23 @@ fn print_combined_codeclimate(
     }
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "CodeClimate issue envelope contains only infallibly serializable fields"
-)]
 fn build_combined_codeclimate(
     check: Option<&CheckResult>,
     dupes: Option<&DupesResult>,
     health: Option<&HealthResult>,
 ) -> serde_json::Value {
     let all_issues = build_combined_codeclimate_issues(check, dupes, health);
-    serde_json::to_value(&all_issues).expect("CodeClimateIssue serializes infallibly")
+    codeclimate_issues_to_value(&all_issues)
 }
 
 fn build_combined_codeclimate_issues(
     check: Option<&CheckResult>,
     dupes: Option<&DupesResult>,
     health: Option<&HealthResult>,
-) -> Vec<crate::output_envelope::CodeClimateIssue> {
-    let mut all_issues: Vec<crate::output_envelope::CodeClimateIssue> = Vec::new();
+) -> Vec<CodeClimateIssue> {
+    let mut all_issues: Vec<CodeClimateIssue> = Vec::new();
     if let Some(result) = check {
-        all_issues.extend(report::build_codeclimate(
+        all_issues.extend(plow_api::build_codeclimate(
             &result.results,
             &result.config.root,
             &result.config.rules,
@@ -680,14 +648,14 @@ fn build_combined_codeclimate_issues(
     }
 
     if let Some(result) = dupes {
-        all_issues.extend(report::build_duplication_codeclimate(
+        all_issues.extend(plow_api::build_duplication_codeclimate(
             &result.report,
             &result.config.root,
         ));
     }
 
     if let Some(result) = health {
-        all_issues.extend(report::build_health_codeclimate(
+        all_issues.extend(plow_api::build_health_codeclimate(
             &result.report,
             &result.config.root,
         ));
@@ -700,4 +668,73 @@ fn build_combined_codeclimate_issues(
 /// ExitCode doesn't implement Ord, so we use this workaround.
 pub(super) fn exit_code_to_u8(code: ExitCode) -> u8 {
     u8::from(code != ExitCode::SUCCESS)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::ExitCode;
+
+    use super::{
+        build_combined_codeclimate, combined_machine_success, emit_combined_json_output,
+        exit_code_to_u8, print_combined_codeclimate, print_combined_sarif,
+    };
+
+    #[test]
+    fn combined_machine_success_maps_success_to_zero_exit() {
+        assert_eq!(combined_machine_success(ExitCode::SUCCESS), Ok(Some(0)));
+    }
+
+    #[test]
+    fn combined_machine_success_preserves_output_error() {
+        let code = ExitCode::from(2);
+
+        assert_eq!(combined_machine_success(code), Err(code));
+    }
+
+    #[test]
+    fn exit_code_to_u8_collapses_non_success_codes() {
+        assert_eq!(exit_code_to_u8(ExitCode::SUCCESS), 0);
+        assert_eq!(exit_code_to_u8(ExitCode::from(1)), 1);
+        assert_eq!(exit_code_to_u8(ExitCode::from(2)), 1);
+    }
+
+    #[test]
+    fn empty_combined_codeclimate_output_is_an_empty_issue_list() {
+        assert_eq!(
+            build_combined_codeclimate(None, None, None),
+            serde_json::json!([])
+        );
+    }
+
+    #[test]
+    fn empty_combined_machine_printers_succeed() {
+        assert_eq!(print_combined_sarif(None, None, None), ExitCode::SUCCESS);
+        assert_eq!(
+            print_combined_codeclimate(None, None, None),
+            ExitCode::SUCCESS
+        );
+    }
+
+    #[test]
+    fn insert_empty_optional_sections_leaves_combined_map_unchanged() {
+        let dupes = plow_api::serialize_combined_dupes_json(None, std::path::Path::new("."))
+            .expect("empty dupes section should serialize");
+        let health = plow_api::serialize_combined_health_json(None, std::path::Path::new("."))
+            .expect("empty health section should serialize");
+
+        assert!(dupes.is_none());
+        assert!(health.is_none());
+    }
+
+    #[test]
+    fn emit_combined_json_output_can_attach_empty_meta() {
+        let combined = serde_json::json!({
+            "kind": "combined",
+            "schema_version": 7,
+            "version": env!("CARGO_PKG_VERSION"),
+            "elapsed_ms": 0,
+        });
+
+        assert_eq!(emit_combined_json_output(&combined), ExitCode::SUCCESS);
+    }
 }

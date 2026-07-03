@@ -28,6 +28,7 @@
 //! `None` (`skip_serializing_if`).
 
 use serde::Serialize;
+use std::path::Path;
 
 use crate::envelope::AuditIntroduced;
 use crate::output::{
@@ -37,13 +38,15 @@ use crate::output::{
 };
 use crate::results::{
     BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation, CircularDependency,
-    DependencyOverrideSource, DuplicateExport, DynamicSegmentNameConflict, EmptyCatalogGroup,
-    InvalidClientExport, MisconfiguredDependencyOverride, MisplacedDirective,
-    MixedClientServerBarrel, PolicyViolation, PrivateTypeLeak, ReExportCycle, ReExportCycleKind,
-    RouteCollision, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency, UnprovidedInject,
-    UnrenderedComponent, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
-    UnusedComponentEmit, UnusedComponentProp, UnusedDependency, UnusedDependencyOverride,
-    UnusedExport, UnusedFile, UnusedMember, UnusedServerAction,
+    DependencyOverrideSource, DuplicateExport, DuplicatePropShape, DynamicSegmentNameConflict,
+    EmptyCatalogGroup, InvalidClientExport, MisconfiguredDependencyOverride, MisplacedDirective,
+    MixedClientServerBarrel, PolicyViolation, PrivateTypeLeak, PropDrillingChain, ReExportCycle,
+    ReExportCycleKind, RouteCollision, TestOnlyDependency, ThinWrapper, TypeOnlyDependency,
+    UnlistedDependency, UnprovidedInject, UnrenderedComponent, UnresolvedCatalogReference,
+    UnresolvedImport, UnusedCatalogEntry, UnusedComponentEmit, UnusedComponentInput,
+    UnusedComponentOutput, UnusedComponentProp, UnusedDependency, UnusedDependencyOverride,
+    UnusedExport, UnusedFile, UnusedLoadDataKey, UnusedMember, UnusedServerAction,
+    UnusedSvelteEvent,
 };
 
 /// Shared note for the `duplicate-exports` fix action. Mirrors the const used
@@ -64,6 +67,29 @@ const IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA: &str = "https://raw.githubusercont
 /// referenced by `add-to-config` actions on both the unused- and
 /// misconfigured-override findings.
 const IGNORE_DEPENDENCY_OVERRIDES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencyOverrides/items";
+
+const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
+
+fn manual_framework_fix(kind: FixActionType, description: &str, note: &str) -> IssueAction {
+    IssueAction::Fix(FixAction {
+        kind,
+        auto_fixable: false,
+        description: description.to_string(),
+        note: Some(note.to_string()),
+        available_in_catalogs: None,
+        suggested_target: None,
+    })
+}
+
+fn suppress_line(comment: &str) -> IssueAction {
+    IssueAction::SuppressLine(SuppressLineAction {
+        kind: SuppressLineKind::SuppressLine,
+        auto_fixable: false,
+        description: "Suppress with an inline comment above the line".to_string(),
+        comment: comment.to_string(),
+        scope: None,
+    })
+}
 
 /// Wire-shape envelope for an [`UnusedFile`] finding. The bare finding
 /// flattens in via `#[serde(flatten)]`, with a typed `actions` array
@@ -539,7 +565,7 @@ impl BoundaryCallViolationFinding {
 }
 
 /// Wire-shape envelope for a [`PolicyViolation`] finding. Carries actions for
-/// replacing the banned call or import, or suppressing it with a scoped
+/// replacing the banned call, import, or effect, or suppressing it with a scoped
 /// `policy-violation:<pack>/<rule-id>` token.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -562,6 +588,7 @@ impl PolicyViolationFinding {
         let what = match violation.kind {
             crate::results::PolicyRuleKind::BannedCall => "call",
             crate::results::PolicyRuleKind::BannedImport => "import",
+            crate::results::PolicyRuleKind::BannedEffect => "effect",
         };
         let description = match &violation.message {
             Some(message) => format!("Replace the `{}` {what}: {message}", violation.matched),
@@ -892,7 +919,8 @@ impl MisplacedDirectiveFinding {
 
 /// Wire-shape envelope for an [`UnprovidedInject`] finding. There is no safe
 /// auto-fix: the fix is binary but judgement-bearing (add a `provide` for the
-/// key, or delete the dead inject). The only action is a line-level suppress.
+/// key, or delete the dead inject). Actions are manual remediation guidance
+/// plus a line-level suppress.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnprovidedInjectFinding {
@@ -909,18 +937,18 @@ pub struct UnprovidedInjectFinding {
 }
 
 impl UnprovidedInjectFinding {
-    /// Build the wrapper from a raw [`UnprovidedInject`]. Emits only a
-    /// line-level suppress action: there is no safe auto-fix because the fix
-    /// (provide the key or remove the inject) is a human decision.
+    /// Build the wrapper from a raw [`UnprovidedInject`]. Emits a manual fix
+    /// action plus a line-level suppress.
     #[must_use]
     pub fn with_actions(inject: UnprovidedInject) -> Self {
-        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
-            kind: SuppressLineKind::SuppressLine,
-            auto_fixable: false,
-            description: "Suppress with an inline comment above the line".to_string(),
-            comment: "// plow-ignore-next-line unprovided-inject".to_string(),
-            scope: None,
-        })];
+        let actions = vec![
+            manual_framework_fix(
+                FixActionType::ProvideInject,
+                "Provide this injected key, or remove the inject / getContext call",
+                "Manual review required: dependency-injection keys can be provided by framework wiring, tests, or package consumers outside this project.",
+            ),
+            suppress_line("// plow-ignore-next-line unprovided-inject"),
+        ];
         Self {
             inject,
             actions,
@@ -931,7 +959,8 @@ impl UnprovidedInjectFinding {
 
 /// Wire-shape envelope for an [`UnusedServerAction`] finding. There is no safe
 /// auto-fix: the fix is binary but judgement-bearing (wire the action up to a
-/// consumer, or delete it). The only action is a line-level suppress.
+/// consumer, or delete it). Actions are manual remediation guidance plus a
+/// line-level suppress.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedServerActionFinding {
@@ -948,18 +977,18 @@ pub struct UnusedServerActionFinding {
 }
 
 impl UnusedServerActionFinding {
-    /// Build the wrapper from a raw [`UnusedServerAction`]. Emits only a
-    /// line-level suppress action: there is no safe auto-fix because the fix
-    /// (wire the action to a consumer or remove it) is a human decision.
+    /// Build the wrapper from a raw [`UnusedServerAction`]. Emits a manual fix
+    /// action plus a line-level suppress.
     #[must_use]
     pub fn with_actions(action: UnusedServerAction) -> Self {
-        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
-            kind: SuppressLineKind::SuppressLine,
-            auto_fixable: false,
-            description: "Suppress with an inline comment above the line".to_string(),
-            comment: "// plow-ignore-next-line unused-server-action".to_string(),
-            scope: None,
-        })];
+        let actions = vec![
+            manual_framework_fix(
+                FixActionType::WireServerAction,
+                "Wire the server action to a caller or form action, or remove it",
+                "Manual review required: server actions may still be POST-able by action id or invoked reflectively outside the static project graph.",
+            ),
+            suppress_line("// plow-ignore-next-line unused-server-action"),
+        ];
         Self {
             action,
             actions,
@@ -968,10 +997,50 @@ impl UnusedServerActionFinding {
     }
 }
 
+/// Wire-shape envelope for an [`UnusedLoadDataKey`] finding. There is no safe
+/// auto-fix: a `load()` fetch can have side effects, so deleting the key is a
+/// human call. Actions are manual remediation guidance plus a line-level
+/// suppress.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedLoadDataKeyFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub key: UnusedLoadDataKey,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedLoadDataKeyFinding {
+    /// Build the wrapper from a raw [`UnusedLoadDataKey`]. Emits a manual fix
+    /// action plus a line-level suppress.
+    #[must_use]
+    pub fn with_actions(key: UnusedLoadDataKey) -> Self {
+        let actions = vec![
+            manual_framework_fix(
+                FixActionType::UseLoadData,
+                "Read this load data key from the route UI, or remove it from the load return",
+                "Manual review required: load functions can perform real server or database work, so verify side effects before deleting the producer.",
+            ),
+            suppress_line("// plow-ignore-next-line unused-load-data-key"),
+        ];
+        Self {
+            key,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
 /// Wire-shape envelope for an [`UnrenderedComponent`] finding. There is no safe
 /// auto-fix: the fix is binary but judgement-bearing (render the component
-/// somewhere, or delete the dead component). The only action is a line-level
-/// suppress.
+/// somewhere, or delete the dead component). Actions are manual remediation
+/// guidance plus a line-level suppress.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnrenderedComponentFinding {
@@ -988,18 +1057,18 @@ pub struct UnrenderedComponentFinding {
 }
 
 impl UnrenderedComponentFinding {
-    /// Build the wrapper from a raw [`UnrenderedComponent`]. Emits only a
-    /// line-level suppress action: there is no safe auto-fix because the fix
-    /// (render the component or remove it) is a human decision.
+    /// Build the wrapper from a raw [`UnrenderedComponent`]. Emits a manual
+    /// fix action plus a line-level suppress.
     #[must_use]
     pub fn with_actions(component: UnrenderedComponent) -> Self {
-        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
-            kind: SuppressLineKind::SuppressLine,
-            auto_fixable: false,
-            description: "Suppress with an inline comment above the line".to_string(),
-            comment: "// plow-ignore-next-line unrendered-component".to_string(),
-            scope: None,
-        })];
+        let actions = vec![
+            manual_framework_fix(
+                FixActionType::RenderComponent,
+                "Render the reachable component from project code, or remove it",
+                "Manual review required: exported library components and dynamic render registries can be intentionally reachable without static template usage.",
+            ),
+            suppress_line("// plow-ignore-next-line unrendered-component"),
+        ];
         Self {
             component,
             actions,
@@ -1010,8 +1079,8 @@ impl UnrenderedComponentFinding {
 
 /// Wire-shape envelope for an [`UnusedComponentProp`] finding. There is no safe
 /// auto-fix: removing a declared prop is judgement-bearing (the prop may be part
-/// of a deliberately-stable public component API). The only action is a
-/// line-level suppress at the prop declaration.
+/// of a deliberately-stable public component API). Actions are manual
+/// remediation guidance plus a line-level suppress at the prop declaration.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedComponentPropFinding {
@@ -1028,18 +1097,18 @@ pub struct UnusedComponentPropFinding {
 }
 
 impl UnusedComponentPropFinding {
-    /// Build the wrapper from a raw [`UnusedComponentProp`]. Emits only a
-    /// line-level suppress action: there is no safe auto-fix because removing a
-    /// prop is a human decision (it may be part of a stable component API).
+    /// Build the wrapper from a raw [`UnusedComponentProp`]. Emits a manual
+    /// fix action plus a line-level suppress.
     #[must_use]
     pub fn with_actions(prop: UnusedComponentProp) -> Self {
-        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
-            kind: SuppressLineKind::SuppressLine,
-            auto_fixable: false,
-            description: "Suppress with an inline comment above the line".to_string(),
-            comment: "// plow-ignore-next-line unused-component-prop".to_string(),
-            scope: None,
-        })];
+        let actions = vec![
+            manual_framework_fix(
+                FixActionType::UseComponentProp,
+                "Use the declared prop in the component, or remove it from the component API",
+                "Manual review required: public component APIs can intentionally keep stable props for external consumers.",
+            ),
+            suppress_line("// plow-ignore-next-line unused-component-prop"),
+        ];
         Self {
             prop,
             actions,
@@ -1050,8 +1119,8 @@ impl UnusedComponentPropFinding {
 
 /// Wire-shape envelope for an [`UnusedComponentEmit`] finding. There is no safe
 /// auto-fix: removing a declared emit is judgement-bearing (the event may be
-/// part of a deliberately-stable public component API). The only action is a
-/// line-level suppress at the emit declaration.
+/// part of a deliberately-stable public component API). Actions are manual
+/// remediation guidance plus a line-level suppress at the emit declaration.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedComponentEmitFinding {
@@ -1068,20 +1137,288 @@ pub struct UnusedComponentEmitFinding {
 }
 
 impl UnusedComponentEmitFinding {
-    /// Build the wrapper from a raw [`UnusedComponentEmit`]. Emits only a
-    /// line-level suppress action: there is no safe auto-fix because removing an
-    /// emit is a human decision (it may be part of a stable component API).
+    /// Build the wrapper from a raw [`UnusedComponentEmit`]. Emits a manual
+    /// fix action plus a line-level suppress.
     #[must_use]
     pub fn with_actions(emit: UnusedComponentEmit) -> Self {
+        let actions = vec![
+            manual_framework_fix(
+                FixActionType::EmitComponentEvent,
+                "Emit the declared event from the component, or remove it from the component API",
+                "Manual review required: public component APIs can intentionally keep stable events for external listeners.",
+            ),
+            suppress_line("// plow-ignore-next-line unused-component-emit"),
+        ];
+        Self {
+            emit,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedSvelteEvent`] finding. There is no safe
+/// auto-fix: removing a dispatched event is judgement-bearing (the event may be
+/// part of a deliberately-stable public component API, or a listener may be
+/// added later). Actions are manual remediation guidance plus a line-level
+/// suppress at the `dispatch` call.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedSvelteEventFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub event: UnusedSvelteEvent,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedSvelteEventFinding {
+    /// Build the wrapper from a raw [`UnusedSvelteEvent`]. Emits a manual fix
+    /// action plus a line-level suppress.
+    #[must_use]
+    pub fn with_actions(event: UnusedSvelteEvent) -> Self {
+        let actions = vec![
+            manual_framework_fix(
+                FixActionType::WireSvelteEvent,
+                "Add or forward a listener for this custom event, or remove the dispatch",
+                "Manual review required: public Svelte component APIs can intentionally dispatch events for package consumers outside this project.",
+            ),
+            suppress_line("// plow-ignore-next-line unused-svelte-event"),
+        ];
+        Self {
+            event,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`PropDrillingChain`] finding. There is no safe
+/// auto-fix: collapsing a drilling chain (colocate the consumer, lift to a
+/// context, or compose the component) is a design decision. The only action is a
+/// line-level suppress at the source hop's prop declaration. The rule defaults
+/// to `off` (opt-in health signal), so this finding is dormant by default.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PropDrillingChainFinding {
+    /// The underlying located chain.
+    #[serde(flatten)]
+    pub chain: PropDrillingChain,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl PropDrillingChainFinding {
+    /// Build the wrapper from a raw [`PropDrillingChain`]. Emits only a
+    /// line-level suppress action anchored at the source hop: there is no safe
+    /// auto-fix because collapsing the chain is a design decision (colocate,
+    /// lift to context, or compose).
+    #[must_use]
+    pub fn with_actions(chain: PropDrillingChain) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the source prop declaration"
+                .to_string(),
+            comment: "// plow-ignore-next-line prop-drilling".to_string(),
+            scope: None,
+        })];
+        Self {
+            chain,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`ThinWrapper`] finding. There is no safe
+/// auto-fix: inlining a thin wrapper at its call sites (or deleting it) is a
+/// design decision. The only action is a line-level suppress at the wrapper's
+/// definition. The rule defaults to `off` (opt-in health signal), so this
+/// finding is dormant by default.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ThinWrapperFinding {
+    /// The underlying located thin wrapper.
+    #[serde(flatten)]
+    pub wrapper: ThinWrapper,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl ThinWrapperFinding {
+    /// Build the wrapper from a raw [`ThinWrapper`]. Emits only a line-level
+    /// suppress action anchored at the wrapper definition: there is no safe
+    /// auto-fix because inlining or deleting the wrapper is a design decision.
+    #[must_use]
+    pub fn with_actions(wrapper: ThinWrapper) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the component definition"
+                .to_string(),
+            comment: "// plow-ignore-next-line thin-wrapper".to_string(),
+            scope: None,
+        })];
+        Self {
+            wrapper,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`DuplicatePropShape`] finding. There is no safe
+/// auto-fix: extracting a shared `Props` type or a base component for a group of
+/// same-shaped components is a design decision. The actions are manual guidance
+/// (extract the shared shape) plus a line-level suppress at the component
+/// definition and a file-level suppress escape hatch (mirroring the
+/// route-collision multi-file model). The rule defaults to `off` (opt-in health
+/// signal), so this finding is dormant by default.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DuplicatePropShapeFinding {
+    /// The underlying duplicate-prop-shape entry.
+    #[serde(flatten)]
+    pub shape: DuplicatePropShape,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl DuplicatePropShapeFinding {
+    /// Build the wrapper from a raw [`DuplicatePropShape`]. Manual guidance is
+    /// the primary action (extract a shared shape); a line-level suppress at the
+    /// component definition and a file-level suppress escape hatch follow,
+    /// mirroring the multi-file route-collision suppress model. There is no safe
+    /// auto-fix because extracting a shared type or base component is a design
+    /// decision.
+    #[must_use]
+    pub fn with_actions(shape: DuplicatePropShape) -> Self {
+        let actions = vec![
+            IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description: "Three or more components share this exact prop shape. Extract one \
+                              shared `Props` type (or a base component) that every member reuses, \
+                              or keep them separate if a per-variant divergence is planned. \
+                              Suppress one member with an inline comment above the component \
+                              definition."
+                    .to_string(),
+                comment: "// plow-ignore-next-line duplicate-prop-shape".to_string(),
+                scope: None,
+            }),
+            IssueAction::SuppressFile(SuppressFileAction {
+                kind: SuppressFileKind::SuppressFile,
+                auto_fixable: false,
+                description: "Escape hatch: a file-level suppress silences this member but it \
+                              still appears in its siblings' `sharing_components` (the group is \
+                              real regardless of suppression)."
+                    .to_string(),
+                comment: "// plow-ignore-file duplicate-prop-shape".to_string(),
+            }),
+        ];
+        Self {
+            shape,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedComponentInput`] finding. There is no safe
+/// auto-fix: removing a declared input is judgement-bearing (the input may be
+/// part of a deliberately-stable public component API). The only action is a
+/// line-level suppress at the input declaration.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedComponentInputFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub input: UnusedComponentInput,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedComponentInputFinding {
+    /// Build the wrapper from a raw [`UnusedComponentInput`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because removing an
+    /// input is a human decision (it may be part of a stable component API).
+    #[must_use]
+    pub fn with_actions(input: UnusedComponentInput) -> Self {
         let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
             kind: SuppressLineKind::SuppressLine,
             auto_fixable: false,
             description: "Suppress with an inline comment above the line".to_string(),
-            comment: "// plow-ignore-next-line unused-component-emit".to_string(),
+            comment: "// plow-ignore-next-line unused-component-input".to_string(),
             scope: None,
         })];
         Self {
-            emit,
+            input,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedComponentOutput`] finding. There is no safe
+/// auto-fix: removing a declared output is judgement-bearing (the event may be
+/// part of a deliberately-stable public component API). The only action is a
+/// line-level suppress at the output declaration.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedComponentOutputFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub output: UnusedComponentOutput,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedComponentOutputFinding {
+    /// Build the wrapper from a raw [`UnusedComponentOutput`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because removing an
+    /// output is a human decision (it may be part of a stable component API).
+    #[must_use]
+    pub fn with_actions(output: UnusedComponentOutput) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// plow-ignore-next-line unused-component-output".to_string(),
+            scope: None,
+        })];
+        Self {
+            output,
             actions,
             introduced: None,
         }
@@ -1784,9 +2121,8 @@ fn build_duplicate_exports_ignore_rules(
 }
 
 /// Wire-shape envelope for an [`UnusedCatalogEntry`] finding. Per-instance
-/// `auto_fixable` flips to `false` when `hardcoded_consumers` is non-empty:
-/// the entry cannot be removed safely while a workspace package still pins
-/// the same package via a hardcoded version range.
+/// `auto_fixable` flips to `false` when `hardcoded_consumers` is non-empty or
+/// the source is not `pnpm-workspace.yaml`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedCatalogEntryFinding {
@@ -1803,31 +2139,45 @@ pub struct UnusedCatalogEntryFinding {
 
 impl UnusedCatalogEntryFinding {
     /// Build the wrapper. Per-instance `auto_fixable` is `true` only when
-    /// `hardcoded_consumers` is empty; otherwise `plow fix` skips the
-    /// entry to avoid breaking `pnpm install` on the holdout consumer.
+    /// `hardcoded_consumers` is empty and the source is `pnpm-workspace.yaml`;
+    /// otherwise `plow fix` skips the entry to avoid breaking installs or
+    /// applying YAML edits to Bun `package.json` catalogs.
     #[must_use]
     pub fn with_actions(entry: UnusedCatalogEntry) -> Self {
-        let auto_fixable = entry.hardcoded_consumers.is_empty();
-        let actions = vec![
-            IssueAction::Fix(FixAction {
-                kind: FixActionType::RemoveCatalogEntry,
-                auto_fixable,
-                description: "Remove the entry from pnpm-workspace.yaml".to_string(),
-                note: Some(
-                    "If any consumer declares the same package with a hardcoded version, switch the consumer to `catalog:` before removing"
-                        .to_string(),
-                ),
-                available_in_catalogs: None,
-                suggested_target: None,
-            }),
-            IssueAction::SuppressLine(SuppressLineAction {
+        let is_pnpm_source = is_pnpm_catalog_source(&entry.path);
+        let auto_fixable = entry.hardcoded_consumers.is_empty() && is_pnpm_source;
+        let note = if is_pnpm_source {
+            Some(
+                "If any consumer declares the same package with a hardcoded version, switch the consumer to `catalog:` before removing"
+                    .to_string(),
+            )
+        } else {
+            Some(
+                "plow fix only edits pnpm-workspace.yaml catalog entries. Edit Bun package.json catalogs manually."
+                    .to_string(),
+            )
+        };
+        let mut actions = vec![IssueAction::Fix(FixAction {
+            kind: FixActionType::RemoveCatalogEntry,
+            auto_fixable,
+            description: if is_pnpm_source {
+                "Remove the entry from pnpm-workspace.yaml".to_string()
+            } else {
+                "Remove the entry from the catalog source file manually".to_string()
+            },
+            note,
+            available_in_catalogs: None,
+            suggested_target: None,
+        })];
+        if is_pnpm_source {
+            actions.push(IssueAction::SuppressLine(SuppressLineAction {
                 kind: SuppressLineKind::SuppressLine,
                 auto_fixable: false,
                 description: "Suppress with a YAML comment above the line".to_string(),
                 comment: "# plow-ignore-next-line unused-catalog-entry".to_string(),
                 scope: None,
-            }),
-        ];
+            }));
+        }
         Self {
             entry,
             actions,
@@ -1837,8 +2187,8 @@ impl UnusedCatalogEntryFinding {
 }
 
 /// Wire-shape envelope for an [`EmptyCatalogGroup`] finding. Carries a
-/// straightforward `remove-empty-catalog-group` primary plus a YAML-comment
-/// suppress.
+/// `remove-empty-catalog-group` primary. YAML-sourced findings also include a
+/// YAML-comment suppress action.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct EmptyCatalogGroupFinding {
@@ -1857,33 +2207,45 @@ impl EmptyCatalogGroupFinding {
     /// Build the wrapper.
     #[must_use]
     pub fn with_actions(group: EmptyCatalogGroup) -> Self {
-        let actions = vec![
-            IssueAction::Fix(FixAction {
-                kind: FixActionType::RemoveEmptyCatalogGroup,
-                auto_fixable: true,
-                description: "Remove the empty named catalog group from pnpm-workspace.yaml"
-                    .to_string(),
-                note: Some(
-                    "Only named groups under `catalogs:` are flagged; the top-level `catalog:` hook is intentionally ignored"
-                        .to_string(),
-                ),
-                available_in_catalogs: None,
-                suggested_target: None,
+        let auto_fixable = is_pnpm_catalog_source(&group.path);
+        let mut actions = vec![IssueAction::Fix(FixAction {
+            kind: FixActionType::RemoveEmptyCatalogGroup,
+            auto_fixable,
+            description: if auto_fixable {
+                "Remove the empty named catalog group from pnpm-workspace.yaml".to_string()
+            } else {
+                "Remove the empty named catalog group from the catalog source file manually"
+                    .to_string()
+            },
+            note: Some(if auto_fixable {
+                "Only named groups under `catalogs:` are flagged; the top-level `catalog:` hook is intentionally ignored"
+                    .to_string()
+            } else {
+                "plow fix only edits pnpm-workspace.yaml catalog groups. Edit Bun package.json catalogs manually."
+                    .to_string()
             }),
-            IssueAction::SuppressLine(SuppressLineAction {
+            available_in_catalogs: None,
+            suggested_target: None,
+        })];
+        if auto_fixable {
+            actions.push(IssueAction::SuppressLine(SuppressLineAction {
                 kind: SuppressLineKind::SuppressLine,
                 auto_fixable: false,
                 description: "Suppress with a YAML comment above the line".to_string(),
                 comment: "# plow-ignore-next-line empty-catalog-group".to_string(),
                 scope: None,
-            }),
-        ];
+            }));
+        }
         Self {
             group,
             actions,
             introduced: None,
         }
     }
+}
+
+fn is_pnpm_catalog_source(path: &Path) -> bool {
+    path == Path::new(PNPM_WORKSPACE_FILE)
 }
 
 /// Wire-shape envelope for an [`UnresolvedCatalogReference`] finding. The
@@ -2180,15 +2542,214 @@ mod position_0_invariants {
                 FixActionType::MoveToServerModule => "move-to-server-module",
                 FixActionType::SplitMixedBarrel => "split-mixed-barrel",
                 FixActionType::HoistDirective => "hoist-directive",
+                FixActionType::WireServerAction => "wire-server-action",
+                FixActionType::ProvideInject => "provide-inject",
+                FixActionType::UseLoadData => "use-load-data",
+                FixActionType::RenderComponent => "render-component",
+                FixActionType::UseComponentProp => "use-component-prop",
+                FixActionType::EmitComponentEvent => "emit-component-event",
+                FixActionType::WireSvelteEvent => "wire-svelte-event",
                 FixActionType::ResolveRouteCollision => "resolve-route-collision",
                 FixActionType::ResolveDynamicSegmentNameConflict => {
                     "resolve-dynamic-segment-name-conflict"
                 }
+                FixActionType::AddSuppressionReason => "add-suppression-reason",
+                FixActionType::RemoveStaleSuppression => "remove-stale-suppression",
             },
             IssueAction::SuppressLine(_) => "suppress-line",
             IssueAction::SuppressFile(_) => "suppress-file",
             IssueAction::AddToConfig(_) => "add-to-config",
         }
+    }
+
+    fn assert_manual_fix_then_suppress(
+        actions: &[IssueAction],
+        primary_type: &str,
+        suppress_comment: &str,
+    ) {
+        assert_eq!(actions.len(), 2);
+        assert_eq!(action_type(&actions[0]), primary_type);
+        let IssueAction::Fix(primary) = &actions[0] else {
+            panic!("position-0 should be a manual fix action");
+        };
+        assert!(!primary.auto_fixable);
+        assert!(primary.note.is_some());
+        assert_eq!(action_type(&actions[1]), "suppress-line");
+        let IssueAction::SuppressLine(suppress) = &actions[1] else {
+            panic!("position-1 should be a suppress-line action");
+        };
+        assert_eq!(suppress.comment, suppress_comment);
+    }
+
+    #[test]
+    fn pnpm_catalog_entry_action_is_auto_fixable() {
+        let finding = UnusedCatalogEntryFinding::with_actions(UnusedCatalogEntry {
+            entry_name: "unused".to_string(),
+            catalog_name: "default".to_string(),
+            path: PathBuf::from("pnpm-workspace.yaml"),
+            line: 3,
+            hardcoded_consumers: vec![],
+        });
+
+        let IssueAction::Fix(fix) = &finding.actions[0] else {
+            panic!("position-0 should be a fix action");
+        };
+        assert!(fix.auto_fixable);
+        assert_eq!(finding.actions.len(), 2);
+        assert_eq!(action_type(&finding.actions[1]), "suppress-line");
+    }
+
+    #[test]
+    fn bun_package_json_catalog_entry_action_is_manual_only() {
+        let finding = UnusedCatalogEntryFinding::with_actions(UnusedCatalogEntry {
+            entry_name: "unused".to_string(),
+            catalog_name: "default".to_string(),
+            path: PathBuf::from("package.json"),
+            line: 4,
+            hardcoded_consumers: vec![],
+        });
+
+        let IssueAction::Fix(fix) = &finding.actions[0] else {
+            panic!("position-0 should be a fix action");
+        };
+        assert!(!fix.auto_fixable);
+        assert!(fix.description.contains("manually"));
+        assert_eq!(finding.actions.len(), 1);
+    }
+
+    #[test]
+    fn bun_package_json_empty_catalog_group_action_is_manual_only() {
+        let finding = EmptyCatalogGroupFinding::with_actions(EmptyCatalogGroup {
+            catalog_name: "empty".to_string(),
+            path: PathBuf::from("package.json"),
+            line: 4,
+        });
+
+        let IssueAction::Fix(fix) = &finding.actions[0] else {
+            panic!("position-0 should be a fix action");
+        };
+        assert!(!fix.auto_fixable);
+        assert!(fix.description.contains("manually"));
+        assert_eq!(finding.actions.len(), 1);
+    }
+
+    #[test]
+    fn unprovided_inject_primary_action_is_provide_inject() {
+        let finding = UnprovidedInjectFinding::with_actions(UnprovidedInject {
+            path: PathBuf::from("src/context.ts"),
+            key_name: "userKey".to_string(),
+            framework: "svelte".to_string(),
+            line: 7,
+            col: 12,
+        });
+
+        assert_manual_fix_then_suppress(
+            &finding.actions,
+            "provide-inject",
+            "// plow-ignore-next-line unprovided-inject",
+        );
+    }
+
+    #[test]
+    fn unused_server_action_primary_action_is_wire_server_action() {
+        let finding = UnusedServerActionFinding::with_actions(UnusedServerAction {
+            path: PathBuf::from("app/actions.ts"),
+            action_name: "saveDraft".to_string(),
+            line: 3,
+            col: 13,
+        });
+
+        assert_manual_fix_then_suppress(
+            &finding.actions,
+            "wire-server-action",
+            "// plow-ignore-next-line unused-server-action",
+        );
+    }
+
+    #[test]
+    fn unused_load_data_key_primary_action_is_use_load_data() {
+        let finding = UnusedLoadDataKeyFinding::with_actions(UnusedLoadDataKey {
+            path: PathBuf::from("src/routes/+page.server.ts"),
+            key_name: "profile".to_string(),
+            line: 12,
+            col: 6,
+            route_dir: Some("src/routes".to_string()),
+        });
+
+        assert_manual_fix_then_suppress(
+            &finding.actions,
+            "use-load-data",
+            "// plow-ignore-next-line unused-load-data-key",
+        );
+    }
+
+    #[test]
+    fn unrendered_component_primary_action_is_render_component() {
+        let finding = UnrenderedComponentFinding::with_actions(UnrenderedComponent {
+            path: PathBuf::from("src/components/EmptyState.vue"),
+            component_name: "EmptyState".to_string(),
+            framework: "vue".to_string(),
+            reachable_via: None,
+            line: 1,
+            col: 0,
+        });
+
+        assert_manual_fix_then_suppress(
+            &finding.actions,
+            "render-component",
+            "// plow-ignore-next-line unrendered-component",
+        );
+    }
+
+    #[test]
+    fn unused_component_prop_primary_action_is_use_component_prop() {
+        let finding = UnusedComponentPropFinding::with_actions(UnusedComponentProp {
+            path: PathBuf::from("src/components/Card.vue"),
+            component_name: "Card".to_string(),
+            prop_name: "variant".to_string(),
+            line: 5,
+            col: 10,
+        });
+
+        assert_manual_fix_then_suppress(
+            &finding.actions,
+            "use-component-prop",
+            "// plow-ignore-next-line unused-component-prop",
+        );
+    }
+
+    #[test]
+    fn unused_component_emit_primary_action_is_emit_component_event() {
+        let finding = UnusedComponentEmitFinding::with_actions(UnusedComponentEmit {
+            path: PathBuf::from("src/components/Picker.vue"),
+            component_name: "Picker".to_string(),
+            emit_name: "focus".to_string(),
+            line: 6,
+            col: 14,
+        });
+
+        assert_manual_fix_then_suppress(
+            &finding.actions,
+            "emit-component-event",
+            "// plow-ignore-next-line unused-component-emit",
+        );
+    }
+
+    #[test]
+    fn unused_svelte_event_primary_action_is_wire_svelte_event() {
+        let finding = UnusedSvelteEventFinding::with_actions(UnusedSvelteEvent {
+            path: PathBuf::from("src/Dialog.svelte"),
+            component_name: "Dialog".to_string(),
+            event_name: "closed".to_string(),
+            line: 19,
+            col: 8,
+        });
+
+        assert_manual_fix_then_suppress(
+            &finding.actions,
+            "wire-svelte-event",
+            "// plow-ignore-next-line unused-svelte-event",
+        );
     }
 
     #[test]

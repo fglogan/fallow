@@ -5,13 +5,14 @@ expression: output
 <!-- plow-id: plow-results -->
 ### Plow dead-code report
 
-Found **26** findings.
+Found **29** findings.
 
 <details>
-<summary>Dead code (10)</summary>
+<summary>Dead code (13)</summary>
 
 | Severity | Rule | Location | Description |
 | --- | --- | --- | --- |
+| minor | `plow/unused-svelte-event` | `src/Child.svelte`:6 | event \`dead\` is dispatched by component \`Child\` but listened to nowhere in the project \(remove it or listen for it\) |
 | major | `plow/unresolved-import` | `src/app.ts`:3 | Import './missing-module' could not be resolved |
 | major | `plow/duplicate-export` | `src/config.ts`:15 | Export 'Config' appears in multiple modules |
 | major | `plow/unused-file` | `src/dead.ts`:1 | File is not reachable from any entry point |
@@ -21,6 +22,8 @@ Found **26** findings.
 | major | `plow/unused-type` | `src/types.ts`:5 | Type export 'OldType' is never imported by other modules |
 | major | `plow/duplicate-export` | `src/types.ts`:30 | Export 'Config' appears in multiple modules |
 | minor | `plow/unprovided-inject` | `src/useTheme.ts`:5 | inject\(\`THEME\_KEY\`\) has no matching provide\(\`THEME\_KEY\`\) in this project; at runtime it returns undefined \(provide the key or remove this inject\) |
+| minor | `plow/unused-component-input` | `src/user-card.component.ts`:12 | input \`variant\` is declared but referenced nowhere in component \`UserCardComponent\` \(remove it or use it\) |
+| minor | `plow/unused-component-output` | `src/user-card.component.ts`:15 | output \`selected\` is declared but emitted nowhere in component \`UserCardComponent\` \(remove it or emit it\) |
 | major | `plow/unused-export` | `src/utils.ts`:10 | Export 'helperFn' is never imported by other modules |
 
 </details>

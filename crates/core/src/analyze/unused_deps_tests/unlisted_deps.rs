@@ -100,13 +100,15 @@ fn builtin_modules_not_reported_as_unlisted() {
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     let pkg = make_pkg(&[], &[], &[]);
@@ -160,13 +162,15 @@ fn virtual_modules_not_reported_as_unlisted() {
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     let pkg = make_pkg(&[], &[], &[]);
@@ -299,6 +303,10 @@ fn peer_dep_not_reported_as_unlisted() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "multi-file dependency fixture keeps the scenario local to the test"
+)]
 fn unlisted_dep_detected_across_multiple_files() {
     let files = vec![
         DiscoveredFile {
@@ -343,13 +351,15 @@ fn unlisted_dep_detected_across_multiple_files() {
             resolved_dynamic_imports: vec![],
             resolved_dynamic_patterns: vec![],
             member_accesses: vec![],
-            whole_object_uses: vec![],
+            semantic_facts: Box::default(),
+            whole_object_uses: Box::default(),
             has_cjs_exports: false,
             has_angular_component_template_url: false,
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
+            exported_factory_returns: Box::default(),
         },
         ResolvedModule {
             file_id: FileId(1),
@@ -371,13 +381,15 @@ fn unlisted_dep_detected_across_multiple_files() {
             resolved_dynamic_imports: vec![],
             resolved_dynamic_patterns: vec![],
             member_accesses: vec![],
-            whole_object_uses: vec![],
+            semantic_facts: Box::default(),
+            whole_object_uses: Box::default(),
             has_cjs_exports: false,
             has_angular_component_template_url: false,
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
+            exported_factory_returns: Box::default(),
         },
     ];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -435,13 +447,15 @@ fn dynamic_import_unlisted_dep_has_import_site() {
         }],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     let pkg = make_pkg(&[], &[], &[]);
@@ -913,13 +927,15 @@ fn workspace_import_case(
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 

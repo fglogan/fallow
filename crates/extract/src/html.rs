@@ -5,8 +5,7 @@
 //! transitive imports) are reachable from the HTML entry point.
 //!
 //! Also scans for Angular template syntax (`{{ }}`, `[prop]`, `(event)`, `@if`, etc.)
-//! and stores referenced identifiers as `MemberAccess` entries with a sentinel object,
-//! enabling the analysis phase to credit component class members used in external templates.
+//! and stores referenced identifiers as typed semantic facts.
 
 use std::path::Path;
 use std::sync::LazyLock;
@@ -14,8 +13,11 @@ use std::sync::LazyLock;
 use oxc_span::Span;
 
 use crate::asset_url::normalize_asset_url;
-use crate::sfc_template::angular::{self, ANGULAR_TPL_SENTINEL};
-use crate::{ImportInfo, ImportedName, MemberAccess, ModuleInfo};
+use crate::sfc_template::angular;
+use crate::{
+    AngularTemplateMemberAccessFact, ImportInfo, ImportedName, MemberAccess, ModuleInfo,
+    SemanticFact,
+};
 use plow_types::discover::FileId;
 
 /// Regex to match HTML comments (`<!-- ... -->`) for stripping before extraction.
@@ -117,21 +119,54 @@ pub(crate) fn collect_asset_refs(source: &str) -> Vec<String> {
     refs
 }
 
+/// Regex matching an opening or closing custom-element tag. The HTML spec
+/// requires a custom-element name to contain a hyphen, so `[a-z][a-z0-9]*-...`
+/// captures `<x-foo>` / `<my-element>` while native tags (`div`, `span`) never
+/// match. The capture stops before attributes / `>` / `/`.
+static CUSTOM_ELEMENT_TAG_RE: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| crate::static_regex(r"</?\s*([a-z][a-z0-9]*-[a-z0-9-]*)"));
+
+/// Collect the custom-element tag names rendered in an `html` template snippet
+/// (`<x-foo>` / `</x-foo>` -> `x-foo`). HTML comments are stripped first so a
+/// commented-out `<!-- <x-foo> -->` does not credit the element. Deduped; native
+/// HTML tags are excluded by the hyphen requirement. Feeds the Lit
+/// `unrendered-component` arm's project-wide rendered-tag union.
+pub(crate) fn collect_custom_element_tags(source: &str) -> Vec<String> {
+    let stripped = HTML_COMMENT_RE.replace_all(source, "");
+    let mut tags: Vec<String> = Vec::new();
+    for cap in CUSTOM_ELEMENT_TAG_RE.captures_iter(&stripped) {
+        if let Some(m) = cap.get(1) {
+            let tag = m.as_str();
+            if !tags.iter().any(|t| t == tag) {
+                tags.push(tag.to_string());
+            }
+        }
+    }
+    tags
+}
+
 /// Parse an HTML file, extracting script and stylesheet references as imports.
 #[cfg(test)]
 pub(crate) fn parse_html_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
     parse_html_to_module_with_complexity(file_id, source, content_hash, false)
 }
 
-/// Parse an HTML file and optionally compute Angular template complexity.
-pub(crate) fn parse_html_to_module_with_complexity(
-    file_id: FileId,
-    source: &str,
-    content_hash: u64,
-    need_complexity: bool,
-) -> ModuleInfo {
-    let parsed_suppressions = crate::suppress::parse_suppressions_from_source(source);
+/// Computed building blocks for an HTML [`ModuleInfo`], gathered before the
+/// (irreducible) struct literal is assembled.
+struct HtmlModuleParts {
+    imports: Vec<ImportInfo>,
+    member_accesses: Vec<MemberAccess>,
+    semantic_facts: Vec<SemanticFact>,
+    security_sinks: Vec<plow_types::extract::SinkSite>,
+    angular_used_selectors: Vec<String>,
+    has_dynamic_component_render: bool,
+    complexity: Vec<plow_types::extract::FunctionComplexity>,
+}
 
+/// Collect the asset-reference imports, Angular template member accesses /
+/// security sinks / used selectors, and (optionally) template complexity for an
+/// HTML source.
+fn collect_html_module_parts(source: &str, need_complexity: bool) -> HtmlModuleParts {
     let mut imports: Vec<ImportInfo> = collect_asset_refs(source)
         .into_iter()
         .map(|raw| ImportInfo {
@@ -153,14 +188,22 @@ pub(crate) fn parse_html_to_module_with_complexity(
         member_accesses: template_member_accesses,
         security_sinks,
     } = angular::collect_angular_template_refs(source);
-    let mut member_accesses: Vec<MemberAccess> = identifiers
-        .into_iter()
-        .map(|name| MemberAccess {
-            object: ANGULAR_TPL_SENTINEL.to_string(),
-            member: name,
+    let identifiers: Vec<String> = identifiers.into_iter().collect();
+    let semantic_facts: Vec<SemanticFact> = identifiers
+        .iter()
+        .cloned()
+        .map(|member| {
+            SemanticFact::AngularTemplateMemberAccess(AngularTemplateMemberAccessFact { member })
         })
         .collect();
-    member_accesses.extend(template_member_accesses);
+    let member_accesses = template_member_accesses;
+
+    // Angular external template (`templateUrl`): harvest the custom element
+    // selector tags rendered here so the Angular `unrendered-component` detector
+    // unions them into the project-wide used-selector set, and flag the
+    // `*ngComponentOutlet` dynamic-render escape hatch (project-wide abstain).
+    let angular_used_selectors = angular::collect_angular_used_selectors(source);
+    let has_dynamic_component_render = source.contains("ngComponentOutlet");
 
     let complexity = if need_complexity {
         crate::template_complexity::compute_angular_template_complexity(source)
@@ -170,6 +213,49 @@ pub(crate) fn parse_html_to_module_with_complexity(
         Vec::new()
     };
 
+    HtmlModuleParts {
+        imports,
+        member_accesses,
+        semantic_facts,
+        security_sinks,
+        angular_used_selectors,
+        has_dynamic_component_render,
+        complexity,
+    }
+}
+
+/// Parse an HTML file and optionally compute Angular template complexity.
+pub(crate) fn parse_html_to_module_with_complexity(
+    file_id: FileId,
+    source: &str,
+    content_hash: u64,
+    need_complexity: bool,
+) -> ModuleInfo {
+    let parsed_suppressions = crate::suppress::parse_suppressions_from_source(source);
+    let parts = collect_html_module_parts(source, need_complexity);
+    html_module_info(file_id, content_hash, source, parsed_suppressions, parts)
+}
+
+/// Assemble the `ModuleInfo` for an HTML file from its computed parts; all
+/// JS-level fields stay empty since HTML carries no module structure. Pure
+/// plumbing struct literal.
+fn html_module_info(
+    file_id: FileId,
+    content_hash: u64,
+    source: &str,
+    parsed_suppressions: crate::suppress::ParsedSuppressions,
+    parts: HtmlModuleParts,
+) -> ModuleInfo {
+    let HtmlModuleParts {
+        imports,
+        member_accesses,
+        semantic_facts,
+        security_sinks,
+        angular_used_selectors,
+        has_dynamic_component_render,
+        complexity,
+    } = parts;
+
     ModuleInfo {
         file_id,
         exports: Vec::new(),
@@ -178,9 +264,10 @@ pub(crate) fn parse_html_to_module_with_complexity(
         dynamic_imports: Vec::new(),
         dynamic_import_patterns: Vec::new(),
         require_calls: Vec::new(),
-        package_path_references: Vec::new(),
+        package_path_references: Box::default(),
         member_accesses,
-        whole_object_uses: Vec::new(),
+        semantic_facts: semantic_facts.into(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         content_hash,
@@ -193,6 +280,7 @@ pub(crate) fn parse_html_to_module_with_complexity(
         complexity,
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        exported_factory_returns: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
@@ -210,6 +298,7 @@ pub(crate) fn parse_html_to_module_with_complexity(
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
         misplaced_directives: Vec::new(),
+        inline_server_action_exports: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
         referenced_import_bindings: Vec::new(),
@@ -219,9 +308,32 @@ pub(crate) fn parse_html_to_module_with_complexity(
         has_define_model: false,
         has_unharvestable_props: false,
         component_emits: Vec::new(),
+        angular_inputs: Vec::new(),
+        angular_outputs: Vec::new(),
+        angular_component_selectors: Vec::new(),
+        registered_custom_elements: Vec::new(),
+        // Custom-element tags rendered in a standalone `.html` document (an app
+        // shell, demo, or dev page) feed the Lit `unrendered-component` arm's
+        // project-wide rendered-tag union, so an element rendered only from HTML
+        // (e.g. a root `<my-app>` in `index.html`) is not falsely flagged.
+        used_custom_element_tags: collect_custom_element_tags(source),
+        angular_used_selectors,
+        angular_entry_component_refs: Vec::new(),
+        has_dynamic_component_render,
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
+        has_page_data_store_whole_use: false,
+        component_functions: Vec::new(),
+        react_props: Vec::new(),
+        hook_uses: Vec::new(),
+        render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        has_dynamic_dispatch: false,
     }
 }
 
@@ -659,21 +771,31 @@ mod tests {
              <button (click)=\"onButtonClick()\">Toggle</button>",
             0,
         );
-        let names: rustc_hash::FxHashSet<&str> = info
-            .member_accesses
+        let fact_names: rustc_hash::FxHashSet<&str> = info
+            .semantic_facts
             .iter()
-            .filter(|a| a.object == ANGULAR_TPL_SENTINEL)
-            .map(|a| a.member.as_str())
+            .filter_map(|fact| {
+                if let SemanticFact::AngularTemplateMemberAccess(access) = fact {
+                    Some(access.member.as_str())
+                } else {
+                    None
+                }
+            })
             .collect();
-        assert!(names.contains("title"), "should contain 'title'");
+        assert!(fact_names.contains("title"), "should contain 'title'");
         assert!(
-            names.contains("isHighlighted"),
+            fact_names.contains("isHighlighted"),
             "should contain 'isHighlighted'"
         );
-        assert!(names.contains("greeting"), "should contain 'greeting'");
+        assert!(fact_names.contains("greeting"), "should contain 'greeting'");
         assert!(
-            names.contains("onButtonClick"),
+            fact_names.contains("onButtonClick"),
             "should contain 'onButtonClick'"
+        );
+        assert!(
+            info.member_accesses.is_empty(),
+            "Angular template refs should emit typed facts instead of member accesses: {:?}",
+            info.member_accesses
         );
     }
 

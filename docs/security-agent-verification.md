@@ -1,11 +1,13 @@
 # Security Agent Verification
 
-`plow security` is a deterministic candidate producer. It does not call a model, decide exploitability, or emit verified vulnerabilities. Use this recipe when an agent or out-of-core harness should turn raw candidates into verifier-filtered survivors.
+`plow security` is a deterministic candidate producer. It does not call a model, decide exploitability, or emit verified vulnerabilities. Use this recipe when an agent or out-of-core harness should turn raw candidates into verifier-retained survivors.
 
 The workflow uses three plow surfaces:
 
 - `plow security --format json --surface` for the candidate list and attack-surface inventory.
 - The candidate contract: plow fills `source_kind`, `sink`, `boundary`, `severity`, and reachability context; the verifier owns `impact`.
+- `plow security survivors --candidates plow-security.json --verdicts verdicts.json --format json` to render verifier-retained survivors without rewriting the raw candidate output.
+- `plow security blind-spots --format json` to group unresolved callee diagnostics into action-oriented blind-spot output.
 - The MCP `security_candidates` tool for agent edit loops that need the same JSON shape without shelling out directly.
 
 ## CLI Flow
@@ -24,7 +26,7 @@ The JSON envelope contains:
 - `unresolved_edge_files` and `unresolved_callee_sites`, the in-band blind-spot counters
 - `unresolved_callee_diagnostics`, when present, a bounded sample plus top files and reason counts for unresolved callee blind spots
 
-See [`docs/output-schema.json`](output-schema.json) for the generated plow output contract. The packet and verdict schemas below are harness-owned conventions, not fields plow emits.
+See [`docs/output-schema.json`](output-schema.json) for the generated plow output contract. The verifier packet below is a harness-owned convention, not a field plow emits. The verdict schema below is a supported CLI input contract for `plow security survivors`; plow parses it, validates it, and renders survivors, but still does not produce verifier verdicts.
 
 For each `security_findings[]` item, build a verifier packet from these fields:
 
@@ -58,6 +60,8 @@ Ask the MCP server for the same scan:
 `surface: true` forwards `--surface` and includes the top-level `attack_surface` array. `paths` forwards repeated `--file` flags and is intended for agent edit loops, where only just-edited anchors, trace hops, or source-trace hops should be returned.
 
 The `security_candidates` tool returns unverified candidates. Treat it as evidence for a verification loop, not as permission to edit code. If the repository is large, raise `PLOW_TIMEOUT_SECS` in the MCP server environment before widening scope.
+
+MCP intentionally does not run `security survivors`: that renderer joins two local files supplied by the caller and does not need repository access. Use the CLI for survivor rendering, and use MCP `security_candidates` for the read-only candidate scan inside agent edit loops.
 
 ## Verifier Packet
 
@@ -148,7 +152,26 @@ The verifier should return a compact verdict object:
 }
 ```
 
-`plow-security-verdict/v1` is also harness-owned. Reject extra prose around the JSON object so the survivor renderer can parse the verdict without model-specific cleanup.
+`plow-security-verdict/v1` is a supported input contract for `plow security survivors`. Reject extra prose around the JSON object so the survivor renderer can parse the verdict without model-specific cleanup. Plow persists `reason`, `rationale`, `confidence`, `impact`, and `fix_direction` in survivor output. `evidence_checked` and `dismissal_reason` are harness-owned audit fields today; plow accepts verdict objects that include them, but does not render those fields.
+
+The survivor renderer accepts either an array of verdict objects or this wrapper shape:
+
+```json
+{
+  "schema_version": "plow-security-verdicts/v1",
+  "verdicts": [
+    {
+      "schema_version": "plow-security-verdict/v1",
+      "finding_id": "security:...",
+      "verdict": "survivor",
+      "rationale": "The request query value reaches execSync without validation.",
+      "impact": "Command injection through the id query parameter."
+    }
+  ]
+}
+```
+
+The renderer rejects unknown verdict values, duplicate `finding_id` values, unsupported schema versions, a wrapper `verdicts` field that is not an array, and verdicts that do not match any candidate in the `--candidates` file.
 
 Allowed `verdict` values:
 
@@ -171,7 +194,18 @@ For `dismissed`, set `impact` to `null` and fill `dismissal_reason`. For `surviv
 
 ## Rendering Survivors
 
-After verification, render only candidates with `verdict: "survivor"` and, optionally, `needs-human-review` when a human triage queue wants ambiguous cases. Carry through:
+After verification, run the survivor renderer:
+
+```bash
+plow security survivors \
+  --candidates plow-security.json \
+  --verdicts verdicts.json \
+  --format json
+```
+
+The renderer emits `kind: "security-survivors"` with `survivors` and `needs_human_review` objects keyed by `finding_id`, plus `summary.unverdicted` for candidates with no matching verdict. Human output says "verifier-retained candidate" and keeps the boundary clear: plow did not prove a vulnerability. In CI, add `--require-verdict-for-each-candidate` so an incomplete verdict file exits 2 instead of silently rendering a partial review.
+
+Carry through:
 
 - `finding_id`
 - `path`, `line`, and `col`
@@ -181,6 +215,16 @@ After verification, render only candidates with `verdict: "survivor"` and, optio
 - verifier `impact`, `reason`, and `fix_direction`
 
 Do not rewrite plow's original JSON with verdict fields. Store verifier output beside it, keyed by `finding_id`, so reruns can correlate after a rebase without changing the plow contract.
+
+## Rendering Blind Spots
+
+Use blind-spot output when a verifier queue needs to understand where plow may have missed candidates behind dynamic callees:
+
+```bash
+plow security blind-spots --format json
+```
+
+The renderer emits `kind: "security-blind-spots"` with aggregate counts and grouped samples by unresolved reason, expression kind, file, and suggested next action. It accepts `--file <PATH>` either before or after `blind-spots`, matching the parent `plow security --file <PATH>` scope. It is derived from existing bounded diagnostics. A non-zero result is not a finding by itself, but it is not a clean bill either.
 
 ## Quality Caveats
 

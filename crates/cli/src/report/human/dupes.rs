@@ -3,13 +3,15 @@ use std::path::Path;
 use std::time::Duration;
 
 use colored::Colorize;
-use plow_core::duplicates::{CloneFamily, CloneFingerprintSet, CloneGroup, DuplicationReport};
+use plow_api::{
+    AttributedCloneGroupFinding, AttributedInstance, DuplicationGroup, DuplicationGrouping,
+};
+use plow_engine::CloneFingerprintSet;
+use plow_types::duplicates::{CloneFamily, CloneGroup, DuplicationReport};
 
 use super::{
     MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, split_dir_filename, thousands,
 };
-use crate::output_dupes::AttributedCloneGroupFinding;
-use crate::report::dupes_grouping::{AttributedInstance, DuplicationGroup, DuplicationGrouping};
 
 /// Docs base URL for duplication explanations.
 pub(super) const DOCS_DUPLICATION: &str = "https://docs.genesis-plow.dev/explanations/duplication";
@@ -55,32 +57,37 @@ pub(in crate::report) fn print_duplication_human(
         outln!("{line}");
     }
 
-    let stats = &report.stats;
     if !quiet {
+        print_duplication_stats(report, elapsed);
+    }
+}
+
+/// Prints the duplication failure stats line and the high-rate mirrored-dir note.
+fn print_duplication_stats(report: &DuplicationReport, elapsed: Duration) {
+    let stats = &report.stats;
+    eprintln!(
+        "{}",
+        format!(
+            "\u{2717} {} lines ({:.1}%) duplicated across {} file{} ({:.2}s)",
+            thousands(stats.duplicated_lines),
+            stats.duplication_percentage,
+            stats.files_with_clones,
+            if stats.files_with_clones == 1 {
+                ""
+            } else {
+                "s"
+            },
+            elapsed.as_secs_f64(),
+        )
+        .red()
+        .bold()
+    );
+    if stats.duplication_percentage > 80.0 {
         eprintln!(
-            "{}",
-            format!(
-                "\u{2717} {} lines ({:.1}%) duplicated across {} file{} ({:.2}s)",
-                thousands(stats.duplicated_lines),
-                stats.duplication_percentage,
-                stats.files_with_clones,
-                if stats.files_with_clones == 1 {
-                    ""
-                } else {
-                    "s"
-                },
-                elapsed.as_secs_f64(),
-            )
-            .red()
-            .bold()
+            "  {}",
+            "Note: rates above 80% often indicate mirrored or generated directories \u{2014} consider ignorePatterns"
+                .dimmed()
         );
-        if stats.duplication_percentage > 80.0 {
-            eprintln!(
-                "  {}",
-                "Note: rates above 80% often indicate mirrored or generated directories \u{2014} consider ignorePatterns"
-                    .dimmed()
-            );
-        }
     }
 }
 
@@ -353,17 +360,62 @@ pub(super) struct MirroredDirs {
 ///
 /// Minimum 3 families must share a pattern to qualify as "mirrored".
 pub(super) fn detect_mirrored_families<'a>(
-    families: &'a [plow_core::duplicates::CloneFamily],
+    families: &'a [plow_types::duplicates::CloneFamily],
     root: &Path,
 ) -> (
     Vec<MirroredDirs>,
-    Vec<&'a plow_core::duplicates::CloneFamily>,
+    Vec<&'a plow_types::duplicates::CloneFamily>,
 ) {
     const MIN_MIRROR_FAMILIES: usize = 3;
 
-    type MirrorEntry = (usize, String, usize);
-    let mut pair_map: rustc_hash::FxHashMap<(String, String), Vec<MirrorEntry>> =
-        rustc_hash::FxHashMap::default();
+    let pair_map = build_mirror_pair_map(families, root);
+
+    let mut mirrored_indices: rustc_hash::FxHashSet<usize> = rustc_hash::FxHashSet::default();
+    let mut mirrors: Vec<MirroredDirs> = Vec::new();
+
+    for ((dir_a, dir_b), entries) in &pair_map {
+        if entries.len() < MIN_MIRROR_FAMILIES {
+            continue;
+        }
+        for &(idx, _, _) in entries {
+            mirrored_indices.insert(idx);
+        }
+        let total_lines: usize = entries.iter().map(|&(_, _, lines)| lines).sum();
+        let mut files: Vec<String> = entries.iter().map(|(_, f, _)| f.clone()).collect();
+        files.sort();
+        let file_count = files.len();
+        mirrors.push(MirroredDirs {
+            dir_a: dir_a.clone(),
+            dir_b: dir_b.clone(),
+            files,
+            file_count,
+            total_lines,
+        });
+    }
+
+    mirrors.sort_by_key(|b| std::cmp::Reverse(b.total_lines));
+
+    let non_mirrored: Vec<&plow_types::duplicates::CloneFamily> = families
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| !mirrored_indices.contains(idx))
+        .map(|(_, f)| f)
+        .collect();
+
+    (mirrors, non_mirrored)
+}
+
+/// Directory-pair key -> the two-file clone families (family index, filename,
+/// instance count) sharing one filename across both directories.
+type MirrorPairMap = rustc_hash::FxHashMap<(String, String), Vec<(usize, String, usize)>>;
+
+/// Map normalized directory-pair keys to the two-file clone families that share
+/// the same filename across both directories (candidates for mirror detection).
+fn build_mirror_pair_map(
+    families: &[plow_types::duplicates::CloneFamily],
+    root: &Path,
+) -> MirrorPairMap {
+    let mut pair_map: MirrorPairMap = rustc_hash::FxHashMap::default();
 
     for (idx, family) in families.iter().enumerate() {
         if family.files.len() != 2 {
@@ -392,39 +444,7 @@ pub(super) fn detect_mirrored_families<'a>(
         ));
     }
 
-    let mut mirrored_indices: rustc_hash::FxHashSet<usize> = rustc_hash::FxHashSet::default();
-    let mut mirrors: Vec<MirroredDirs> = Vec::new();
-
-    for ((dir_a, dir_b), entries) in &pair_map {
-        if entries.len() < MIN_MIRROR_FAMILIES {
-            continue;
-        }
-        for &(idx, _, _) in entries {
-            mirrored_indices.insert(idx);
-        }
-        let total_lines: usize = entries.iter().map(|&(_, _, lines)| lines).sum();
-        let mut files: Vec<String> = entries.iter().map(|(_, f, _)| f.clone()).collect();
-        files.sort();
-        let file_count = files.len();
-        mirrors.push(MirroredDirs {
-            dir_a: dir_a.clone(),
-            dir_b: dir_b.clone(),
-            files,
-            file_count,
-            total_lines,
-        });
-    }
-
-    mirrors.sort_by_key(|b| std::cmp::Reverse(b.total_lines));
-
-    let non_mirrored: Vec<&plow_core::duplicates::CloneFamily> = families
-        .iter()
-        .enumerate()
-        .filter(|(idx, _)| !mirrored_indices.contains(idx))
-        .map(|(_, f)| f)
-        .collect();
-
-    (mirrors, non_mirrored)
+    pair_map
 }
 
 /// Print a concise duplication summary showing only aggregate counts.
@@ -675,7 +695,7 @@ fn print_grouped_duplication_footer(
 mod tests {
     use super::super::plain;
     use super::*;
-    use plow_core::duplicates::{
+    use plow_types::duplicates::{
         CloneFamily, CloneGroup, CloneInstance, DuplicationStats, RefactoringKind,
         RefactoringSuggestion,
     };

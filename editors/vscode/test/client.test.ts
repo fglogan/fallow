@@ -20,6 +20,7 @@ const mockBinaryResolution = vi.hoisted(() => ({
   localBinary: "/mock/plow-lsp" as string | null,
   pathBinary: null as string | null,
   installedBinary: null as string | null,
+  configuredBinary: null as string | null,
 }));
 
 const mockWorkspace = vi.hoisted(() => ({
@@ -57,7 +58,7 @@ vi.mock("vscode", () => ({
   },
 }));
 
-vi.mock("vscode-languageclient/node.js", () => ({
+vi.mock("vscode-languageclient/node", () => ({
   LanguageClient: class {
     state = 2;
     private stateListeners: Array<(event: { newState: number }) => void> = [];
@@ -104,6 +105,7 @@ vi.mock("vscode-languageclient/node.js", () => ({
 vi.mock("../src/binary-utils.js", () => ({
   findLocalBinary: () => mockBinaryResolution.localBinary,
   findBinaryInPath: () => mockBinaryResolution.pathBinary,
+  resolveConfiguredBinaryPath: (configured: string) => mockBinaryResolution.configuredBinary ?? configured,
 }));
 
 vi.mock("../src/download.js", () => ({
@@ -175,6 +177,7 @@ beforeEach(() => {
   mockBinaryResolution.localBinary = "/mock/plow-lsp";
   mockBinaryResolution.pathBinary = null;
   mockBinaryResolution.installedBinary = null;
+  mockBinaryResolution.configuredBinary = null;
   mockLanguageClient.instances = [];
   mockLanguageClient.startError = null;
   mockWorkspace.textDocuments = [];
@@ -259,9 +262,7 @@ describe("loadDiagnosticCategories", () => {
     const client = await startClient({} as never, outputChannel() as never, filter as never);
 
     expect(client).not.toBeNull();
-    expect(filter.updateBaselineMutedCategories).toHaveBeenCalledWith(
-      new Set(["future-rule"]),
-    );
+    expect(filter.updateBaselineMutedCategories).toHaveBeenCalledWith(new Set(["future-rule"]));
     // attachClient receives an adapter (not the raw client): a lazy
     // `diagnostics` getter delegating to the push collection plus a
     // `refreshPullDiagnostics` hook that re-pulls open documents on a mute
@@ -449,9 +450,7 @@ describe("requestServerDiagnosticRefresh", () => {
     const sendRequest = vi.fn(async () => {
       throw new Error("Unhandled method plow/refreshDiagnostics");
     });
-    await expect(
-      requestServerDiagnosticRefresh({ sendRequest } as never),
-    ).resolves.toBeUndefined();
+    await expect(requestServerDiagnosticRefresh({ sendRequest } as never)).resolves.toBeUndefined();
     expect(sendRequest).toHaveBeenCalledWith("plow/refreshDiagnostics");
   });
 });

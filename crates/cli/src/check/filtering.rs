@@ -15,129 +15,10 @@ use crate::error::emit_error;
 /// Any issue whose path starts with one of the roots passes; dependency-level
 /// issues are scoped to the matching workspaces' own `package.json` files.
 pub fn filter_to_workspaces(
-    results: &mut plow_core::results::AnalysisResults,
+    results: &mut plow_types::results::AnalysisResults,
     ws_roots: &[PathBuf],
 ) {
-    let any_under = |p: &Path| ws_roots.iter().any(|r| p.starts_with(r));
-    let pkg_jsons: Vec<PathBuf> = ws_roots.iter().map(|r| r.join("package.json")).collect();
-    let in_pkg_jsons = |p: &Path| pkg_jsons.iter().any(|pkg| p == pkg);
-
-    results.unused_files.retain(|f| any_under(&f.file.path));
-    results.unused_exports.retain(|e| any_under(&e.export.path));
-    results.unused_types.retain(|e| any_under(&e.export.path));
-    results
-        .private_type_leaks
-        .retain(|e| any_under(&e.leak.path));
-    results
-        .unused_enum_members
-        .retain(|m| any_under(&m.member.path));
-    results
-        .unused_class_members
-        .retain(|m| any_under(&m.member.path));
-    results
-        .unused_store_members
-        .retain(|m| any_under(&m.member.path));
-    results
-        .unprovided_injects
-        .retain(|f| any_under(&f.inject.path));
-    results
-        .unrendered_components
-        .retain(|c| any_under(&c.component.path));
-    results
-        .unused_component_props
-        .retain(|p| any_under(&p.prop.path));
-    results
-        .unused_component_emits
-        .retain(|e| any_under(&e.emit.path));
-    results
-        .unused_server_actions
-        .retain(|a| any_under(&a.action.path));
-    results
-        .unresolved_imports
-        .retain(|i| any_under(&i.import.path));
-
-    results
-        .unused_dependencies
-        .retain(|d| in_pkg_jsons(&d.dep.path));
-    results
-        .unused_dev_dependencies
-        .retain(|d| in_pkg_jsons(&d.dep.path));
-    results
-        .unused_optional_dependencies
-        .retain(|d| in_pkg_jsons(&d.dep.path));
-    results
-        .type_only_dependencies
-        .retain(|d| in_pkg_jsons(&d.dep.path));
-    results
-        .test_only_dependencies
-        .retain(|d| in_pkg_jsons(&d.dep.path));
-
-    results
-        .unlisted_dependencies
-        .retain(|d| d.dep.imported_from.iter().any(|s| any_under(&s.path)));
-
-    for dup in &mut results.duplicate_exports {
-        dup.export.locations.retain(|loc| any_under(&loc.path));
-    }
-    results
-        .duplicate_exports
-        .retain(|d| d.export.locations.len() >= 2);
-
-    results
-        .circular_dependencies
-        .retain(|c| c.cycle.files.iter().any(|f| any_under(f)));
-
-    results
-        .re_export_cycles
-        .retain(|c| c.cycle.files.iter().any(|f| any_under(f)));
-
-    results
-        .boundary_violations
-        .retain(|v| any_under(&v.violation.from_path));
-    results
-        .boundary_coverage_violations
-        .retain(|v| any_under(&v.violation.path));
-    results
-        .boundary_call_violations
-        .retain(|v| any_under(&v.violation.path));
-    results
-        .policy_violations
-        .retain(|v| any_under(&v.violation.path));
-
-    results.stale_suppressions.retain(|s| any_under(&s.path));
-
-    results.security_findings.retain(|f| any_under(&f.path));
-    results
-        .security_unresolved_callee_diagnostics
-        .retain(|d| any_under(&d.path));
-
-    results.unused_catalog_entries.clear();
-    results.empty_catalog_groups.clear();
-    results
-        .unresolved_catalog_references
-        .retain(|r| any_under(&r.reference.path));
-    results.unused_dependency_overrides.clear();
-    results.misconfigured_dependency_overrides.clear();
-
-    results
-        .invalid_client_exports
-        .retain(|e| any_under(&e.export.path));
-
-    results
-        .mixed_client_server_barrels
-        .retain(|b| any_under(&b.barrel.path));
-
-    results
-        .misplaced_directives
-        .retain(|d| any_under(&d.directive_site.path));
-
-    results
-        .route_collisions
-        .retain(|c| any_under(&c.collision.path));
-
-    results
-        .dynamic_segment_name_conflicts
-        .retain(|c| any_under(&c.conflict.path));
+    plow_engine::filter_to_workspaces(results, ws_roots);
 }
 
 /// Resolve `--workspace <patterns...>` to a set of workspace roots, or exit with
@@ -183,31 +64,7 @@ pub fn resolve_workspace_filters(
 
     let (positive, negative) = split_patterns(patterns);
 
-    let mut matched: FxHashSet<usize> = FxHashSet::default();
-    let mut unmatched: Vec<String> = Vec::new();
-
-    if positive.is_empty() {
-        matched.extend(0..workspaces.len());
-    } else {
-        for pat in &positive {
-            let hits = find_matches(pat, &workspaces, &rel_paths, output)?;
-            if hits.is_empty() {
-                unmatched.push(pat.to_string());
-            }
-            matched.extend(hits);
-        }
-    }
-
-    if !unmatched.is_empty() {
-        let quoted: Vec<String> = unmatched.iter().map(|p| format!("'{p}'")).collect();
-        let available = format_available_workspaces(&workspaces);
-        let msg = format!(
-            "--workspace: no workspaces matched pattern{}: {}. Available: {available}",
-            if unmatched.len() == 1 { "" } else { "s" },
-            quoted.join(", "),
-        );
-        return Err(emit_error(&msg, 2, output));
-    }
+    let mut matched = match_positive_patterns(&positive, &workspaces, &rel_paths, output)?;
 
     for pat in &negative {
         let hits = find_matches(pat, &workspaces, &rel_paths, output)?;
@@ -217,25 +74,7 @@ pub fn resolve_workspace_filters(
     }
 
     if matched.is_empty() {
-        let include_desc = if positive.is_empty() {
-            "<all>".to_owned()
-        } else {
-            positive
-                .iter()
-                .map(|p| format!("'{p}'"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        let exclude_desc = negative
-            .iter()
-            .map(|p| format!("'{p}'"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let msg = format!(
-            "--workspace: all workspaces were excluded by the filter. \
-             Included: {include_desc}. Excluded: {exclude_desc}."
-        );
-        return Err(emit_error(&msg, 2, output));
+        return Err(error_all_excluded(&positive, &negative, output));
     }
 
     let mut roots: Vec<PathBuf> = matched
@@ -244,6 +83,68 @@ pub fn resolve_workspace_filters(
         .collect();
     roots.sort();
     Ok(roots)
+}
+
+/// Resolve the positive `--workspace` patterns to a set of workspace indices.
+/// An empty positive set matches every workspace. Errors (exit 2) if any
+/// pattern matched nothing.
+fn match_positive_patterns(
+    positive: &[&str],
+    workspaces: &[WorkspaceInfo],
+    rel_paths: &[String],
+    output: OutputFormat,
+) -> Result<FxHashSet<usize>, ExitCode> {
+    let mut matched: FxHashSet<usize> = FxHashSet::default();
+    let mut unmatched: Vec<String> = Vec::new();
+
+    if positive.is_empty() {
+        matched.extend(0..workspaces.len());
+    } else {
+        for pat in positive {
+            let hits = find_matches(pat, workspaces, rel_paths, output)?;
+            if hits.is_empty() {
+                unmatched.push((*pat).to_string());
+            }
+            matched.extend(hits);
+        }
+    }
+
+    if !unmatched.is_empty() {
+        let quoted: Vec<String> = unmatched.iter().map(|p| format!("'{p}'")).collect();
+        let available = format_available_workspaces(workspaces);
+        let msg = format!(
+            "--workspace: no workspaces matched pattern{}: {}. Available: {available}",
+            if unmatched.len() == 1 { "" } else { "s" },
+            quoted.join(", "),
+        );
+        return Err(emit_error(&msg, 2, output));
+    }
+
+    Ok(matched)
+}
+
+/// Build the exit-2 error for when every workspace was removed by negation,
+/// describing both the included and excluded patterns.
+fn error_all_excluded(positive: &[&str], negative: &[&str], output: OutputFormat) -> ExitCode {
+    let include_desc = if positive.is_empty() {
+        "<all>".to_owned()
+    } else {
+        positive
+            .iter()
+            .map(|p| format!("'{p}'"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let exclude_desc = negative
+        .iter()
+        .map(|p| format!("'{p}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let msg = format!(
+        "--workspace: all workspaces were excluded by the filter. \
+         Included: {include_desc}. Excluded: {exclude_desc}."
+    );
+    emit_error(&msg, 2, output)
 }
 
 /// Format the workspace list for inclusion in error messages. Caps the
@@ -334,7 +235,7 @@ fn find_matches(
     Ok(hits)
 }
 
-pub use plow_core::changed_files::{
+pub use plow_engine::{
     filter_results_by_changed_files as filter_changed_files, get_changed_files,
     try_get_changed_files,
 };
@@ -360,7 +261,7 @@ pub use plow_core::changed_files::{
 /// escape), the finding is RETAINED rather than silently dropped: an
 /// unfilterable path is better surfaced than silently hidden.
 pub fn filter_results_by_diff(
-    results: &mut plow_core::results::AnalysisResults,
+    results: &mut plow_types::results::AnalysisResults,
     diff_index: &crate::report::ci::diff_filter::DiffIndex,
     root: &Path,
 ) {
@@ -381,6 +282,18 @@ pub fn filter_results_by_diff(
         }
     };
 
+    filter_diff_source_findings(results, &touches_file, &line_in_diff);
+    filter_diff_security_findings(results, &touches_file, &line_in_diff);
+    filter_diff_dependency_findings(results, &line_in_diff);
+    filter_diff_graph_findings(results, &touches_file, &line_in_diff);
+    filter_diff_framework_findings(results, &line_in_diff);
+}
+
+fn filter_diff_source_findings(
+    results: &mut plow_types::results::AnalysisResults,
+    touches_file: &dyn Fn(&Path) -> bool,
+    line_in_diff: &dyn Fn(&Path, u32) -> bool,
+) {
     results.unused_files.retain(|f| touches_file(&f.file.path));
 
     results
@@ -414,16 +327,35 @@ pub fn filter_results_by_diff(
         .unused_component_emits
         .retain(|e| line_in_diff(&e.emit.path, e.emit.line));
     results
+        .unused_component_inputs
+        .retain(|i| line_in_diff(&i.input.path, i.input.line));
+    results
+        .unused_component_outputs
+        .retain(|o| line_in_diff(&o.output.path, o.output.line));
+    results
+        .unused_svelte_events
+        .retain(|e| line_in_diff(&e.event.path, e.event.line));
+    results
         .unused_server_actions
         .retain(|a| line_in_diff(&a.action.path, a.action.line));
     results
+        .unused_load_data_keys
+        .retain(|k| line_in_diff(&k.key.path, k.key.line));
+    results
         .unresolved_imports
         .retain(|i| line_in_diff(&i.import.path, i.import.line));
+}
+
+fn filter_diff_security_findings(
+    results: &mut plow_types::results::AnalysisResults,
+    touches_file: &dyn Fn(&Path) -> bool,
+    line_in_diff: &dyn Fn(&Path, u32) -> bool,
+) {
     results.security_findings.retain(|f| {
         line_in_diff(&f.path, f.line)
             || f.trace.iter().any(|hop| {
                 line_in_diff(&hop.path, hop.line)
-                    || (matches!(hop.role, plow_core::results::TraceHopRole::SecretSource)
+                    || (matches!(hop.role, plow_types::results::TraceHopRole::SecretSource)
                         && touches_file(&hop.path))
             })
             || f.reachability.as_ref().is_some_and(|reachability| {
@@ -441,7 +373,12 @@ pub fn filter_results_by_diff(
     results
         .security_unresolved_callee_diagnostics
         .retain(|d| line_in_diff(&d.path, d.line));
+}
 
+fn filter_diff_dependency_findings(
+    results: &mut plow_types::results::AnalysisResults,
+    line_in_diff: &dyn Fn(&Path, u32) -> bool,
+) {
     for unlisted in &mut results.unlisted_dependencies {
         unlisted
             .dep
@@ -451,7 +388,13 @@ pub fn filter_results_by_diff(
     results
         .unlisted_dependencies
         .retain(|d| !d.dep.imported_from.is_empty());
+}
 
+fn filter_diff_graph_findings(
+    results: &mut plow_types::results::AnalysisResults,
+    touches_file: &dyn Fn(&Path) -> bool,
+    line_in_diff: &dyn Fn(&Path, u32) -> bool,
+) {
     results.duplicate_exports.retain(|d| {
         d.export
             .locations
@@ -474,7 +417,12 @@ pub fn filter_results_by_diff(
     results
         .stale_suppressions
         .retain(|s| line_in_diff(&s.path, s.line));
+}
 
+fn filter_diff_framework_findings(
+    results: &mut plow_types::results::AnalysisResults,
+    line_in_diff: &dyn Fn(&Path, u32) -> bool,
+) {
     results
         .invalid_client_exports
         .retain(|e| line_in_diff(&e.export.path, e.export.line));
@@ -520,12 +468,12 @@ pub fn filter_results_by_diff(
 /// (`line_in_diff` returns `true` for them): a candidate the gate cannot prove is
 /// old fails conservatively, the safe direction for a security gate.
 pub fn retain_gate_new(
-    results: &mut plow_core::results::AnalysisResults,
+    results: &mut plow_types::results::AnalysisResults,
     diff_index: &crate::report::ci::diff_filter::DiffIndex,
     root: &Path,
 ) {
     use crate::report::ci::diff_filter::relative_to_diff_path;
-    use plow_core::results::TraceHopRole;
+    use plow_types::results::TraceHopRole;
 
     let line_in_diff = |path: &Path, line: u32| -> bool {
         match relative_to_diff_path(path, root) {
@@ -649,9 +597,10 @@ pub fn resolve_workspace_scope(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plow_core::extract::MemberKind;
-    use plow_core::results::*;
+    use plow_types::extract::MemberKind;
     use plow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
+    use plow_types::output_dead_code::*;
+    use plow_types::results::*;
     use plow_types::results::{SecurityReachability, SecuritySeverity};
     use std::path::PathBuf;
 

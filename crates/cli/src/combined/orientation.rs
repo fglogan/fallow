@@ -71,7 +71,7 @@ impl OrientationHeader<'_> {
         }
     }
 
-    fn vital_sign_parts(vs: &crate::health_types::VitalSigns) -> Vec<String> {
+    fn vital_sign_parts(vs: &plow_output::VitalSigns) -> Vec<String> {
         let mut parts = Vec::new();
         Self::push_dead_code_parts(vs, &mut parts);
         Self::push_maintainability_part(vs, &mut parts);
@@ -79,7 +79,7 @@ impl OrientationHeader<'_> {
         parts
     }
 
-    fn push_dead_code_parts(vs: &crate::health_types::VitalSigns, parts: &mut Vec<String>) {
+    fn push_dead_code_parts(vs: &plow_output::VitalSigns, parts: &mut Vec<String>) {
         if let Some(dfp) = vs.dead_file_pct {
             if let Some(ref c) = vs.counts {
                 parts.push(format!(
@@ -102,7 +102,7 @@ impl OrientationHeader<'_> {
         }
     }
 
-    fn push_maintainability_part(vs: &crate::health_types::VitalSigns, parts: &mut Vec<String>) {
+    fn push_maintainability_part(vs: &plow_output::VitalSigns, parts: &mut Vec<String>) {
         if let Some(mi) = vs.maintainability_avg {
             let label = if mi >= 85.0 {
                 "good"
@@ -115,7 +115,7 @@ impl OrientationHeader<'_> {
         }
     }
 
-    fn push_risk_parts(vs: &crate::health_types::VitalSigns, parts: &mut Vec<String>) {
+    fn push_risk_parts(vs: &plow_output::VitalSigns, parts: &mut Vec<String>) {
         if let Some(hc) = vs.hotspot_count
             && hc > 0
         {
@@ -271,7 +271,7 @@ pub(super) fn is_test_path(path: &std::path::Path) -> bool {
 /// Shows a dimmed informational line so users can verify that plow found the
 /// right entry points. When zero entry points are detected, emits a warning
 /// with a remediation command.
-pub fn print_entry_point_summary(results: &plow_core::results::AnalysisResults) {
+pub fn print_entry_point_summary(results: &plow_types::results::AnalysisResults) {
     let Some(ref summary) = results.entry_point_summary else {
         return;
     };

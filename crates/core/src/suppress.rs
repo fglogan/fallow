@@ -4,7 +4,8 @@ use plow_config::{ResolvedConfig, RulesConfig, Severity};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 pub use plow_types::suppress::{
-    IssueKind, PolicyRuleSuppression, Suppression, UnknownSuppressionKind, issue_kind_to_kebab,
+    IssueKind, PolicyRuleSuppression, Suppression, UnknownSuppressionKind, is_file_suppressed,
+    is_suppressed, issue_kind_to_kebab,
 };
 
 pub use plow_extract::suppress::parse_suppressions_from_source;
@@ -70,7 +71,14 @@ fn severity_for_kind(rules: &RulesConfig, kind: IssueKind) -> Severity {
         IssueKind::UnrenderedComponent => rules.unrendered_components,
         IssueKind::UnusedComponentProp => rules.unused_component_props,
         IssueKind::UnusedComponentEmit => rules.unused_component_emits,
+        IssueKind::UnusedComponentInput => rules.unused_component_inputs,
+        IssueKind::UnusedComponentOutput => rules.unused_component_outputs,
+        IssueKind::UnusedSvelteEvent => rules.unused_svelte_events,
         IssueKind::UnusedServerAction => rules.unused_server_actions,
+        IssueKind::UnusedLoadDataKey => rules.unused_load_data_keys,
+        IssueKind::PropDrilling => rules.prop_drilling,
+        IssueKind::ThinWrapper => rules.thin_wrapper,
+        IssueKind::DuplicatePropShape => rules.duplicate_prop_shape,
         IssueKind::Complexity | IssueKind::CodeDuplication => Severity::Error,
     }
 }
@@ -284,52 +292,53 @@ impl<'a> SuppressionContext<'a> {
                 if used[i].load(Ordering::Relaxed) {
                     continue;
                 }
+                if let Some(entry) = stale_entry_for_suppression(
+                    config,
+                    &file_rules,
+                    path,
+                    s,
+                    &mut warned_unknown_policy_targets,
+                ) {
+                    stale.push(entry);
+                }
+            }
+        }
 
-                if let Some(kind) = s.issue_kind_target()
-                    && NON_CORE_KINDS.contains(&kind)
-                {
+        for (&file_id, unknowns) in &self.unknown_kinds {
+            let path = &graph.modules[file_id.0 as usize].path;
+            for u in *unknowns {
+                stale.push(unknown_kind_stale_entry(path, u, false));
+            }
+        }
+
+        stale
+    }
+
+    /// Collect suppression comments that are missing `-- <reason>`.
+    #[must_use]
+    pub fn find_missing_reasons(&self, graph: &ModuleGraph) -> Vec<StaleSuppression> {
+        let mut findings = Vec::new();
+        let mut seen: FxHashSet<(FileId, u32)> = FxHashSet::default();
+
+        for (&file_id, supps) in &self.by_file {
+            let path = &graph.modules[file_id.0 as usize].path;
+            for s in *supps {
+                if s.reason.is_some() || !seen.insert((file_id, s.comment_line)) {
                     continue;
                 }
 
-                if let Some(kind) = s.issue_kind_target()
-                    && severity_for_kind(&file_rules, kind) == Severity::Off
-                {
-                    continue;
-                }
-
-                if let Some(target) = s.policy_rule_target() {
-                    if file_rules.policy_violation == Severity::Off
-                        || policy_rule_is_disabled(config, target)
-                    {
-                        continue;
-                    }
-
-                    if !policy_rule_exists(config, target) {
-                        let token = target.token();
-                        let key = (path.to_string_lossy().to_string(), token.clone());
-                        if warned_unknown_policy_targets.insert(key) {
-                            tracing::warn!(
-                                "{}:{}: suppression '{}' names no loaded rule-pack rule",
-                                path.display(),
-                                s.comment_line,
-                                token
-                            );
-                        }
-                    }
-                }
-
-                let is_file_level = s.line == 0;
-                let issue_kind_str = s.target_token();
-
-                stale.push(StaleSuppression {
+                findings.push(StaleSuppression {
                     path: path.clone(),
                     line: s.comment_line,
                     col: 0,
                     origin: SuppressionOrigin::Comment {
-                        issue_kind: issue_kind_str,
-                        is_file_level,
+                        issue_kind: s.target_token(),
+                        reason: None,
+                        is_file_level: s.line == 0,
                         kind_known: true,
                     },
+                    missing_reason: true,
+                    actions: StaleSuppression::actions_for(true),
                 });
             }
         }
@@ -337,20 +346,27 @@ impl<'a> SuppressionContext<'a> {
         for (&file_id, unknowns) in &self.unknown_kinds {
             let path = &graph.modules[file_id.0 as usize].path;
             for u in *unknowns {
-                stale.push(StaleSuppression {
+                if u.reason.is_some() || !seen.insert((file_id, u.comment_line)) {
+                    continue;
+                }
+
+                findings.push(StaleSuppression {
                     path: path.clone(),
                     line: u.comment_line,
                     col: 0,
                     origin: SuppressionOrigin::Comment {
                         issue_kind: Some(u.token.clone()),
+                        reason: None,
                         is_file_level: u.is_file_level,
                         kind_known: false,
                     },
+                    missing_reason: true,
+                    actions: StaleSuppression::actions_for(true),
                 });
             }
         }
 
-        stale
+        findings
     }
 
     /// Collect every suppression comment present in the analyzed files this run,
@@ -382,6 +398,7 @@ impl<'a> SuppressionContext<'a> {
                     path: path.clone(),
                     kind: s.target_token(),
                     is_file_level: s.line == 0,
+                    reason: s.reason.clone(),
                 });
             }
         }
@@ -389,25 +406,87 @@ impl<'a> SuppressionContext<'a> {
     }
 }
 
-/// Check if a specific issue at a given line should be suppressed.
+/// Build the [`StaleSuppression`] entry for an unconsumed suppression, or `None`
+/// if the suppression is exempt (non-core kind, disabled rule, disabled policy).
 ///
-/// Standalone predicate for callers outside `find_dead_code_full`
-/// (e.g., CLI health/flags commands) that don't need tracking.
-#[must_use]
-pub fn is_suppressed(suppressions: &[Suppression], line: u32, kind: IssueKind) -> bool {
-    suppressions
-        .iter()
-        .any(|s| s.matches_issue_kind(line, kind))
+/// Records unknown policy-rule targets in `warned` and emits a one-time warning.
+fn stale_entry_for_suppression(
+    config: &ResolvedConfig,
+    file_rules: &RulesConfig,
+    path: &std::path::Path,
+    s: &Suppression,
+    warned: &mut FxHashSet<(String, String)>,
+) -> Option<StaleSuppression> {
+    if let Some(kind) = s.issue_kind_target()
+        && NON_CORE_KINDS.contains(&kind)
+    {
+        return None;
+    }
+
+    if let Some(kind) = s.issue_kind_target()
+        && severity_for_kind(file_rules, kind) == Severity::Off
+    {
+        return None;
+    }
+
+    if let Some(target) = s.policy_rule_target() {
+        if file_rules.policy_violation == Severity::Off || policy_rule_is_disabled(config, target) {
+            return None;
+        }
+
+        if !policy_rule_exists(config, target) {
+            let token = target.token();
+            let key = (path.to_string_lossy().to_string(), token.clone());
+            if warned.insert(key) {
+                tracing::warn!(
+                    "{}:{}: suppression '{}' names no loaded rule-pack rule",
+                    path.display(),
+                    s.comment_line,
+                    token
+                );
+            }
+        }
+    }
+
+    Some(StaleSuppression {
+        path: path.to_path_buf(),
+        line: s.comment_line,
+        col: 0,
+        origin: SuppressionOrigin::Comment {
+            issue_kind: s.target_token(),
+            reason: s.reason.clone(),
+            is_file_level: s.line == 0,
+            kind_known: true,
+        },
+        missing_reason: false,
+        actions: StaleSuppression::actions_for(false),
+    })
 }
 
-/// Check if the entire file is suppressed (for issue types that don't have line numbers).
-///
-/// Standalone predicate for callers outside `find_dead_code_full`.
-#[must_use]
-pub fn is_file_suppressed(suppressions: &[Suppression], kind: IssueKind) -> bool {
-    suppressions
-        .iter()
-        .any(|s| s.line == 0 && s.matches_issue_kind(0, kind))
+/// Build a [`StaleSuppression`] entry for a suppression token that parsed to no
+/// known [`IssueKind`]. `missing_reason` controls the corresponding flags.
+fn unknown_kind_stale_entry(
+    path: &std::path::Path,
+    u: &UnknownSuppressionKind,
+    missing_reason: bool,
+) -> StaleSuppression {
+    StaleSuppression {
+        path: path.to_path_buf(),
+        line: u.comment_line,
+        col: 0,
+        origin: SuppressionOrigin::Comment {
+            issue_kind: Some(u.token.clone()),
+            reason: if missing_reason {
+                None
+            } else {
+                u.reason.clone()
+            },
+            is_file_level: u.is_file_level,
+            kind_known: false,
+        },
+        missing_reason,
+        actions: StaleSuppression::actions_for(missing_reason),
+    }
 }
 
 fn policy_rule_exists(config: &ResolvedConfig, target: &PolicyRuleSuppression) -> bool {
@@ -548,6 +627,13 @@ mod tests {
             IssueKind::UnusedComponentProp,
             IssueKind::UnusedComponentEmit,
             IssueKind::UnusedServerAction,
+            IssueKind::UnusedLoadDataKey,
+            IssueKind::PropDrilling,
+            IssueKind::ThinWrapper,
+            IssueKind::DuplicatePropShape,
+            IssueKind::UnusedComponentInput,
+            IssueKind::UnusedComponentOutput,
+            IssueKind::UnusedSvelteEvent,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -555,7 +641,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(41), None);
+        assert_eq!(IssueKind::from_discriminant(48), None);
     }
 
     #[test]
@@ -805,6 +891,7 @@ mod tests {
             IssueKind::DynamicSegmentNameConflict,
             IssueKind::UnrenderedComponent,
             IssueKind::UnusedServerAction,
+            IssueKind::UnusedLoadDataKey,
         ];
 
         let all_kinds = [
@@ -839,6 +926,7 @@ mod tests {
             IssueKind::DynamicSegmentNameConflict,
             IssueKind::UnrenderedComponent,
             IssueKind::UnusedServerAction,
+            IssueKind::UnusedLoadDataKey,
         ];
 
         for kind in all_kinds {

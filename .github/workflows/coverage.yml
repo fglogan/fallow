@@ -21,11 +21,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - uses: ./.github/actions/setup-rust
 
-      - uses: taiki-e/install-action@2d15d02e710b40b6332201aba6af30d595b5cd96 # cargo-llvm-cov
+      - uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2.82.2
+        with:
+          tool: cargo-llvm-cov
 
       - name: Build CLI binary for e2e tests
         run: cargo build -p plow-cli
@@ -46,6 +48,19 @@ jobs:
           ' coverage/lcov.info)
           echo "COVERAGE=$COVERAGE" >> "$GITHUB_ENV"
           echo "Coverage: $COVERAGE%"
+
+      - name: Enforce coverage floor
+        # Hard gate: fail if workspace line coverage drops below the floor.
+        # Ratcheted upward over time; raise only, never lower. Current main ~92.7%.
+        run: |
+          FLOOR=92.0
+          awk -v cov="$COVERAGE" -v floor="$FLOOR" 'BEGIN {
+            if (cov + 0 < floor + 0) {
+              printf "FAIL: coverage %.1f%% is below the floor of %.1f%%\n", cov, floor
+              exit 1
+            }
+            printf "OK: coverage %.1f%% meets the floor of %.1f%%\n", cov, floor
+          }'
 
       - name: Compute badge color
         run: |

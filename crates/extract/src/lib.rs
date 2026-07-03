@@ -20,6 +20,9 @@ pub mod astro;
 pub mod cache;
 pub(crate) mod complexity;
 pub mod css;
+pub mod css_classes;
+pub mod css_in_js;
+pub mod css_metrics;
 pub mod flags;
 pub mod glimmer;
 pub mod graphql;
@@ -27,12 +30,16 @@ pub mod html;
 pub mod iconify;
 pub mod inventory;
 pub mod mdx;
+mod module_info;
 mod parse;
 pub mod sfc;
+pub mod sfc_css;
 mod sfc_props;
 mod sfc_template;
 mod source_map;
 pub mod suppress;
+/// Tailwind CSS arbitrary-value detection.
+pub mod tailwind;
 pub(crate) mod template_complexity;
 mod template_usage;
 /// Visitor utilities for AST extraction.
@@ -46,18 +53,39 @@ use cache::CacheStore;
 use plow_types::discover::{DiscoveredFile, FileId};
 
 pub use plow_types::extract::{
-    ClassHeritageInfo, DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo,
-    ImportedName, LocalTypeDeclaration, MemberAccess, MemberInfo, MemberKind, ModuleInfo,
-    ParseResult, PublicSignatureTypeReference, ReExportInfo, RequireCallInfo, VisibilityTag,
-    compute_line_offsets,
+    AngularTemplateMemberAccessFact, AngularThisSpreadFact, ClassHeritageInfo,
+    DynamicCustomElementRenderFact, DynamicImportInfo, DynamicImportPattern, ExportInfo,
+    ExportName, FactoryCallMemberAccessFact, FactoryFnMemberAccessFact, FactoryReturnExport,
+    FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, ImportInfo, ImportedName,
+    InstanceExportBindingFact, LocalTypeDeclaration, MemberAccess, MemberInfo, MemberKind,
+    ModuleInfo, ParseResult, PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact,
+    PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact, PublicSignatureTypeReference,
+    ReExportInfo, RequireCallInfo, SemanticFact, VisibilityTag, compute_line_offsets,
 };
 
-pub use astro::extract_astro_frontmatter;
-pub use css::extract_css_module_exports;
+pub use astro::{
+    extract_astro_frontmatter, extract_astro_style_regions, extract_astro_template_regions,
+};
+pub use css::{
+    ThemeScan, ThemeTokenDef, extract_apply_tokens, extract_apply_tokens_located,
+    extract_css_module_exports, extract_css_var_reads_located, scan_theme_blocks,
+};
+pub use css_classes::{
+    MarkupClassScan, MarkupClassToken, is_edit_distance_one, is_typo_edit, scan_markup_class_tokens,
+};
+pub use css_in_js::{
+    CssInJsObjectSheets, CssInJsToken, CssInJsTokenDef, TokenConsumerHit, css_in_js_object_sheets,
+    css_in_js_token_consumers, css_in_js_token_defs, css_in_js_virtual_stylesheet,
+};
+pub use css_metrics::compute_css_analytics;
 pub use glimmer::{is_glimmer_file, strip_glimmer_templates};
 pub use mdx::extract_mdx_statements;
-pub use sfc::{extract_sfc_scripts, is_sfc_file};
-pub use sfc_template::angular::ANGULAR_TPL_SENTINEL;
+pub use sfc::{
+    SourceRegion, extract_sfc_scripts, extract_sfc_styles, extract_sfc_template_regions,
+    is_sfc_file,
+};
+pub use sfc_css::{scoped_unused_classes, sfc_virtual_stylesheet};
+pub use tailwind::{TailwindArbitraryUse, scan_tailwind_arbitrary_values};
 
 #[expect(
     clippy::expect_used,
@@ -66,80 +94,6 @@ pub use sfc_template::angular::ANGULAR_TPL_SENTINEL;
 pub(crate) fn static_regex(pattern: &str) -> regex::Regex {
     regex::Regex::new(pattern).expect("static regex pattern should compile")
 }
-
-/// Synthetic member-access object used to carry exported-instance bindings.
-///
-/// `MemberAccess { object: format!("{INSTANCE_EXPORT_SENTINEL}{export_name}"), member: target }`
-/// means the exported value named `export_name` is an instance of the local
-/// class/interface symbol named `target`.
-pub const INSTANCE_EXPORT_SENTINEL: &str = "__plow_instance_export__:";
-
-/// Synthetic member-access object prefix for typed Playwright fixtures.
-///
-/// `MemberAccess { object: format!("{PLAYWRIGHT_FIXTURE_DEF_SENTINEL}{test}:{fixture}"), member: type_name }`
-/// means the exported Playwright test object named `test` provides a fixture
-/// named `fixture` whose declared type is `type_name`.
-pub const PLAYWRIGHT_FIXTURE_DEF_SENTINEL: &str = "__plow_playwright_fixture_def__:";
-
-/// Synthetic member-access object prefix for Playwright fixture wrapper aliases.
-///
-/// `MemberAccess { object: format!("{PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL}{alias}:"), member: base }`
-/// means the exported Playwright test object named `alias` inherits fixture
-/// definitions from the exported test object named `base`.
-pub const PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL: &str = "__plow_playwright_fixture_alias__:";
-
-/// Synthetic member-access object prefix for Playwright fixture member uses.
-///
-/// `MemberAccess { object: format!("{PLAYWRIGHT_FIXTURE_USE_SENTINEL}{test}:{fixture}"), member }`
-/// means a callback passed to the Playwright test object named `test`
-/// destructures `fixture` and accesses `fixture.member`.
-pub const PLAYWRIGHT_FIXTURE_USE_SENTINEL: &str = "__plow_playwright_fixture_use__:";
-
-/// Synthetic member-access object prefix for exported Playwright fixture type aliases.
-///
-/// `MemberAccess { object: format!("{PLAYWRIGHT_FIXTURE_TYPE_SENTINEL}{alias}:{fixture_path}"), member: type_name }`
-/// means a local type alias named `alias` contains a nested fixture path whose
-/// declared type is `type_name`. The analyze layer uses this when a Playwright
-/// fixture generic imports an object type alias from another module.
-pub const PLAYWRIGHT_FIXTURE_TYPE_SENTINEL: &str = "__plow_playwright_fixture_type__:";
-
-/// Synthetic member-access object prefix for static-factory call returns.
-///
-/// `MemberAccess { object: format!("{FACTORY_CALL_SENTINEL}{callee}:{method}"), member }`
-/// means a local binding was assigned from `<callee>.<method>()` and a member
-/// is accessed on the result. The analyze layer resolves `callee` through the
-/// consumer module's imports to a class export and credits `member` on the
-/// class when the matching method carries `is_instance_returning_static`.
-/// See issue #346.
-pub const FACTORY_CALL_SENTINEL: &str = "__plow_factory_call__:";
-
-/// Synthetic member-access object prefix for fluent-builder chain credit.
-///
-/// `MemberAccess { object: format!("{FLUENT_CHAIN_SENTINEL}{callee}:{root_method}:{chain}"), member }`
-/// means a fluent chain `<callee>.<root_method>().<...chain>.<member>` was
-/// observed. `chain` is a comma-separated list of method names (empty when
-/// `member` is the first chained call after `root_method`). The analyze layer
-/// resolves `callee` to a class export, validates `root_method` has
-/// `is_instance_returning_static`, walks each `chain` segment requiring
-/// `is_self_returning` on the class, and credits `member` on the class
-/// when the chain remains on the class type. See issue #387.
-pub const FLUENT_CHAIN_SENTINEL: &str = "__plow_fluent_chain__:";
-
-/// Synthetic member-access object prefix for fluent chains rooted at a `new`
-/// expression.
-///
-/// `MemberAccess { object: format!("{FLUENT_CHAIN_NEW_SENTINEL}{class}:{chain}"), member }`
-/// means a chain `new <class>(...).<...chain>.<member>` was observed. Unlike
-/// `FLUENT_CHAIN_SENTINEL`, there is no root method: a constructor always
-/// returns an instance of `class`, so no `is_instance_returning_static` check
-/// applies. `chain` is a comma-separated list of the intermediate method names
-/// between the constructor and `member` (it always contains at least the first
-/// method, which must be `is_self_returning` to reach `member`). The analyze
-/// layer resolves `class` to a class export, requires every `chain` segment to
-/// be `is_self_returning` on the class, and credits `member` on the class.
-/// The first method directly off the constructor is credited separately via
-/// the `static_member_object_name` `NewExpression` arm. See issue #605.
-pub const FLUENT_CHAIN_NEW_SENTINEL: &str = "__plow_fluent_chain_new__:";
 
 pub use parse::parse_source_to_module;
 
@@ -174,27 +128,25 @@ pub fn parse_all_files(
     cache: Option<&CacheStore>,
     need_complexity: bool,
 ) -> ParseResult {
-    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-    let cache_hits = AtomicUsize::new(0);
-    let cache_misses = AtomicUsize::new(0);
-    let parse_cpu_nanos = AtomicU64::new(0);
-
-    let modules: Vec<ModuleInfo> = files
+    let results: Vec<ParseFileResult> = files
         .par_iter()
-        .filter_map(|file| {
-            parse_single_file_cached(
-                file,
-                cache,
-                &cache_hits,
-                &cache_misses,
-                &parse_cpu_nanos,
-                need_complexity,
-            )
-        })
+        .map(|file| parse_single_file_cached(file, cache, need_complexity))
         .collect();
 
-    let hits = cache_hits.load(Ordering::Relaxed);
-    let misses = cache_misses.load(Ordering::Relaxed);
+    let mut modules = Vec::with_capacity(results.len());
+    let mut hits = 0usize;
+    let mut misses = 0usize;
+    let mut parse_cpu_nanos = 0u64;
+
+    for result in results {
+        hits += result.cache_hits;
+        misses += result.cache_misses;
+        parse_cpu_nanos = parse_cpu_nanos.saturating_add(result.parse_cpu_nanos);
+        if let Some(module) = result.module {
+            modules.push(module);
+        }
+    }
+
     if hits > 0 || misses > 0 {
         tracing::info!(
             cache_hits = hits,
@@ -207,7 +159,43 @@ pub fn parse_all_files(
         modules,
         cache_hits: hits,
         cache_misses: misses,
-        parse_cpu_ms: parse_cpu_nanos.load(Ordering::Relaxed) as f64 / 1_000_000.0,
+        parse_cpu_ms: parse_cpu_nanos as f64 / 1_000_000.0,
+    }
+}
+
+struct ParseFileResult {
+    module: Option<ModuleInfo>,
+    cache_hits: usize,
+    cache_misses: usize,
+    parse_cpu_nanos: u64,
+}
+
+impl ParseFileResult {
+    fn cache_hit(module: ModuleInfo) -> Self {
+        Self {
+            module: Some(module),
+            cache_hits: 1,
+            cache_misses: 0,
+            parse_cpu_nanos: 0,
+        }
+    }
+
+    fn cache_miss(module: ModuleInfo, parse_cpu_nanos: u64) -> Self {
+        Self {
+            module: Some(module),
+            cache_hits: 0,
+            cache_misses: 1,
+            parse_cpu_nanos,
+        }
+    }
+
+    const fn skipped() -> Self {
+        Self {
+            module: None,
+            cache_hits: 0,
+            cache_misses: 0,
+            parse_cpu_nanos: 0,
+        }
     }
 }
 
@@ -222,23 +210,22 @@ pub fn parse_all_files(
 fn parse_single_file_cached(
     file: &DiscoveredFile,
     cache: Option<&CacheStore>,
-    cache_hits: &std::sync::atomic::AtomicUsize,
-    cache_misses: &std::sync::atomic::AtomicUsize,
-    parse_cpu_nanos: &std::sync::atomic::AtomicU64,
     need_complexity: bool,
-) -> Option<ModuleInfo> {
-    use std::sync::atomic::Ordering;
+) -> ParseFileResult {
+    let cached_by_path = cache.and_then(|store| store.get_by_path_only(&file.path));
 
-    if let Some(store) = cache
+    if let Some(cached) = cached_by_path
+        && cached.file_size == file.size_bytes
         && let Ok(metadata) = std::fs::metadata(&file.path)
+        && metadata.len() == cached.file_size
     {
-        let mt = mtime_secs(&metadata);
-        let sz = metadata.len();
-        if let Some(cached) = store.get_by_metadata(&file.path, mt, sz)
+        let fingerprint =
+            plow_types::source_fingerprint::SourceFingerprint::from_metadata(&metadata);
+        if cached.source_fingerprint() == fingerprint
+            && fingerprint.has_known_mtime()
             && (!need_complexity || !cached.complexity.is_empty())
         {
-            cache_hits.fetch_add(1, Ordering::Relaxed);
-            return Some(cache::cached_to_module_opts(
+            return ParseFileResult::cache_hit(cache::cached_to_module_opts(
                 cached,
                 file.id,
                 need_complexity,
@@ -246,40 +233,27 @@ fn parse_single_file_cached(
         }
     }
 
-    let raw = std::fs::read_to_string(&file.path).ok()?;
+    let Ok(raw) = std::fs::read_to_string(&file.path) else {
+        return ParseFileResult::skipped();
+    };
     let source = strip_bom(&raw);
     let content_hash = xxhash_rust::xxh3::xxh3_64(source.as_bytes());
 
-    if let Some(store) = cache
-        && let Some(cached) = store.get(&file.path, content_hash)
+    if let Some(cached) = cached_by_path
+        && cached.content_hash == content_hash
         && (!need_complexity || !cached.complexity.is_empty())
     {
-        cache_hits.fetch_add(1, Ordering::Relaxed);
-        return Some(cache::cached_to_module_opts(
+        return ParseFileResult::cache_hit(cache::cached_to_module_opts(
             cached,
             file.id,
             need_complexity,
         ));
     }
-    cache_misses.fetch_add(1, Ordering::Relaxed);
 
     let parse_start = std::time::Instant::now();
     let module = parse_source_to_module(file.id, &file.path, source, content_hash, need_complexity);
-    parse_cpu_nanos.fetch_add(
-        u64::try_from(parse_start.elapsed().as_nanos()).unwrap_or(u64::MAX),
-        Ordering::Relaxed,
-    );
-    Some(module)
-}
-
-/// Extract mtime (seconds since epoch) from file metadata.
-/// Returns 0 if mtime cannot be determined (pre-epoch, unsupported OS, etc.).
-fn mtime_secs(metadata: &std::fs::Metadata) -> u64 {
-    metadata
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
-        .map_or(0, |d| d.as_secs())
+    let parse_cpu_nanos = u64::try_from(parse_start.elapsed().as_nanos()).unwrap_or(u64::MAX);
+    ParseFileResult::cache_miss(module, parse_cpu_nanos)
 }
 
 /// Parse a single file and extract module information (without complexity).

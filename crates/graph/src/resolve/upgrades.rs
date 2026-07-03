@@ -34,7 +34,7 @@ use super::types::ResolveResult;
 ///
 /// Note: if two tsconfigs map the same specifier to different `FileId`s, the first one
 /// encountered (by module order = `FileId` order) wins. This is deterministic but may be
-/// imprecise for that edge case — both files get connected regardless.
+/// imprecise for that edge case , both files get connected regardless.
 pub(super) fn apply_specifier_upgrades(resolved: &mut [ResolvedModule]) {
     let mut specifier_upgrades: FxHashMap<String, ResolveResult> = FxHashMap::default();
     for module in resolved.iter() {
@@ -108,13 +108,15 @@ mod tests {
             resolved_dynamic_imports: vec![],
             resolved_dynamic_patterns: vec![],
             member_accesses: vec![],
-            whole_object_uses: vec![],
+            semantic_facts: Box::default(),
+            whole_object_uses: Box::default(),
             has_cjs_exports: false,
             has_angular_component_template_url: false,
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
+            exported_factory_returns: Box::default(),
         }
     }
 

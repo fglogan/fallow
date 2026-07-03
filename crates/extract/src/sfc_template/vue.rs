@@ -4,9 +4,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::template_usage::TemplateUsage;
 
-use super::scanners::{scan_bracket_section, scan_curly_section, scan_html_tag};
+use super::scanners::{
+    scan_bracket_section, scan_curly_section, scan_html_tag, scan_paren_section,
+};
 use super::shared::{
-    HTML_COMMENT_RE, ParsedAttr, ParsedTag, merge_component_tag_usage,
+    HTML_COMMENT_RE, ParsedAttr, ParsedTag, kebab_to_camel_case, merge_component_tag_usage,
     merge_expression_usage_with_bound_targets, merge_pattern_binding_usage,
     merge_statement_usage_with_bound_targets, parse_tag_attrs,
 };
@@ -24,28 +26,89 @@ static TEMPLATE_OPEN_RE: LazyLock<regex::Regex> =
 static VUE_FOR_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?is)^(?P<binding>.+?)\s+(?:in|of)\s+(?P<source>.+)$"));
 
+/// Matches a `v-for="..."` / `v-for='...'` attribute and captures its value.
+/// Used only by the pre-scan that types loop variables (issue #1707); the
+/// streaming scan re-parses each directive via `parse_tag_attrs` / `VUE_FOR_RE`.
+static VUE_FOR_ATTR_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r#"(?is)\bv-for\s*=\s*(?:"([^"]*)"|'([^']*)')"#));
+
+/// Matches a `<style ...>...</style>` block, capturing the body. Used to scan
+/// for Vue SFC CSS `v-bind(expr)` references, which bind a script/prop binding
+/// into CSS and otherwise look like usage nowhere in the `<template>`.
+static VUE_STYLE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    crate::static_regex(r#"(?is)<style\b(?:[^>"']|"[^"]*"|'[^']*')*>(?P<body>.*?)</style>"#)
+});
+
 #[cfg(test)]
 pub(super) fn collect_template_usage(
     source: &str,
     imported_bindings: &FxHashSet<String>,
 ) -> TemplateUsage {
-    collect_template_usage_with_bound_targets(source, imported_bindings, &FxHashMap::default())
+    collect_template_usage_with_bound_targets(
+        source,
+        imported_bindings,
+        &FxHashMap::default(),
+        &FxHashMap::default(),
+    )
 }
 
 pub(super) fn collect_template_usage_with_bound_targets(
     source: &str,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
+    iterable_types: &FxHashMap<String, String>,
 ) -> TemplateUsage {
     let comment_ranges: Vec<(usize, usize)> = HTML_COMMENT_RE
         .find_iter(source)
         .map(|m| (m.start(), m.end()))
         .collect();
+    let body_ranges = template_body_ranges(source, &comment_ranges);
+
+    // Type each `v-for` loop item to its source iterable's element class up front
+    // (issue #1707), so a member access on the item (`{{ util.getter }}`) anywhere
+    // in the streamed scan remaps onto the class via the effective bound targets.
+    // Only clone when there is something to add. Scoped to the same template body
+    // regions (comments excluded) the streaming scan covers, so a `v-for="..."`
+    // string inside `<script>` or an HTML comment is never picked up.
+    let augmented = augment_bound_targets_with_v_for_types(
+        source,
+        &body_ranges,
+        &comment_ranges,
+        iterable_types,
+        bound_targets,
+    );
+    let effective_bound_targets = augmented.as_ref().unwrap_or(bound_targets);
 
     let mut usage = TemplateUsage::default();
+    for &(body_start, body_end) in &body_ranges {
+        usage.merge(scan_template_body(
+            &source[body_start..body_end],
+            body_start,
+            imported_bindings,
+            effective_bound_targets,
+            iterable_types,
+        ));
+    }
+
+    scan_style_vbind_usage(
+        source,
+        imported_bindings,
+        effective_bound_targets,
+        &mut usage,
+    );
+
+    usage
+}
+
+/// Compute the `(start, end)` byte ranges of each root `<template>` body, mirroring
+/// the streaming scan's skip logic: nested `<template>` opens are subsumed by the
+/// enclosing root body, comment-embedded opens and self-closing `<template/>` are
+/// skipped.
+fn template_body_ranges(source: &str, comment_ranges: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
     // Cursor past the last fully-consumed root template body, so nested
-    // `<template>` opens (which `TEMPLATE_OPEN_RE` also matches) are skipped
-    // rather than rescanned as separate roots.
+    // `<template>` opens (which `TEMPLATE_OPEN_RE` also matches) are skipped rather
+    // than rescanned as separate roots.
     let mut scan_from = 0usize;
     for open in TEMPLATE_OPEN_RE.find_iter(source) {
         if open.start() < scan_from {
@@ -65,16 +128,176 @@ pub(super) fn collect_template_usage_with_bound_targets(
         let Some(body_end) = find_template_body_end(source, body_start) else {
             continue;
         };
-        usage.merge(scan_template_body(
-            &source[body_start..body_end],
-            body_start,
-            imported_bindings,
-            bound_targets,
-        ));
+        ranges.push((body_start, body_end));
         scan_from = body_end;
     }
+    ranges
+}
 
-    usage
+/// Pre-scan the template body regions for `v-for` directives and, for each whose
+/// source iterable resolves to a known element class in `iterable_types`, bind the
+/// loop item variable to that class. Returns an augmented copy of `bound_targets`
+/// only when at least one typed loop variable was found (so the common no-array
+/// case pays no clone). First-write-wins on a repeated item name across v-fors:
+/// the over-credit direction is preferred (never introduces a false positive).
+/// Matches are constrained to `body_ranges` and excluded from `comment_ranges`, so
+/// a `v-for="..."` occurring in `<script>` or inside an HTML comment is ignored.
+fn augment_bound_targets_with_v_for_types(
+    source: &str,
+    body_ranges: &[(usize, usize)],
+    comment_ranges: &[(usize, usize)],
+    iterable_types: &FxHashMap<String, String>,
+    bound_targets: &FxHashMap<String, String>,
+) -> Option<FxHashMap<String, String>> {
+    if iterable_types.is_empty() {
+        return None;
+    }
+    let mut augmented: Option<FxHashMap<String, String>> = None;
+    for caps in VUE_FOR_ATTR_RE.captures_iter(source) {
+        let Some(value) = caps.get(1).or_else(|| caps.get(2)) else {
+            continue;
+        };
+        let pos = value.start();
+        let in_template = body_ranges
+            .iter()
+            .any(|&(start, end)| pos >= start && pos < end);
+        if !in_template {
+            continue;
+        }
+        let in_comment = comment_ranges
+            .iter()
+            .any(|&(start, end)| pos >= start && pos < end);
+        if in_comment {
+            continue;
+        }
+        let Some((item, class)) = v_for_element_binding(value.as_str(), iterable_types) else {
+            continue;
+        };
+        augmented
+            .get_or_insert_with(|| bound_targets.clone())
+            .entry(item)
+            .or_insert(class);
+    }
+    augmented
+}
+
+/// Resolve a `v-for` directive value (`"(util, index) of utils"`) to
+/// `(item_name, element_class)` when the source iterable has a known element
+/// class and the loop item is a bare identifier. Destructured items
+/// (`{ id } of items`) and unknown sources yield `None`.
+fn v_for_element_binding(
+    directive_value: &str,
+    iterable_types: &FxHashMap<String, String>,
+) -> Option<(String, String)> {
+    let caps = VUE_FOR_RE.captures(directive_value)?;
+    let binding = caps.name("binding").map_or("", |m| m.as_str());
+    let source_expr = caps.name("source").map_or("", |m| m.as_str()).trim();
+    let class = iterable_types.get(source_expr)?;
+    let item = v_for_item_identifier(binding)?;
+    Some((item, class.clone()))
+}
+
+/// Extract the loop ITEM identifier from a `v-for` binding pattern. The item is
+/// the first (value) element; a destructured or non-identifier item yields
+/// `None`. A `(util, index)` alias tuple and an optional TS annotation
+/// (`(util: Util, index)`) are handled.
+fn v_for_item_identifier(binding: &str) -> Option<String> {
+    let trimmed = binding.trim();
+    let inner = trimmed
+        .strip_prefix('(')
+        .and_then(|rest| rest.strip_suffix(')'))
+        .unwrap_or(trimmed)
+        .trim();
+    // The first comma-separated element is the item. A destructured item begins
+    // with `{`/`[`, so a naive split leaves an invalid identifier that fails the
+    // identifier check below (correctly declining to type it).
+    let first = inner.split(',').next()?.trim();
+    // Drop an optional TS type annotation (`util: Util`).
+    let name = first.split(':').next().unwrap_or(first).trim();
+    is_vfor_identifier(name).then(|| name.to_string())
+}
+
+fn is_vfor_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    matches!(first, 'A'..='Z' | 'a'..='z' | '_' | '$')
+        && chars.all(|ch| matches!(ch, 'A'..='Z' | 'a'..='z' | '0'..='9' | '_' | '$'))
+}
+
+/// Scan each `<style>` block for Vue SFC CSS `v-bind(expr)` references and credit
+/// the referenced bindings, so a prop / import used only via `v-bind(accent)` is
+/// not reported as unused. Handles the identifier form `v-bind(accent)`, the
+/// member form `v-bind(props.accent)`, and the string form `v-bind('a.b')` (the
+/// quoted content is itself a JS expression). Restricted to `<style>` bodies so a
+/// template attribute `v-bind="..."` is never matched here.
+fn scan_style_vbind_usage(
+    source: &str,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    usage: &mut TemplateUsage,
+) {
+    for caps in VUE_STYLE_RE.captures_iter(source) {
+        let Some(body) = caps.name("body") else {
+            continue;
+        };
+        let body = body.as_str();
+        let bytes = body.as_bytes();
+        let mut index = 0;
+        while let Some(rel) = body[index..].find("v-bind") {
+            let start = index + rel;
+            // Require a token boundary before `v-bind` so a longer identifier
+            // (e.g. a CSS custom property containing the substring) is not matched.
+            let preceded_by_word = start
+                .checked_sub(1)
+                .is_some_and(|prev| bytes[prev].is_ascii_alphanumeric() || bytes[prev] == b'_');
+            let mut paren = start + "v-bind".len();
+            while bytes.get(paren).is_some_and(u8::is_ascii_whitespace) {
+                paren += 1;
+            }
+            if !preceded_by_word
+                && bytes.get(paren) == Some(&b'(')
+                && let Some((expr, next)) = scan_paren_section(body, paren)
+            {
+                credit_style_vbind_expr(expr.trim(), imported_bindings, bound_targets, usage);
+                index = next;
+                continue;
+            }
+            index = start + "v-bind".len();
+        }
+    }
+}
+
+/// Credit the bindings referenced by a single `v-bind(...)` style expression.
+/// A wholly-quoted argument (`v-bind('foo.bar')`) is unwrapped because Vue treats
+/// the string content as the JS expression.
+fn credit_style_vbind_expr(
+    expr: &str,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    usage: &mut TemplateUsage,
+) {
+    let inner = strip_wrapping_quotes(expr).unwrap_or(expr);
+    if inner.is_empty() {
+        return;
+    }
+    merge_expression_usage_with_bound_targets(usage, inner, imported_bindings, bound_targets, &[]);
+}
+
+/// Strip a single matching wrapping quote pair (`'x'` / `"x"`), but only when the
+/// quote does not reappear inside, so a real expression such as `'a' + b` is left
+/// intact for the analyzer.
+fn strip_wrapping_quotes(expr: &str) -> Option<&str> {
+    let bytes = expr.as_bytes();
+    let first = *bytes.first()?;
+    if (first == b'\'' || first == b'"') && bytes.len() >= 2 && *bytes.last()? == first {
+        let inner = &expr[1..expr.len() - 1];
+        if !inner.as_bytes().contains(&first) {
+            return Some(inner);
+        }
+    }
+    None
 }
 
 /// Locate the `</template>` that closes the root template whose body starts at
@@ -105,7 +328,7 @@ fn find_template_body_end(source: &str, body_start: usize) -> Option<usize> {
             && let Some((tag, next_index)) = scan_html_tag(source, index)
         {
             let trimmed = tag.trim();
-            if trimmed.eq_ignore_ascii_case("</template>") {
+            if is_template_close_tag(trimmed) {
                 depth -= 1;
                 if depth == 0 {
                     return Some(index);
@@ -137,11 +360,26 @@ fn is_template_open_tag(tag: &str) -> bool {
             .is_none_or(|c| c.is_whitespace() || c == '>' || c == '/')
 }
 
+/// Whether `tag` (a full `<...>` tag string) is a `</template>` closing tag
+/// (case-insensitive), tolerating interior whitespace before `>` such as the
+/// `</template >` Prettier emits for slot blocks. Guards against `</templatefoo>`
+/// via the post-name remainder check.
+fn is_template_close_tag(tag: &str) -> bool {
+    let Some(rest) = tag.strip_prefix("</") else {
+        return false;
+    };
+    let Some(after) = rest.get(..8) else {
+        return false;
+    };
+    after.eq_ignore_ascii_case("template") && rest[8..].trim() == ">"
+}
+
 fn scan_template_body(
     body: &str,
     body_offset: usize,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
+    iterable_types: &FxHashMap<String, String>,
 ) -> TemplateUsage {
     let mut usage = TemplateUsage::default();
     let mut scopes: Vec<Vec<String>> = vec![Vec::new()];
@@ -177,15 +415,16 @@ fn scan_template_body(
             let Some((tag, next_index)) = scan_html_tag(body, index) else {
                 break;
             };
-            apply_tag(
+            apply_tag(VueTagInput {
                 tag,
-                body_offset + index,
-                body_offset + next_index,
+                tag_start: body_offset + index,
+                tag_end: body_offset + next_index,
                 imported_bindings,
                 bound_targets,
-                &mut scopes,
-                &mut usage,
-            );
+                iterable_types,
+                scopes: &mut scopes,
+                usage: &mut usage,
+            });
             index = next_index;
             continue;
         }
@@ -196,15 +435,29 @@ fn scan_template_body(
     usage
 }
 
-fn apply_tag(
-    tag: &str,
+struct VueTagInput<'a> {
+    tag: &'a str,
     tag_start: usize,
     tag_end: usize,
-    imported_bindings: &FxHashSet<String>,
-    bound_targets: &FxHashMap<String, String>,
-    scopes: &mut Vec<Vec<String>>,
-    usage: &mut TemplateUsage,
-) {
+    imported_bindings: &'a FxHashSet<String>,
+    bound_targets: &'a FxHashMap<String, String>,
+    iterable_types: &'a FxHashMap<String, String>,
+    scopes: &'a mut Vec<Vec<String>>,
+    usage: &'a mut TemplateUsage,
+}
+
+fn apply_tag(input: VueTagInput<'_>) {
+    let VueTagInput {
+        tag,
+        tag_start,
+        tag_end,
+        imported_bindings,
+        bound_targets,
+        iterable_types,
+        scopes,
+        usage,
+    } = input;
+
     let trimmed = tag.trim();
     if trimmed.starts_with("</") {
         if scopes.len() > 1 {
@@ -222,8 +475,14 @@ fn apply_tag(
     mark_tag_usage(&parsed.name, imported_bindings, &current, usage);
     collect_v_html_sink(&parsed, tag_start, tag_end, usage);
 
-    let v_for_locals =
-        collect_v_for_locals(&parsed, imported_bindings, bound_targets, &current, usage);
+    let v_for_locals = collect_v_for_locals(
+        &parsed,
+        imported_bindings,
+        bound_targets,
+        iterable_types,
+        &current,
+        usage,
+    );
     let slot_locals = collect_slot_locals(&parsed, imported_bindings, &current, usage);
 
     let mut element_locals = v_for_locals.clone();
@@ -265,6 +524,7 @@ fn collect_v_for_locals(
     parsed: &ParsedTag,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
+    iterable_types: &FxHashMap<String, String>,
     current: &[String],
     usage: &mut TemplateUsage,
 ) -> Vec<String> {
@@ -283,7 +543,16 @@ fn collect_v_for_locals(
         bound_targets,
         current,
     );
-    merge_pattern_binding_usage(usage, binding, imported_bindings, current)
+    let mut locals = merge_pattern_binding_usage(usage, binding, imported_bindings, current);
+    // When the loop item is typed to an element class (issue #1707), drop it from
+    // the locals so it is NOT declared as a resolved binding in the wrapped
+    // snippet; it stays an unresolved reference that remaps onto the class via the
+    // pre-augmented `bound_targets`, crediting `item.member`. The `index` alias
+    // and destructured items are unaffected (they stay locals).
+    if let Some((item, _)) = v_for_element_binding(value, iterable_types) {
+        locals.retain(|name| name != &item);
+    }
+    locals
 }
 
 fn collect_slot_locals(
@@ -323,6 +592,17 @@ fn scan_vue_attrs(
                 imported_bindings,
                 bound_targets,
                 arg_locals,
+            );
+        }
+        if attr.value.is_none()
+            && let Some(binding) = vbind_shorthand_binding(&attr.name)
+        {
+            merge_expression_usage_with_bound_targets(
+                usage,
+                &binding,
+                imported_bindings,
+                bound_targets,
+                attr_locals,
             );
         }
         scan_vue_attr_value(attr, imported_bindings, bound_targets, attr_locals, usage);
@@ -428,6 +708,31 @@ fn directive_name(attr_name: &str) -> Option<&str> {
         .next()
         .map(str::trim)
         .filter(|name| !name.is_empty())
+}
+
+/// Vue 3.4+ same-name `v-bind` shorthand: a value-less `:arg` (or `v-bind:arg`)
+/// is shorthand for `:arg="arg"`, so the argument name references a local
+/// binding (`:open` = `:open="open"`, `:some-prop` = `:some-prop="someProp"`).
+/// Only fires for a value-less attribute; with an explicit value the value
+/// expression names the reference and the bare argument is the binding target.
+/// A dynamic argument (`:[expr]`) has no static same-name form and is credited
+/// separately via `dynamic_argument_expression`. Modifiers (`:foo.prop`) do not
+/// change the referenced variable, so the argument before the first `.` wins.
+/// The argument is camelized via `kebab_to_camel_case` to match Vue's own
+/// `camelize` (hyphen-only, so `:some_prop` stays `some_prop`).
+fn vbind_shorthand_binding(attr_name: &str) -> Option<String> {
+    let arg = attr_name
+        .strip_prefix(':')
+        .or_else(|| attr_name.strip_prefix("v-bind:"))?;
+    if arg.starts_with('[') {
+        return None;
+    }
+    let name = arg
+        .split('.')
+        .next()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())?;
+    Some(kebab_to_camel_case(name))
 }
 
 fn is_custom_directive_attr(name: &str) -> bool {
@@ -583,6 +888,54 @@ mod tests {
             assert!(
                 usage.used_bindings.contains(name),
                 "{name} should be credited across nested slot templates"
+            );
+        }
+    }
+
+    #[test]
+    fn closing_template_tag_with_interior_whitespace_is_matched() {
+        // Prettier emits `</template >` (space before `>`) for slot blocks. The
+        // root close must still be recognized so `find_template_body_end` does not
+        // return `None` and drop the whole body, falsely reporting every
+        // template-only binding unused. Regression for issue #1439.
+        for source in [
+            "<template><Content /></template >",
+            "<template><Content /></template\n>",
+        ] {
+            let usage = collect_template_usage(source, &imported(&["Content"]));
+            assert!(
+                usage.used_bindings.contains("Content"),
+                "component must stay credited when the root close tag has interior whitespace: {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn nested_slot_close_with_whitespace_does_not_truncate_root_body() {
+        // A `</template >` closing a nested slot must decrement depth like the
+        // exact form, so the trailing component after it stays credited.
+        let usage = collect_template_usage(
+            "<template><Header><template #logo>x</template ></Header><Content /></template >",
+            &imported(&["Header", "Content"]),
+        );
+        assert!(usage.used_bindings.contains("Header"));
+        assert!(usage.used_bindings.contains("Content"));
+    }
+
+    #[test]
+    fn whitespace_close_inside_comment_or_attribute_does_not_truncate() {
+        // A `</template >` appearing in an HTML comment or a quoted attribute must
+        // not be treated as the root close: comments are skipped and `scan_html_tag`
+        // is quote-aware, so the real close still ends the body and trailing
+        // bindings stay credited.
+        for source in [
+            "<template><!-- </template > --><Content /></template >",
+            "<template><div title=\"</template >\"></div><Content /></template >",
+        ] {
+            let usage = collect_template_usage(source, &imported(&["Content"]));
+            assert!(
+                usage.used_bindings.contains("Content"),
+                "spurious whitespace close must not truncate the body: {source:?}"
             );
         }
     }
@@ -793,6 +1146,7 @@ mod tests {
             "<template><button @click=\"counter.bump()\">{{ counter.value }}</button></template>",
             &imported(&[]),
             &bound_targets(&[("counter", "Counter")]),
+            &FxHashMap::default(),
         );
 
         assert!(
@@ -819,6 +1173,7 @@ mod tests {
             "<template><button v-for=\"counter in counters\" @click=\"other.go(); counter.bump()\" /></template>",
             &imported(&[]),
             &bound_targets(&[("counter", "Counter"), ("other", "Other")]),
+            &FxHashMap::default(),
         );
 
         assert!(
@@ -835,6 +1190,143 @@ mod tests {
                 .iter()
                 .any(|access| access.object == "Counter" && access.member == "bump"),
             "shadowed counter.bump() must not map to Counter.bump, found: {:?}",
+            usage.member_accesses
+        );
+    }
+
+    fn iterable_types(pairs: &[(&str, &str)]) -> FxHashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn v_for_item_typed_to_element_class_credits_member_access() {
+        // `v-for="(util, index) of utils"` where `utils` is `Util[]`: the item
+        // `util`'s member accesses credit the `Util` class (issue #1707).
+        let usage = collect_template_usage_with_bound_targets(
+            "<template><template v-for=\"(util, index) of utils\" :key=\"index\">{{ util.getter }} {{ util.property }} {{ util.hello() }}</template></template>",
+            &imported(&[]),
+            &FxHashMap::default(),
+            &iterable_types(&[("utils", "Util")]),
+        );
+
+        for member in ["getter", "property", "hello"] {
+            assert!(
+                usage
+                    .member_accesses
+                    .iter()
+                    .any(|access| access.object == "Util" && access.member == member),
+                "util.{member} should map to Util.{member}, found: {:?}",
+                usage.member_accesses
+            );
+        }
+    }
+
+    #[test]
+    fn v_for_item_typed_without_alias_tuple_credits_member_access() {
+        // Bare item form `v-for="util of utils"` (no `(item, index)` tuple).
+        let usage = collect_template_usage_with_bound_targets(
+            "<template><li v-for=\"util of utils\">{{ util.getter }}</li></template>",
+            &imported(&[]),
+            &FxHashMap::default(),
+            &iterable_types(&[("utils", "Util")]),
+        );
+
+        assert!(
+            usage
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "Util" && access.member == "getter"),
+            "util.getter should map to Util.getter, found: {:?}",
+            usage.member_accesses
+        );
+    }
+
+    #[test]
+    fn v_for_index_alias_is_not_typed_as_element_class() {
+        // The second alias (`index`) is a number, never the element class: a
+        // member access on it must not remap onto the class.
+        let usage = collect_template_usage_with_bound_targets(
+            "<template><li v-for=\"(util, index) of utils\">{{ index.toFixed() }}</li></template>",
+            &imported(&[]),
+            &FxHashMap::default(),
+            &iterable_types(&[("utils", "Util")]),
+        );
+
+        assert!(
+            !usage
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "Util"),
+            "index member access must not map to the element class, found: {:?}",
+            usage.member_accesses
+        );
+    }
+
+    #[test]
+    fn v_for_untyped_source_leaves_item_unmapped() {
+        // Neuter check: with no known element type for the source, the item stays
+        // a local and its member accesses are NOT credited (pre-fix behavior).
+        let usage = collect_template_usage_with_bound_targets(
+            "<template><li v-for=\"(util, index) of utils\">{{ util.getter }}</li></template>",
+            &imported(&[]),
+            &FxHashMap::default(),
+            &FxHashMap::default(),
+        );
+
+        assert!(
+            !usage
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "Util"),
+            "untyped v-for item must not credit any class, found: {:?}",
+            usage.member_accesses
+        );
+    }
+
+    #[test]
+    fn v_for_destructured_item_is_not_typed() {
+        // A destructured item (`{ id }`) has no bare identifier to type; the scan
+        // declines to bind it (no spurious class member credit).
+        let usage = collect_template_usage_with_bound_targets(
+            "<template><li v-for=\"({ id }, index) of utils\">{{ id }}</li></template>",
+            &imported(&[]),
+            &FxHashMap::default(),
+            &iterable_types(&[("utils", "Util")]),
+        );
+
+        assert!(
+            !usage
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "Util"),
+            "destructured item must not credit the element class, found: {:?}",
+            usage.member_accesses
+        );
+    }
+
+    #[test]
+    fn v_for_inside_comment_does_not_type_template_reference() {
+        // The pre-scan is scoped to template bodies with comments excluded (same
+        // as the streaming scan), so a `v-for=` inside an HTML comment must not
+        // type a later bare `util.x` reference elsewhere in the template. Here the
+        // `<span>{{ util.getter }}` is outside any real v-for, so `util` is unbound
+        // and must credit nothing (issue #1707 hardening).
+        let usage = collect_template_usage_with_bound_targets(
+            "<template><!-- <li v-for=\"util of utils\">{{ util.getter }}</li> --><span>{{ util.getter }}</span></template>",
+            &imported(&[]),
+            &FxHashMap::default(),
+            &iterable_types(&[("utils", "Util")]),
+        );
+
+        assert!(
+            !usage
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "Util"),
+            "a v-for in a comment must not type a template reference, found: {:?}",
             usage.member_accesses
         );
     }

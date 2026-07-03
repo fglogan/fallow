@@ -26,12 +26,16 @@ RUN set -eux; \
   echo "${sha256}  /usr/local/bin/plow" | sha256sum -c -; \
   chmod +x /usr/local/bin/plow
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:26-bookworm-slim AS runtime
+
+ARG COREPACK_VERSION=0.35.0
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates git \
-  && rm -rf /var/lib/apt/lists/* \
-  && corepack enable
+  && npm install -g "corepack@${COREPACK_VERSION}" \
+  && corepack enable \
+  && npm cache clean --force \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=download /usr/local/bin/plow /usr/local/bin/plow
 

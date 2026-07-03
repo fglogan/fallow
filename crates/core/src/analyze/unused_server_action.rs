@@ -25,8 +25,14 @@
 //!   elsewhere, so the directive on this barrel does not make `x` an action.
 //!
 //! Inline `"use server"` body directives (`export async function f() { "use
-//! server" }` in a non-`"use server"` file) are deferred to a later revision;
-//! such dead actions still surface as `unused-export` until then.
+//! server" }` in a non-`"use server"` file) are ALSO reclassified: the extract
+//! layer records the export local name of every exported function / const-arrow
+//! whose body carries an inline `"use server"` directive on
+//! [`ModuleInfo::inline_server_action_exports`](plow_types::extract::ModuleInfo),
+//! and an unused export whose name appears there is moved into
+//! `unused_server_actions` just like a whole-`"use server"`-file export. The same
+//! `is_type_only` / `is_re_export` skips apply, so this inherits every
+//! unused-export abstain as well.
 
 use std::path::Path;
 
@@ -36,10 +42,98 @@ use plow_types::extract::ModuleInfo;
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
-use crate::results::{AnalysisResults, UnusedServerAction, UnusedServerActionFinding};
+use crate::results::{
+    AnalysisResults, UnusedExport, UnusedServerAction, UnusedServerActionFinding,
+};
 use crate::suppress::{IssueKind, SuppressionContext};
 
-/// Move unused exports of `"use server"` files into `unused_server_actions`.
+struct ServerActionIndexes<'a> {
+    use_server_ids: FxHashSet<FileId>,
+    inline_actions_by_id: FxHashMap<FileId, &'a [String]>,
+    file_id_by_path: FxHashMap<&'a Path, FileId>,
+}
+
+enum Reclassification {
+    KeepUnusedExport,
+    DropSuppressed,
+    MoveToServerAction(UnusedServerAction),
+}
+
+fn server_action_indexes<'a>(
+    graph: &'a ModuleGraph,
+    modules: &'a [ModuleInfo],
+) -> Option<ServerActionIndexes<'a>> {
+    let use_server_ids: FxHashSet<FileId> = modules
+        .iter()
+        .filter(|m| m.directives.iter().any(|d| d == "use server"))
+        .map(|m| m.file_id)
+        .collect();
+
+    let inline_actions_by_id: FxHashMap<FileId, &[String]> = modules
+        .iter()
+        .filter(|m| !m.inline_server_action_exports.is_empty())
+        .map(|m| (m.file_id, m.inline_server_action_exports.as_slice()))
+        .collect();
+
+    if use_server_ids.is_empty() && inline_actions_by_id.is_empty() {
+        return None;
+    }
+
+    let file_id_by_path: FxHashMap<&Path, FileId> = graph
+        .modules
+        .iter()
+        .map(|node| (node.path.as_path(), node.file_id))
+        .collect();
+
+    Some(ServerActionIndexes {
+        use_server_ids,
+        inline_actions_by_id,
+        file_id_by_path,
+    })
+}
+
+fn reclassify_unused_export(
+    export: &UnusedExport,
+    indexes: &ServerActionIndexes<'_>,
+    suppressions: &SuppressionContext<'_>,
+) -> Reclassification {
+    // Conservative: only direct value exports (a use-server file export, or an
+    // inline `"use server"` body action in any file).
+    if export.is_type_only || export.is_re_export {
+        return Reclassification::KeepUnusedExport;
+    }
+
+    let Some(&file_id) = indexes.file_id_by_path.get(export.path.as_path()) else {
+        return Reclassification::KeepUnusedExport;
+    };
+
+    let is_whole_file_action = indexes.use_server_ids.contains(&file_id);
+    let is_inline_action = indexes
+        .inline_actions_by_id
+        .get(&file_id)
+        .is_some_and(|names| names.contains(&export.export_name));
+    if !is_whole_file_action && !is_inline_action {
+        return Reclassification::KeepUnusedExport;
+    }
+
+    // Suppressed as unused-server-action: drop from both buckets and mark the
+    // marker consumed so it is not reported stale.
+    if suppressions.is_suppressed(file_id, export.line, IssueKind::UnusedServerAction)
+        || suppressions.is_file_suppressed(file_id, IssueKind::UnusedServerAction)
+    {
+        return Reclassification::DropSuppressed;
+    }
+
+    Reclassification::MoveToServerAction(UnusedServerAction {
+        path: export.path.clone(),
+        action_name: export.export_name.clone(),
+        line: export.line,
+        col: export.col,
+    })
+}
+
+/// Move unused exports of `"use server"` files (and inline `"use server"` body
+/// actions) into `unused_server_actions`.
 ///
 /// Gated on the project declaring `next`. The caller only invokes this when the
 /// `unused-server-action` rule is enabled; when it is `off`, the findings stay
@@ -58,52 +152,20 @@ pub fn reclassify_unused_server_actions(
         return;
     }
 
-    // FileIds of `"use server"` files (the directive lives on ModuleInfo).
-    let use_server_ids: FxHashSet<FileId> = modules
-        .iter()
-        .filter(|m| m.directives.iter().any(|d| d == "use server"))
-        .map(|m| m.file_id)
-        .collect();
-
-    if use_server_ids.is_empty() {
+    let Some(indexes) = server_action_indexes(graph, modules) else {
         return;
-    }
-
-    // The export `path` is the graph node path; map it back to a FileId so the
-    // use-server membership and suppression checks can key on the right module.
-    let file_id_by_path: FxHashMap<&Path, FileId> = graph
-        .modules
-        .iter()
-        .map(|node| (node.path.as_path(), node.file_id))
-        .collect();
+    };
 
     let mut reclassified: Vec<UnusedServerAction> = Vec::new();
     results.unused_exports.retain(|finding| {
-        let export = &finding.export;
-        // Conservative: only direct value exports defined in a use-server file.
-        if export.is_type_only || export.is_re_export {
-            return true;
+        match reclassify_unused_export(&finding.export, &indexes, suppressions) {
+            Reclassification::KeepUnusedExport => true,
+            Reclassification::DropSuppressed => false,
+            Reclassification::MoveToServerAction(action) => {
+                reclassified.push(action);
+                false
+            }
         }
-        let Some(&file_id) = file_id_by_path.get(export.path.as_path()) else {
-            return true;
-        };
-        if !use_server_ids.contains(&file_id) {
-            return true;
-        }
-        // Suppressed as unused-server-action: drop from both buckets and mark
-        // the marker consumed (so it is not reported stale).
-        if suppressions.is_suppressed(file_id, export.line, IssueKind::UnusedServerAction)
-            || suppressions.is_file_suppressed(file_id, IssueKind::UnusedServerAction)
-        {
-            return false;
-        }
-        reclassified.push(UnusedServerAction {
-            path: export.path.clone(),
-            action_name: export.export_name.clone(),
-            line: export.line,
-            col: export.col,
-        });
-        false
     });
 
     results.unused_server_actions = reclassified

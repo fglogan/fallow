@@ -446,13 +446,15 @@ fn path_alias_imports_not_reported_as_unlisted() {
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     let pkg = make_pkg(&[], &[], &[]);
@@ -511,13 +513,15 @@ fn multiple_unresolved_imports_collected() {
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -589,13 +593,15 @@ fn workspace_dep_used_within_workspace_not_flagged() {
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 

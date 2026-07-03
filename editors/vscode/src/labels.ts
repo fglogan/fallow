@@ -14,6 +14,21 @@ export type IssueCategory =
   | "unused-optional-dependencies"
   | "unused-enum-members"
   | "unused-class-members"
+  | "unused-store-member"
+  | "unused-server-action"
+  | "unused-load-data-keys"
+  | "unused-component-prop"
+  | "unused-component-emit"
+  | "unused-component-input"
+  | "unused-component-output"
+  | "unused-svelte-event"
+  | "unrendered-component"
+  | "unprovided-inject"
+  | "invalid-client-export"
+  | "mixed-client-server-barrel"
+  | "misplaced-directive"
+  | "route-collision"
+  | "dynamic-segment-name-conflict"
   | "unresolved-imports"
   | "unlisted-dependencies"
   | "duplicate-exports"
@@ -22,6 +37,7 @@ export type IssueCategory =
   | "circular-dependencies"
   | "re-export-cycles"
   | "boundary-violation"
+  | "policy-violations"
   | "stale-suppressions"
   | "unused-catalog-entries"
   | "empty-catalog-groups"
@@ -39,6 +55,21 @@ export const ISSUE_CATEGORY_LABELS: Record<IssueCategory, string> = {
   "unused-optional-dependencies": "Unused Optional Dependencies",
   "unused-enum-members": "Unused Enum Members",
   "unused-class-members": "Unused Class Members",
+  "unused-store-member": "Unused Store Members",
+  "unused-server-action": "Unused Server Actions",
+  "unused-load-data-keys": "Unused Load Data Keys",
+  "unused-component-prop": "Unused Component Props",
+  "unused-component-emit": "Unused Component Emits",
+  "unused-component-input": "Unused Component Inputs",
+  "unused-component-output": "Unused Component Outputs",
+  "unused-svelte-event": "Unused Svelte Events",
+  "unrendered-component": "Unrendered Components",
+  "unprovided-inject": "Unprovided Injects",
+  "invalid-client-export": "Invalid Client Exports",
+  "mixed-client-server-barrel": "Mixed Client/Server Barrels",
+  "misplaced-directive": "Misplaced Directives",
+  "route-collision": "Route Collisions",
+  "dynamic-segment-name-conflict": "Dynamic Segment Name Conflicts",
   "unresolved-imports": "Unresolved Imports",
   "unlisted-dependencies": "Unlisted Dependencies",
   "duplicate-exports": "Duplicate Exports",
@@ -47,6 +78,7 @@ export const ISSUE_CATEGORY_LABELS: Record<IssueCategory, string> = {
   "circular-dependencies": "Circular Dependencies",
   "re-export-cycles": "Re-Export Cycles",
   "boundary-violation": "Boundary Violations",
+  "policy-violations": "Policy Violations",
   "stale-suppressions": "Stale Suppressions",
   "unused-catalog-entries": "Unused Catalog Entries",
   "empty-catalog-groups": "Empty Catalog Groups",

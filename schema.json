@@ -159,7 +159,14 @@
         "unrendered-components": "warn",
         "unused-component-props": "warn",
         "unused-component-emits": "warn",
+        "unused-component-inputs": "warn",
+        "unused-component-outputs": "warn",
+        "unused-svelte-events": "warn",
         "unused-server-actions": "warn",
+        "unused-load-data-keys": "warn",
+        "prop-drilling": "off",
+        "thin-wrapper": "off",
+        "duplicate-prop-shape": "off",
         "unresolved-imports": "error",
         "unlisted-dependencies": "error",
         "duplicate-exports": "error",
@@ -171,6 +178,7 @@
         "coverage-gaps": "off",
         "feature-flags": "off",
         "stale-suppressions": "warn",
+        "require-suppression-reason": "off",
         "unused-catalog-entries": "warn",
         "empty-catalog-groups": "warn",
         "unresolved-catalog-references": "error",
@@ -183,8 +191,11 @@
         "mixed-client-server-barrel": "warn",
         "misplaced-directive": "warn",
         "route-collision": "error",
-        "dynamic-segment-name-conflict": "warn"
+        "dynamic-segment-name-conflict": "error"
       }
+    },
+    "unusedComponentProps": {
+      "$ref": "#/$defs/UnusedComponentPropsConfig"
     },
     "boundaries": {
       "$ref": "#/$defs/BoundaryConfig",
@@ -227,7 +238,7 @@
       "default": []
     },
     "rulePacks": {
-      "description": "Paths to declarative rule-pack files (JSON or JSONC), relative to the\nproject root. Each pack declares `banned-call` / `banned-import` rules\nthat report as `policy-violation` findings. Packs are pure data: no\nproject code is executed. Invalid or missing packs fail config load.",
+      "description": "Paths to declarative rule-pack files (JSON or JSONC), relative to the\nproject root. Each pack declares `banned-call`, `banned-import`, or\n`banned-effect` rules that report as `policy-violation` findings. Packs\nare pure data: no project code is executed. Invalid or missing packs\nfail config load.",
       "type": "array",
       "items": {
         "type": "string"
@@ -708,7 +719,7 @@
           "default": false
         },
         "ignoreImports": {
-          "description": "Exclude ES `import` declarations from clone detection.\n\nDefaults to `true`: token-identical sorted import blocks are a structural\nproperty of well-formatted code, not copy-paste, so they should not\nsurface as clone groups. Set to `false` to count import blocks again.\nWhen enabled, all `import` statements (value imports, type imports, and\nside-effect imports) are stripped from the token stream before clone\ndetection. Only affects ES `import` declarations; CommonJS `require()`\ncalls and `export ... from` re-export blocks are still counted.",
+          "description": "Exclude module-wiring declarations from clone detection.\n\nDefaults to `true`: token-identical module wiring is a structural\nproperty of well-formatted code, not copy-paste, so it should not\nsurface as clone groups. Set to `false` to count module wiring again.\nWhen enabled, ES imports, re-export declarations, and top-level static\nCommonJS `require(\"...\")` binding declarations are stripped from the\ntoken stream before clone detection. Dynamic imports, side-effect\n`require()` calls, nested `require()` calls, dynamic require arguments,\nand mixed declarations are still counted.",
           "type": "boolean",
           "default": true
         },
@@ -1039,7 +1050,7 @@
           "default": "error"
         },
         "unused-component-props": {
-          "description": "Vue `<script setup>` `defineProps` declared prop referenced nowhere\ninside its own single-file component (neither `<script>` nor\n`<template>`). The single-file dead-input direction. Defaults to `warn`,\nnot `error`: a prop can be part of a deliberately-stable public component\nAPI, so analyzer confidence is lower; warn encodes that without failing\nCI.",
+          "description": "Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, or React\ndeclared prop referenced nowhere inside its own component. The\nsingle-component dead-input direction. Defaults to `warn`, not `error`: a\nprop can be part of a deliberately-stable public component API, so\nanalyzer confidence is lower; warn encodes that without failing CI.",
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
@@ -1048,10 +1059,45 @@
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
+        "unused-component-inputs": {
+          "description": "Angular `@Input()` / signal `input()` / `model()` declared input read\nnowhere inside its own component (neither the inline/external template nor\nthe class body). The single-file dead-input direction, the Angular\nanalogue of `unused-component-prop`. Defaults to `warn`, not `error`: an\ninput can be part of a deliberately-stable public component API, so\nanalyzer confidence is lower; warn encodes that without failing CI.",
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "unused-component-outputs": {
+          "description": "Angular `@Output()` / signal `output()` declared output emitted nowhere\ninside its own component (no `this.<output>.emit(...)`). The single-file\ndead-output direction, the Angular analogue of `unused-component-emit`.\nDefaults to `warn`, not `error`: an output can be part of a\ndeliberately-stable public component API, so analyzer confidence is lower;\nwarn encodes that without failing CI.",
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "unused-svelte-events": {
+          "description": "Svelte component dispatching a custom event via `createEventDispatcher()`\nwhose event name is listened to nowhere in the analyzed project. The\ncross-file dead-output direction (no eslint-plugin-svelte / svelte-check\nrule covers the listener side). Defaults to `warn`, not `error`: a\ndispatched event can be part of a deliberately-stable public component\nAPI, or a listener may be added later, so analyzer confidence is lower;\nwarn encodes that without failing CI.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
         "unused-server-actions": {
           "description": "Next.js Server Action (an export of a `\"use server\"` file) referenced by\nno code in the project: no import-and-call, no `action={fn}` binding, no\n`<form action={fn}>`. Cross-graph dead-export direction, reclassified out\nof `unused-export` for `\"use server\"` files. Defaults to `warn`, not\n`error`: the rule is new and false-negative-preferring, and reflective\naction-dispatch shapes can hide a real consumer; warn encodes that\nwithout failing CI until corpus-validated.",
           "$ref": "#/$defs/Severity",
           "default": "error"
+        },
+        "unused-load-data-keys": {
+          "description": "SvelteKit `+page.{ts,server.ts,js,server.js}` `load()` return-object key\nread by no consumer: not off the sibling `+page.svelte`'s `data.<key>`,\nnor project-wide via `page.data.<key>` / `$page.data.<key>`. Cross-file\ndead-input direction. Defaults to `warn`, not `error`: the rule is new and\nfalse-negative-preferring (a whole-object `data` pass abstains), and a\nload fetch can have side effects so deletion is a human call; warn encodes\nthat without failing CI until corpus-validated.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "prop-drilling": {
+          "description": "React/Preact prop forwarded unchanged through `>= N` intermediate\npass-through components until a component that substantively consumes it.\nA graph-derived health signal. Defaults to `off` (opt-in), like\n`private-type-leak` / `security-*`: the located per-chain records and the\nsmall capped health penalty are dormant until the user enables the rule.",
+          "$ref": "#/$defs/Severity",
+          "default": "off"
+        },
+        "thin-wrapper": {
+          "description": "A React/Preact component whose entire body is `return <Child {...props}/>`\n(pure structural indirection, a candidate for inlining). A graph-derived\nhealth signal. Defaults to `off` (opt-in), like `prop-drilling`: the\nlocated per-wrapper records are dormant until the user enables the rule.",
+          "$ref": "#/$defs/Severity",
+          "default": "off"
+        },
+        "duplicate-prop-shape": {
+          "description": "Three or more React/Preact components across two or more files whose\nstatically-harvested prop NAME set is identical after stripping ubiquitous\nDOM / passthrough names (a missing shared `Props` type / base component).\nA graph-derived structural-refactor health signal. Defaults to `off`\n(opt-in), like `thin-wrapper`: the located per-component records are\ndormant until the user enables the rule.",
+          "$ref": "#/$defs/Severity",
+          "default": "off"
         },
         "unresolved-imports": {
           "$ref": "#/$defs/Severity",
@@ -1096,6 +1142,11 @@
         "stale-suppressions": {
           "$ref": "#/$defs/Severity",
           "default": "warn"
+        },
+        "require-suppression-reason": {
+          "description": "Opt-in suppression hygiene rule: when enabled, every `plow-ignore-*`\ncomment and `@expected-unused` tag must carry a `-- <reason>` suffix.",
+          "$ref": "#/$defs/Severity",
+          "default": "off"
         },
         "unused-catalog-entries": {
           "$ref": "#/$defs/Severity",
@@ -1153,9 +1204,9 @@
           "default": "error"
         },
         "dynamic-segment-name-conflict": {
-          "description": "Sibling Next.js dynamic route segments at one tree position using\ndifferent param spellings (`[id]` vs `[slug]`). Next.js throws \"You\ncannot use different slug names for the same dynamic path\" at dev and\nproduction runtime when the position is hit; `next build` does NOT catch\nit (the build succeeds), so CI passes while the route crashes on its\nfirst request. plow catches it statically. Defaults to `warn` for now\n(graduates to `error` in a later release once field-proven).",
+          "description": "Sibling Next.js dynamic route segments at one tree position using\ndifferent param spellings (`[id]` vs `[slug]`). Next.js throws \"You\ncannot use different slug names for the same dynamic path\" at dev and\nproduction runtime when the position is hit; `next build` does NOT catch\nit (the build succeeds), so CI passes while the route crashes on its\nfirst request. plow catches it statically. Defaults to `error`: the\nroute is a deterministic runtime crash on first request, so failing CI\nis the honest signal even though `next build` stays green (this is the\n\"error-runtime\" severity tier, shared with `route-collision`).",
           "$ref": "#/$defs/Severity",
-          "default": "warn"
+          "default": "error"
         }
       }
     },
@@ -1178,6 +1229,20 @@
           "const": "off"
         }
       ]
+    },
+    "UnusedComponentPropsConfig": {
+      "description": "Options for the `unused-component-props` rule.\n\nLets a project exempt component props whose local destructure binding name\nmatches a regex from `unused-component-props`, honoring the\n\"accepted-but-intentionally-unused\" leading-underscore convention (Svelte 5\n`$props()`, React destructure) that mirrors TypeScript `noUnusedParameters`\nand ESLint `@typescript-eslint/no-unused-vars` `varsIgnorePattern` /\n`argsIgnorePattern`. Opt-in; an unset `ignorePattern` leaves the rule's\nbehavior unchanged.",
+      "type": "object",
+      "properties": {
+        "ignorePattern": {
+          "description": "Regex matched against each declared prop's LOCAL destructure binding name\n(e.g. `_stage` in `let { stage: _stage } = $props()`), which falls back\nto the public prop name when there is no alias. A prop whose local name\nmatches is treated as intentionally unused and never reported as\n`unused-component-props`. Matching is unanchored (substring), like\nESLint's `RegExp.test`, so anchor with `^_` to match a leading\nunderscore. Compiled and validated at config load (an invalid regex fails\nload). Applies to Vue, Svelte, Astro, and React/Preact props.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "BoundaryConfig": {
       "description": "Architecture boundary configuration.",
@@ -1707,7 +1772,77 @@
             }
           ]
         },
+        "unused-component-inputs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-component-outputs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-svelte-events": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "unused-server-actions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-load-data-keys": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prop-drilling": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "thin-wrapper": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "duplicate-prop-shape": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -1818,6 +1953,16 @@
           ]
         },
         "stale-suppressions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "require-suppression-reason": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

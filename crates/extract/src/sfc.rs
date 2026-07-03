@@ -51,9 +51,16 @@ static SRC_ATTR_RE: LazyLock<regex::Regex> =
 static SETUP_ATTR_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?:^|\s)setup(?:\s|$)"));
 
-/// Regex to detect Svelte's `context="module"` attribute.
+/// Regex to detect Svelte's `context="module"` attribute (Svelte 4).
 static CONTEXT_MODULE_ATTR_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r#"context\s*=\s*["']module["']"#));
+
+/// Regex to detect Svelte 5's bare `module` script attribute (`<script module>`,
+/// `<script module lang="ts">`). Anchored like [`SETUP_ATTR_RE`] so `module` must
+/// be a standalone attribute, not a substring of another attr name (e.g.
+/// `data-module`) or value.
+static SVELTE_MODULE_ATTR_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"(?:^|\s)module(?:\s|$|=)"));
 
 /// Regex to extract Vue's `generic="..."` attribute value (script-setup
 /// generics). Matches the contents between the quotes and stops at the
@@ -78,6 +85,16 @@ static HTML_COMMENT_RE: LazyLock<regex::Regex> =
 /// `unused-component-prop` detector abstains on the whole file when this matches.
 static PROPS_ATTRS_SPREAD_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r#"v-bind\s*=\s*["'](?:\$attrs|\$props|props)["']"#));
+
+/// FP-1 (unused-load-data-key): a SvelteKit route component passing the whole
+/// `data` prop opaquely in MARKUP, where a child reads arbitrary keys the
+/// detector cannot see. Matches `data={data}` (whole-prop pass to a child) and
+/// `{...data}` (Svelte template spread). The script-side `const x = {...data}` /
+/// `fn(data)` / `const X = data` forms are captured by the JS visitor instead.
+/// Only a whole-`data` pass forces the abstain; `data.x` member access stays a
+/// credited consumer.
+static SVELTE_TEMPLATE_DATA_WHOLE_USE_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"(?:=\s*\{\s*data\s*\}|\{\s*\.\.\.\s*data\s*\})"));
 
 /// Matches an emit-style call in template markup: a callee identifier (or
 /// `$emit`) followed by `(` and its first argument. Group 1 is the callee name
@@ -218,7 +235,12 @@ pub fn extract_sfc_scripts(source: &str) -> Vec<SfcScript> {
                 )
             });
             let is_setup = SETUP_ATTR_RE.is_match(attrs);
-            let is_context_module = CONTEXT_MODULE_ATTR_RE.is_match(attrs);
+            // Svelte module context: Svelte 4 `context="module"` OR Svelte 5's
+            // bare `module` attribute. Both scope declarations to the module
+            // script (not the instance), so `is_template_visible_script` returns
+            // false and the instance/module split for runes harvest is correct.
+            let is_context_module =
+                CONTEXT_MODULE_ATTR_RE.is_match(attrs) || SVELTE_MODULE_ATTR_RE.is_match(attrs);
             let generic_attr = VUE_GENERIC_ATTR_RE
                 .captures(attrs)
                 .or_else(|| SVELTE_GENERICS_ATTR_RE.captures(attrs))
@@ -253,6 +275,32 @@ pub struct SfcStyle {
     pub src_span: Option<Span>,
     /// Byte offset of the style body within the full SFC source.
     pub byte_offset: usize,
+}
+
+/// A source region extracted from a larger file while preserving the byte
+/// offset of the region body in the original source.
+pub struct SourceRegion {
+    /// Region body text.
+    pub body: String,
+    /// Byte offset of `body` within the original source.
+    pub byte_offset: usize,
+}
+
+/// Extract template markup regions from a Vue/Svelte SFC.
+///
+/// The returned regions exclude `<script>` blocks, `<style>` blocks, and HTML
+/// comments, so callers can tokenize authored markup without reading code or
+/// comments as template text. Offsets always point into the original SFC source.
+#[must_use]
+pub fn extract_sfc_template_regions(source: &str) -> Vec<SourceRegion> {
+    let mut ranges: Vec<(usize, usize)> = SCRIPT_BLOCK_RE
+        .find_iter(source)
+        .chain(STYLE_BLOCK_RE.find_iter(source))
+        .chain(HTML_COMMENT_RE.find_iter(source))
+        .map(|m| (m.start(), m.end()))
+        .collect();
+    ranges.sort_unstable_by_key(|(start, _)| *start);
+    ranges_to_gaps(source, &ranges)
 }
 
 /// Extract all `<style>` blocks from a Vue/Svelte SFC source string.
@@ -305,6 +353,34 @@ pub fn extract_sfc_styles(source: &str) -> Vec<SfcStyle> {
         .collect()
 }
 
+fn ranges_to_gaps(source: &str, ranges: &[(usize, usize)]) -> Vec<SourceRegion> {
+    let mut regions = Vec::new();
+    let mut cursor = 0;
+    for &(start, end) in ranges {
+        if start > cursor {
+            push_region(source, cursor, start, &mut regions);
+        }
+        cursor = cursor.max(end);
+    }
+    if cursor < source.len() {
+        push_region(source, cursor, source.len(), &mut regions);
+    }
+    regions
+}
+
+fn push_region(source: &str, start: usize, end: usize, regions: &mut Vec<SourceRegion>) {
+    let Some(body) = source.get(start..end) else {
+        return;
+    };
+    if body.trim().is_empty() {
+        return;
+    }
+    regions.push(SourceRegion {
+        body: body.to_string(),
+        byte_offset: start,
+    });
+}
+
 /// Check if a file path is a Vue or Svelte SFC (`.vue` or `.svelte`).
 #[must_use]
 pub fn is_sfc_file(path: &Path) -> bool {
@@ -327,20 +403,22 @@ pub(crate) fn parse_sfc_to_module(
     let mut combined = empty_sfc_module(file_id, source, content_hash);
     let mut template_visible_imports: FxHashSet<String> = FxHashSet::default();
     let mut template_visible_bound_targets: FxHashMap<String, String> = FxHashMap::default();
+    let mut template_visible_iterable_types: FxHashMap<String, String> = FxHashMap::default();
     let mut props_return_binding: Option<String> = None;
     let mut emit_return_binding: Option<String> = None;
 
     for script in &scripts {
-        merge_script_into_module(
+        merge_script_into_module(&mut SfcScriptMergeInput {
             kind,
             script,
-            &mut combined,
-            &mut template_visible_imports,
-            &mut template_visible_bound_targets,
-            &mut props_return_binding,
-            &mut emit_return_binding,
+            combined: &mut combined,
+            template_visible_imports: &mut template_visible_imports,
+            template_visible_bound_targets: &mut template_visible_bound_targets,
+            template_visible_iterable_types: &mut template_visible_iterable_types,
+            props_return_binding: &mut props_return_binding,
+            emit_return_binding: &mut emit_return_binding,
             need_complexity,
-        );
+        });
     }
 
     for style in &styles {
@@ -357,14 +435,20 @@ pub(crate) fn parse_sfc_to_module(
         combined.has_props_attrs_fallthrough = true;
     }
 
-    apply_template_usage(
+    apply_template_usage(TemplateUsageInput {
         kind,
         source,
-        &template_visible_imports,
-        &template_visible_bound_targets,
-        props_return_binding.as_deref(),
-        &mut combined,
-    );
+        template_visible_imports: &template_visible_imports,
+        template_visible_bound_targets: &template_visible_bound_targets,
+        template_visible_iterable_types: &template_visible_iterable_types,
+        props_return_binding: props_return_binding.as_deref(),
+        credit_load_data: kind == SfcKind::Svelte && is_sveltekit_route_data_component(path),
+        combined: &mut combined,
+    });
+
+    if need_complexity {
+        append_template_complexity(kind, source, &mut combined);
+    }
 
     // Credit `<emit_binding>('event')` / `$emit('event')` calls in the template
     // (`@click="emit('close')"`), which the script-only emit usage walk cannot
@@ -373,9 +457,39 @@ pub(crate) fn parse_sfc_to_module(
         apply_template_emit_usage(source, emit_return_binding.as_deref(), &mut combined);
     }
 
-    // Static relative asset references in markup (`<img src="./logo.png">`)
-    // become SideEffect imports so a genuinely-missing asset surfaces as
-    // `unresolved-import` (existing assets resolve to `ExternalFile`, no finding).
+    // Harvest Svelte template `on:<name>` listener bindings on component tags
+    // into the per-file listened set; the `unused-svelte-event` detector unions
+    // these project-wide to decide which dispatched events are dead.
+    if kind == SfcKind::Svelte {
+        combined.svelte_listened_events =
+            crate::sfc_template::collect_svelte_listened_events(source);
+    }
+
+    append_template_asset_imports(source, &mut combined);
+    dedup_import_binding_lists(&mut combined);
+
+    combined
+}
+
+/// Append the synthetic `<template>` complexity entry for the SFC. Counts
+/// template control flow (`v-if`/`v-for`, `{#if}`/`{#each}`) and
+/// bound-expression/interpolation complexity so a template-heavy SFC is not
+/// scored as artificially simple. The scanners mask `<script>`/`<style>`/comments,
+/// so script control flow is NOT double-counted (it is scored by
+/// `translate_script_complexity`). Mirrors Angular's synthetic entry; no new rule
+/// or threshold, the entry folds into the existing complexity aggregate.
+fn append_template_complexity(kind: SfcKind, source: &str, combined: &mut ModuleInfo) {
+    let template_complexity = match kind {
+        SfcKind::Vue => crate::template_complexity::compute_vue_template_complexity(source),
+        SfcKind::Svelte => crate::template_complexity::compute_svelte_template_complexity(source),
+    };
+    combined.complexity.extend(template_complexity);
+}
+
+/// Turn static relative asset references in markup (`<img src="./logo.png">`)
+/// into `SideEffect` imports so a genuinely-missing asset surfaces as
+/// `unresolved-import` (existing assets resolve to `ExternalFile`, no finding).
+fn append_template_asset_imports(source: &str, combined: &mut ModuleInfo) {
     for (specifier, span) in collect_template_asset_refs(source) {
         combined.imports.push(ImportInfo {
             source: specifier,
@@ -387,7 +501,11 @@ pub(crate) fn parse_sfc_to_module(
             source_span: span,
         });
     }
+}
 
+/// Sort and dedup the per-script import-binding accumulator lists so the merged
+/// SFC module reports each binding once in a stable order.
+fn dedup_import_binding_lists(combined: &mut ModuleInfo) {
     combined.unused_import_bindings.sort_unstable();
     combined.unused_import_bindings.dedup();
     combined.type_referenced_import_bindings.sort_unstable();
@@ -396,8 +514,6 @@ pub(crate) fn parse_sfc_to_module(
     combined.value_referenced_import_bindings.dedup();
     combined.auto_import_candidates.sort_unstable();
     combined.auto_import_candidates.dedup();
-
-    combined
 }
 
 fn sfc_kind(path: &Path) -> SfcKind {
@@ -408,203 +524,334 @@ fn sfc_kind(path: &Path) -> SfcKind {
     }
 }
 
+/// SvelteKit route components receive a `data` prop populated by the route's
+/// `load()` return object. This predicate gates the `data`-as-template-root
+/// credit (unused-load-data-key Primitive B) to exactly those files. It matches
+/// `+page.svelte` / `+layout.svelte` AND their layout-reset variants
+/// (`+page@.svelte`, `+page@named.svelte`, `+page@(group).svelte`, and the
+/// `+layout@...` forms), all of which still receive the `data` prop. `+error.svelte`
+/// is excluded (it receives `$page.error`, not the `load()` `data` prop), and a
+/// non-route file like `+pageHelper.svelte` is excluded by the grammar (the part
+/// after `+page` must be empty or start with `@`). The leading `+` is a
+/// SvelteKit-only filename convention, so no ordinary `.svelte` component matches.
+fn is_sveltekit_route_data_component(path: &Path) -> bool {
+    let Some(stem) = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_suffix(".svelte"))
+    else {
+        return false;
+    };
+    ["+page", "+layout"].iter().any(|prefix| {
+        stem.strip_prefix(prefix)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('@'))
+    })
+}
+
 fn empty_sfc_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
     let parsed = crate::suppress::parse_suppressions_from_source(source);
 
-    ModuleInfo {
+    crate::module_info::non_js_module_info(
         file_id,
-        exports: Vec::new(),
-        imports: Vec::new(),
-        re_exports: Vec::new(),
-        dynamic_imports: Vec::new(),
-        dynamic_import_patterns: Vec::new(),
-        require_calls: Vec::new(),
-        package_path_references: Vec::new(),
-        member_accesses: Vec::new(),
-        whole_object_uses: Vec::new(),
-        has_cjs_exports: false,
-        has_angular_component_template_url: false,
         content_hash,
-        suppressions: parsed.suppressions,
-        unknown_suppression_kinds: parsed.unknown_kinds,
-        unused_import_bindings: Vec::new(),
-        type_referenced_import_bindings: Vec::new(),
-        value_referenced_import_bindings: Vec::new(),
-        line_offsets: compute_line_offsets(source),
-        complexity: Vec::new(),
-        flag_uses: Vec::new(),
-        class_heritage: vec![],
-        injection_tokens: vec![],
-        local_type_declarations: Vec::new(),
-        public_signature_type_references: Vec::new(),
-        namespace_object_aliases: Vec::new(),
-        iconify_prefixes: Vec::new(),
-        iconify_icon_names: Vec::new(),
-        auto_import_candidates: Vec::new(),
-        directives: Vec::new(),
-        client_only_dynamic_import_spans: Vec::new(),
-        security_sinks: Vec::new(),
-        security_sinks_skipped: 0,
-        security_unresolved_callee_sites: Vec::new(),
-        tainted_bindings: Vec::new(),
-        sanitized_sink_args: Vec::new(),
-        security_control_sites: Vec::new(),
-        callee_uses: Vec::new(),
-        misplaced_directives: Vec::new(),
-        di_key_sites: Vec::new(),
-        has_dynamic_provide: false,
-        referenced_import_bindings: Vec::new(),
-        component_props: Vec::new(),
-        has_props_attrs_fallthrough: false,
-        has_define_expose: false,
-        has_define_model: false,
-        has_unharvestable_props: false,
-        component_emits: Vec::new(),
-        has_unharvestable_emits: false,
-        has_dynamic_emit: false,
-        has_emit_whole_object_use: false,
-    }
+        source,
+        parsed,
+        Vec::new(),
+        Vec::new(),
+    )
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threads SFC script context plus the prop and emit template-credit return bindings into the per-script merge"
-)]
-fn merge_script_into_module(
+struct SfcScriptMergeInput<'a> {
     kind: SfcKind,
-    script: &SfcScript,
-    combined: &mut ModuleInfo,
-    template_visible_imports: &mut FxHashSet<String>,
-    template_visible_bound_targets: &mut FxHashMap<String, String>,
-    props_return_binding: &mut Option<String>,
-    emit_return_binding: &mut Option<String>,
+    script: &'a SfcScript,
+    combined: &'a mut ModuleInfo,
+    template_visible_imports: &'a mut FxHashSet<String>,
+    template_visible_bound_targets: &'a mut FxHashMap<String, String>,
+    template_visible_iterable_types: &'a mut FxHashMap<String, String>,
+    props_return_binding: &'a mut Option<String>,
+    emit_return_binding: &'a mut Option<String>,
     need_complexity: bool,
-) {
-    if kind == SfcKind::Vue
-        && let Some(src) = &script.src
+}
+
+fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
+    if input.kind == SfcKind::Vue
+        && let Some(src) = &input.script.src
     {
-        add_script_src_import(combined, src, script.src_span);
+        add_script_src_import(input.combined, src, input.script.src_span);
     }
 
     let allocator = Allocator::default();
-    let parser_return =
-        Parser::new(&allocator, &script.body, source_type_for_script(script)).parse();
+    let parser_return = Parser::new(
+        &allocator,
+        &input.script.body,
+        source_type_for_script(input.script),
+    )
+    .parse();
     let mut extractor = ModuleInfoExtractor::new();
     extractor.visit_program(&parser_return.program);
-    let extraction = ExtractionResult::contiguous(&script.body, script.byte_offset);
+    let extraction = ExtractionResult::contiguous(&input.script.body, input.script.byte_offset);
     extractor.remap_spans_with(|span| extraction.remap_span(span));
     extractor.resolve_typed_destructure_bindings();
 
-    let augmented_body = build_generic_attr_probe_source(script);
-    let empty_template_used = rustc_hash::FxHashSet::default();
+    merge_script_binding_usage(input, &allocator, &parser_return, &extractor.imports);
+    if input.need_complexity {
+        input
+            .combined
+            .complexity
+            .extend(translate_script_complexity(
+                input.script,
+                &parser_return.program,
+                &input.combined.line_offsets,
+            ));
+    }
+
+    // Vue prop/emit harvesting (`<script setup>` macros + Options API) for the
+    // `unused-component-prop` / `unused-component-emit` detectors. Extracted to a
+    // helper to keep this function under the unit-size lint.
+    if input.kind == SfcKind::Vue {
+        merge_vue_props_emits_into(input, &parser_return.program, &mut extractor);
+    }
+
+    // Svelte 5 `$props()` rune harvesting for `unused-component-prop`. `$props`
+    // is an instance-only rune, so harvest ONLY the template-visible instance
+    // script, never the module script (`<script context="module">` /
+    // `<script module>`).
+    if input.kind == SfcKind::Svelte && is_template_visible_script(input.kind, input.script) {
+        merge_svelte_props_into(
+            input.combined,
+            &parser_return.program,
+            input.script.byte_offset,
+        );
+    }
+
+    if is_template_visible_script(input.kind, input.script) {
+        harvest_template_visible_bindings(input, &extractor);
+    }
+
+    // Dispatched events recorded by the visitor carry body-relative spans, like
+    // props/emits above. Remap the entries this script contributes onto the SFC
+    // source via the script byte offset so the finding line/col points at the
+    // real `dispatch(...)` call, not a body-relative position.
+    let dispatch_base = input.combined.svelte_dispatched_events.len();
+    extractor.merge_into(input.combined);
+    for event in &mut input.combined.svelte_dispatched_events[dispatch_base..] {
+        event.span_start += input.script.byte_offset as u32;
+    }
+}
+
+/// Compute and merge this script's import-binding usage (unused / type- and
+/// value-referenced) plus auto-import candidates into `combined`. A
+/// `generic="..."` attribute re-parses an augmented body so a type-only import
+/// consumed solely inside the constraint stays classified as type-referenced.
+fn merge_script_binding_usage(
+    input: &mut SfcScriptMergeInput<'_>,
+    allocator: &Allocator,
+    parser_return: &oxc_parser::ParserReturn<'_>,
+    imports: &[ImportInfo],
+) {
+    let augmented_body = build_generic_attr_probe_source(input.script);
+    let empty_template_used = FxHashSet::default();
     let (binding_usage, auto_import_candidates) = if let Some(augmented) = augmented_body.as_deref()
     {
         let augmented_return =
-            Parser::new(&allocator, augmented, source_type_for_script(script)).parse();
+            Parser::new(allocator, augmented, source_type_for_script(input.script)).parse();
         (
-            compute_import_binding_usage(
-                &augmented_return.program,
-                &extractor.imports,
-                &empty_template_used,
-            ),
+            compute_import_binding_usage(&augmented_return.program, imports, &empty_template_used),
             compute_auto_import_candidates(&parser_return.program),
         )
     } else {
-        let semantic_usage = compute_semantic_usage(
-            &parser_return.program,
-            &extractor.imports,
-            &empty_template_used,
-        );
+        let semantic_usage =
+            compute_semantic_usage(&parser_return.program, imports, &empty_template_used);
         (
             semantic_usage.import_binding_usage,
             semantic_usage.auto_import_candidates,
         )
     };
-    combined
+    input
+        .combined
         .unused_import_bindings
         .extend(binding_usage.unused.iter().cloned());
-    combined
+    input
+        .combined
         .type_referenced_import_bindings
         .extend(binding_usage.type_referenced.iter().cloned());
-    combined
+    input
+        .combined
         .value_referenced_import_bindings
         .extend(binding_usage.value_referenced.iter().cloned());
-    combined
+    input
+        .combined
         .auto_import_candidates
         .extend(auto_import_candidates);
-    if need_complexity {
-        combined.complexity.extend(translate_script_complexity(
-            script,
-            &parser_return.program,
-            &combined.line_offsets,
-        ));
+}
+
+/// Carry an instance script's import locals and binding-target names into the
+/// template-visible sets (dropping empty locals and `this.`-prefixed targets) so
+/// the template scanner can credit them.
+fn harvest_template_visible_bindings(
+    input: &mut SfcScriptMergeInput<'_>,
+    extractor: &ModuleInfoExtractor,
+) {
+    input.template_visible_imports.extend(
+        extractor
+            .imports
+            .iter()
+            .filter(|import| !import.local_name.is_empty())
+            .map(|import| import.local_name.clone()),
+    );
+    input.template_visible_bound_targets.extend(
+        extractor
+            .binding_target_names()
+            .iter()
+            .filter(|(local, _)| !local.starts_with("this."))
+            .filter_map(|(local, target)| {
+                target
+                    .class_name()
+                    .map(|class_name| (local.clone(), class_name.to_string()))
+            }),
+    );
+    // Array / reactive-array binding element classes, so the Vue template
+    // scanner can type a `v-for` loop variable to its source's element class
+    // (issue #1707). `this.`-filtered for parity with bound targets.
+    input.template_visible_iterable_types.extend(
+        extractor
+            .array_binding_element_types()
+            .iter()
+            .filter(|(local, _)| !local.starts_with("this."))
+            .map(|(local, element)| (local.clone(), element.clone())),
+    );
+}
+
+/// Harvest Svelte 5 `$props()` declared props from an instance `<script>`
+/// program into `combined.component_props` (reusing the Vue IR + abstain flags),
+/// remapping each prop's body-relative span onto the SFC source via `byte_offset`.
+fn merge_svelte_props_into(
+    combined: &mut ModuleInfo,
+    program: &oxc_ast::ast::Program<'_>,
+    byte_offset: usize,
+) {
+    let harvest = crate::sfc_props::harvest_svelte_props(program);
+    if harvest.has_unharvestable_props {
+        combined.has_unharvestable_props = true;
     }
-
-    // Vue `<script setup>` `defineProps` harvesting for `unused-component-prop`.
-    // Spans returned by the harvest are relative to the script body; remap onto
-    // the SFC source via the script byte offset.
-    if kind == SfcKind::Vue && script.is_setup {
-        let harvest = crate::sfc_props::harvest_define_props(&parser_return.program);
-        if harvest.has_unharvestable_props {
-            combined.has_unharvestable_props = true;
-        }
-        if harvest.has_props_attrs_fallthrough {
-            combined.has_props_attrs_fallthrough = true;
-        }
-        if harvest.has_define_expose {
-            combined.has_define_expose = true;
-        }
-        if harvest.has_define_model {
-            combined.has_define_model = true;
-        }
-        if let Some(binding) = harvest.props_return_binding {
-            *props_return_binding = Some(binding);
-        }
-        for mut prop in harvest.props {
-            prop.span_start += script.byte_offset as u32;
-            combined.component_props.push(prop);
-        }
-
-        // `defineEmits` harvesting for `unused-component-emit`. Same span remap.
-        // `defineModel` creates implicit `update:x` emits, so a file with
-        // `defineModel` must abstain emits too (reuse the props-side flag).
-        let emit_harvest = crate::sfc_props::harvest_define_emits(&parser_return.program);
-        if emit_harvest.has_unharvestable_emits {
-            combined.has_unharvestable_emits = true;
-        }
-        if emit_harvest.has_dynamic_emit {
-            combined.has_dynamic_emit = true;
-        }
-        if emit_harvest.has_emit_whole_object_use {
-            combined.has_emit_whole_object_use = true;
-        }
-        if let Some(binding) = emit_harvest.emit_binding {
-            *emit_return_binding = Some(binding);
-        }
-        for mut emit in emit_harvest.emits {
-            emit.span_start += script.byte_offset as u32;
-            combined.component_emits.push(emit);
-        }
+    if harvest.has_props_attrs_fallthrough {
+        combined.has_props_attrs_fallthrough = true;
     }
+    for mut prop in harvest.props {
+        prop.span_start += byte_offset as u32;
+        combined.component_props.push(prop);
+    }
+}
 
-    if is_template_visible_script(kind, script) {
-        template_visible_imports.extend(
-            extractor
-                .imports
-                .iter()
-                .filter(|import| !import.local_name.is_empty())
-                .map(|import| import.local_name.clone()),
+/// Harvest Vue prop/emit declarations into `combined`, remapping body-relative
+/// spans onto the SFC source via the script byte offset. The `<script setup>`
+/// path harvests `defineProps` / `defineEmits` (and the `defineExpose` /
+/// `defineModel` abstain flags + return bindings); the non-setup path harvests
+/// the Options API `props:` / `emits:` (same IR, same abstain flags, same remap,
+/// only the harvest source differs).
+fn merge_vue_props_emits_into(
+    input: &mut SfcScriptMergeInput<'_>,
+    program: &oxc_ast::ast::Program<'_>,
+    extractor: &mut ModuleInfoExtractor,
+) {
+    let byte_offset = input.script.byte_offset as u32;
+    if input.script.is_setup {
+        apply_props_harvest(
+            input,
+            crate::sfc_props::harvest_define_props(program),
+            byte_offset,
+            extractor,
         );
-        template_visible_bound_targets.extend(
-            extractor
-                .binding_target_names()
-                .iter()
-                .filter(|(local, _)| !local.starts_with("this."))
-                .map(|(local, target)| (local.clone(), target.clone())),
+        apply_emits_harvest(
+            input,
+            crate::sfc_props::harvest_define_emits(program),
+            byte_offset,
+        );
+    } else {
+        apply_props_harvest(
+            input,
+            crate::sfc_props::harvest_options_api_props(program),
+            byte_offset,
+            extractor,
+        );
+        apply_emits_harvest(
+            input,
+            crate::sfc_props::harvest_options_api_emits(program),
+            byte_offset,
         );
     }
+}
 
-    extractor.merge_into(combined);
+/// Fold a prop harvest (setup `defineProps` or Options-API `props:`) into
+/// `combined`: copy the abstain flags and `defineProps` return binding, then push
+/// each prop with its span remapped onto the SFC source. The setup-only fields
+/// (`has_define_expose` / `has_define_model` / `props_return_binding`) default to
+/// `false`/`None` in the Options-API harvest, so the shared copy is inert there.
+fn apply_props_harvest(
+    input: &mut SfcScriptMergeInput<'_>,
+    harvest: crate::sfc_props::DefinePropsHarvest,
+    byte_offset: u32,
+    extractor: &mut ModuleInfoExtractor,
+) {
+    if harvest.has_unharvestable_props {
+        input.combined.has_unharvestable_props = true;
+    }
+    if harvest.has_props_attrs_fallthrough {
+        input.combined.has_props_attrs_fallthrough = true;
+    }
+    if harvest.has_define_expose {
+        input.combined.has_define_expose = true;
+    }
+    if harvest.has_define_model {
+        input.combined.has_define_model = true;
+    }
+    if let Some(binding) = harvest.props_return_binding {
+        *input.props_return_binding = Some(binding);
+    }
+    // Record each props array field's element class keyed `props.<field>` into the
+    // visitor's array-binding element-types map (issue #1711). This runs before
+    // `harvest_template_visible_bindings` reads that map into
+    // `template_visible_iterable_types`, so a `v-for="(util) of props.items"`
+    // matches the `"props.items"` key and types `util` to the element class.
+    // Over-credit only: the harvest records a field only when its type resolved
+    // to a non-builtin array element class, so this can never add a finding.
+    for (field_name, element_type) in harvest.props_array_element_types {
+        extractor
+            .array_binding_element_types_mut()
+            .insert(format!("props.{field_name}"), element_type);
+    }
+    for mut prop in harvest.props {
+        prop.span_start += byte_offset;
+        input.combined.component_props.push(prop);
+    }
+}
+
+/// Fold an emit harvest (setup `defineEmits` or Options-API `emits:`) into
+/// `combined`: copy the abstain flags and emit return binding, then push each
+/// emit with its span remapped onto the SFC source. The setup-only fields
+/// (`has_emit_whole_object_use` / `emit_binding`) default to `false`/`None` in
+/// the Options-API harvest, so the shared copy is inert there.
+fn apply_emits_harvest(
+    input: &mut SfcScriptMergeInput<'_>,
+    harvest: crate::sfc_props::DefineEmitsHarvest,
+    byte_offset: u32,
+) {
+    if harvest.has_unharvestable_emits {
+        input.combined.has_unharvestable_emits = true;
+    }
+    if harvest.has_dynamic_emit {
+        input.combined.has_dynamic_emit = true;
+    }
+    if harvest.has_emit_whole_object_use {
+        input.combined.has_emit_whole_object_use = true;
+    }
+    if let Some(binding) = harvest.emit_binding {
+        *input.emit_return_binding = Some(binding);
+    }
+    for mut emit in harvest.emits {
+        emit.span_start += byte_offset;
+        input.combined.component_emits.push(emit);
+    }
 }
 
 fn translate_script_complexity(
@@ -721,50 +968,131 @@ fn build_generic_attr_probe_source(script: &SfcScript) -> Option<String> {
     ))
 }
 
-fn apply_template_usage(
+struct TemplateUsageInput<'a> {
     kind: SfcKind,
-    source: &str,
-    template_visible_imports: &FxHashSet<String>,
-    template_visible_bound_targets: &FxHashMap<String, String>,
-    props_return_binding: Option<&str>,
-    combined: &mut ModuleInfo,
-) {
-    // Props are NOT imports, so the template scanner does not credit them by
-    // default. Thread the harvested prop names (and the `defineProps` return
-    // binding, so `props.<name>` template member accesses are emitted) in as an
-    // additional credited set alongside `template_visible_imports`. Crediting a
-    // prop name against an import is inert (no import binding shares the name),
-    // so the unused-import retain is unaffected.
-    let credited: FxHashSet<String> = if combined.component_props.is_empty() {
-        template_visible_imports.clone()
-    } else {
-        let mut set = template_visible_imports.clone();
-        for prop in &combined.component_props {
-            // Credit both the declared name (Vue exposes props by name in the
-            // template) and the destructure local (a renamed prop is used via it).
-            set.insert(prop.name.clone());
-            set.insert(prop.local.clone());
-        }
-        // Vue's implicit `$props` whole-props object is always available in a
-        // template; credit `$props.<name>` member accesses too.
-        set.insert("$props".to_string());
-        if let Some(binding) = props_return_binding {
-            set.insert(binding.to_string());
-        }
-        set
-    };
+    source: &'a str,
+    template_visible_imports: &'a FxHashSet<String>,
+    template_visible_bound_targets: &'a FxHashMap<String, String>,
+    template_visible_iterable_types: &'a FxHashMap<String, String>,
+    props_return_binding: Option<&'a str>,
+    credit_load_data: bool,
+    combined: &'a mut ModuleInfo,
+}
 
-    let template_usage = collect_template_usage_with_bound_targets(
+fn apply_template_usage(input: TemplateUsageInput<'_>) {
+    let TemplateUsageInput {
+        kind,
+        source,
+        template_visible_imports,
+        template_visible_bound_targets,
+        template_visible_iterable_types,
+        props_return_binding,
+        credit_load_data,
+        combined,
+    } = input;
+    let credited = build_template_credited_set(
+        template_visible_imports,
+        props_return_binding,
+        credit_load_data,
+        source,
+        combined,
+    );
+    let template_usage = compute_template_usage(
         kind,
         source,
         &credited,
         template_visible_bound_targets,
+        template_visible_iterable_types,
+        credit_load_data,
     );
+    apply_prop_template_credit(&template_usage, props_return_binding, combined);
+    merge_template_usage_into_combined(template_usage, combined);
+}
 
-    // A template reference credits `used_in_template`: either a bare prop name in
-    // `used_bindings` (destructured prop form, or template uses the bare name) OR
-    // a `<props>.<name>` / `$props.<name>` member access (the
-    // `const props = defineProps()` form and Vue's implicit `$props`).
+/// Build the set of template-credited names: the template-visible imports plus
+/// each harvested prop name / destructure local, Vue's implicit `$props`, the
+/// `defineProps` return binding, and (for SvelteKit route components) the `data`
+/// load prop. Crediting a prop name against an import is inert. Also sets
+/// `has_load_data_whole_use` when a route spreads / passes the whole `data` prop.
+fn build_template_credited_set(
+    template_visible_imports: &FxHashSet<String>,
+    props_return_binding: Option<&str>,
+    credit_load_data: bool,
+    source: &str,
+    combined: &mut ModuleInfo,
+) -> FxHashSet<String> {
+    let mut credited: FxHashSet<String> = template_visible_imports.clone();
+    // unused-load-data-key Primitive B: a SvelteKit route component receives a
+    // `data` prop populated by the route's `load()` return object. Credit `data`
+    // as a recognized root so its template member accesses (`data.<key>`) are
+    // emitted for the cross-file load-data-key join, gated to route components.
+    if credit_load_data {
+        credited.insert("data".to_string());
+        // FP-1: a route component spreading / passing the whole `data` prop in
+        // markup consumes arbitrary keys opaquely; force the detector to abstain.
+        if SVELTE_TEMPLATE_DATA_WHOLE_USE_RE.is_match(source) {
+            combined.has_load_data_whole_use = true;
+        }
+    }
+    if !combined.component_props.is_empty() {
+        for prop in &combined.component_props {
+            // Credit both the declared name (Vue exposes props by name in the
+            // template) and the destructure local (a renamed prop is used via it).
+            credited.insert(prop.name.clone());
+            credited.insert(prop.local.clone());
+        }
+        // Vue's implicit `$props` whole-props object is always available in a
+        // template; credit `$props.<name>` member accesses too.
+        credited.insert("$props".to_string());
+        if let Some(binding) = props_return_binding {
+            credited.insert(binding.to_string());
+        }
+    }
+    credited
+}
+
+/// Scan the template for usage of the credited names and bound targets. For a
+/// SvelteKit route, `data` is dropped from the bound targets so its template
+/// member accesses stay keyed on `data` (not remapped onto the generated
+/// `PageData` / `LayoutData` type) for the cross-file load-data join.
+fn compute_template_usage(
+    kind: SfcKind,
+    source: &str,
+    credited: &FxHashSet<String>,
+    template_visible_bound_targets: &FxHashMap<String, String>,
+    template_visible_iterable_types: &FxHashMap<String, String>,
+    credit_load_data: bool,
+) -> crate::template_usage::TemplateUsage {
+    if credit_load_data && template_visible_bound_targets.contains_key("data") {
+        let mut filtered = template_visible_bound_targets.clone();
+        filtered.remove("data");
+        collect_template_usage_with_bound_targets(
+            kind,
+            source,
+            credited,
+            &filtered,
+            template_visible_iterable_types,
+        )
+    } else {
+        collect_template_usage_with_bound_targets(
+            kind,
+            source,
+            credited,
+            template_visible_bound_targets,
+            template_visible_iterable_types,
+        )
+    }
+}
+
+/// Mark each harvested prop `used_in_template` when the template references it by
+/// bare name (destructure form) or via a `<props>.<name>` / `$props.<name>`
+/// member access. A bare reference to a custom `defineProps` return binding as a
+/// whole object means abstain on the whole file (`has_props_attrs_fallthrough`).
+fn apply_prop_template_credit(
+    template_usage: &crate::template_usage::TemplateUsage,
+    props_return_binding: Option<&str>,
+    combined: &mut ModuleInfo,
+) {
     if !combined.component_props.is_empty() {
         let member_used: FxHashSet<&str> = template_usage
             .member_accesses
@@ -785,12 +1113,6 @@ fn apply_template_usage(
         }
     }
 
-    // A custom-named `defineProps` return spread as a whole object in the template
-    // (`const myProps = defineProps(); <Child v-bind="myProps" />`) consumes every
-    // prop opaquely; the literal `props`/`$props`/`$attrs` regex misses a custom
-    // name. The scanner records a bare `v-bind="myProps"` value as a used binding
-    // (not a whole-object use), so a bare reference to the return binding in either
-    // set means abstain on the whole file.
     if let Some(binding) = props_return_binding
         && (template_usage.used_bindings.contains(binding)
             || template_usage
@@ -800,16 +1122,25 @@ fn apply_template_usage(
     {
         combined.has_props_attrs_fallthrough = true;
     }
+}
 
+/// Drain the scanned template usage into `combined`: retain unused-import
+/// bindings the template did not consume, extend member accesses / whole-object
+/// uses / security sinks, and fold unresolved tag names into auto-import
+/// candidates (sorted + deduped).
+fn merge_template_usage_into_combined(
+    template_usage: crate::template_usage::TemplateUsage,
+    combined: &mut ModuleInfo,
+) {
     combined
         .unused_import_bindings
         .retain(|binding| !template_usage.used_bindings.contains(binding));
     combined
         .member_accesses
         .extend(template_usage.member_accesses);
-    combined
-        .whole_object_uses
-        .extend(template_usage.whole_object_uses);
+    let mut whole_object_uses = std::mem::take(&mut combined.whole_object_uses).into_vec();
+    whole_object_uses.extend(template_usage.whole_object_uses);
+    combined.whole_object_uses = whole_object_uses.into_boxed_slice();
     combined
         .security_sinks
         .extend(template_usage.security_sinks);
@@ -980,6 +1311,81 @@ const count = 0;
         let scripts = extract_sfc_scripts(r#"<script src="./component.ts" lang="ts"></script>"#);
         assert_eq!(scripts.len(), 1);
         assert_eq!(scripts[0].src.as_deref(), Some("./component.ts"));
+    }
+
+    // -- Svelte module-context recognition (W1.1 piece 1) ----------------------
+
+    #[test]
+    fn svelte4_context_module_is_module_context() {
+        let scripts =
+            extract_sfc_scripts(r#"<script context="module">export const x = 1;</script>"#);
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].is_context_module);
+    }
+
+    #[test]
+    fn svelte5_bare_module_attr_is_module_context() {
+        let scripts = extract_sfc_scripts(r"<script module>export const x = 1;</script>");
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].is_context_module);
+    }
+
+    #[test]
+    fn svelte5_module_with_lang_is_module_context() {
+        let scripts =
+            extract_sfc_scripts(r#"<script module lang="ts">export const x = 1;</script>"#);
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].is_context_module);
+        assert!(scripts[0].is_typescript);
+    }
+
+    #[test]
+    fn plain_script_is_not_module_context() {
+        let scripts = extract_sfc_scripts(r"<script>const x = 1;</script>");
+        assert_eq!(scripts.len(), 1);
+        assert!(!scripts[0].is_context_module);
+    }
+
+    #[test]
+    fn lang_ts_script_is_not_module_context() {
+        let scripts = extract_sfc_scripts(r#"<script lang="ts">const x = 1;</script>"#);
+        assert_eq!(scripts.len(), 1);
+        assert!(!scripts[0].is_context_module);
+    }
+
+    #[test]
+    fn data_module_attr_is_not_module_context() {
+        // The `(?:^|\s)module(?:\s|$|=)` anchor must not match `data-module`.
+        let scripts =
+            extract_sfc_scripts(r#"<script data-module="x" lang="ts">const x = 1;</script>"#);
+        assert_eq!(scripts.len(), 1);
+        assert!(!scripts[0].is_context_module);
+    }
+
+    #[test]
+    fn bare_module_script_is_not_template_visible() {
+        // AC-2: a bare `<script module>` is scoped as module context, so its
+        // imports are NOT credited as template-visible (matching `context="module"`).
+        let module_script = SfcScript {
+            body: String::new(),
+            is_typescript: false,
+            is_jsx: false,
+            byte_offset: 0,
+            src: None,
+            src_span: None,
+            is_setup: false,
+            is_context_module: true,
+            generic_attr: None,
+        };
+        assert!(!is_template_visible_script(SfcKind::Svelte, &module_script));
+        let instance_script = SfcScript {
+            is_context_module: false,
+            ..module_script
+        };
+        assert!(is_template_visible_script(
+            SfcKind::Svelte,
+            &instance_script
+        ));
     }
 
     #[test]
@@ -1458,5 +1864,187 @@ export const foo = 1;
             "template <img src> should seed a SideEffect import: {:?}",
             info.imports
         );
+    }
+
+    // -- Svelte 5 `$props()` rune harvest (W1.1 piece 2) -----------------------
+
+    fn svelte_props(source: &str) -> Vec<crate::ModuleInfo> {
+        vec![parse_sfc_to_module(
+            FileId(0),
+            Path::new("Component.svelte"),
+            source,
+            0,
+            false,
+        )]
+    }
+
+    fn prop_names(info: &crate::ModuleInfo) -> Vec<String> {
+        let mut names: Vec<String> = info
+            .component_props
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn svelte_shorthand_props_harvested() {
+        // AC-3: `let { a, b } = $props()` harvests `a`, `b` with `local == name`.
+        let info = &svelte_props(r"<script>let { a, b } = $props();</script>")[0];
+        assert_eq!(prop_names(info), vec!["a", "b"]);
+        for prop in &info.component_props {
+            assert_eq!(prop.local, prop.name);
+        }
+    }
+
+    #[test]
+    fn svelte_renamed_prop_tracks_local_and_script_use() {
+        // AC-4: `let { a: alias } = $props()` harvests `a` with `local == "alias"`,
+        // and a reference to `alias` sets `used_in_script` for prop `a`.
+        let info =
+            &svelte_props(r"<script>let { a: alias } = $props(); console.log(alias);</script>")[0];
+        assert_eq!(prop_names(info), vec!["a"]);
+        let prop = &info.component_props[0];
+        assert_eq!(prop.local, "alias");
+        assert!(
+            prop.used_in_script,
+            "alias is referenced, so a is used in script"
+        );
+    }
+
+    #[test]
+    fn svelte_unreferenced_prop_is_unused_in_script() {
+        let info = &svelte_props(r"<script>let { a } = $props();</script>")[0];
+        assert_eq!(prop_names(info), vec!["a"]);
+        assert!(!info.component_props[0].used_in_script);
+    }
+
+    #[test]
+    fn svelte_default_prop_peeled() {
+        // AC-5: `let { a = 1 } = $props()` harvests `a` (default peeled).
+        let info = &svelte_props(r"<script>let { a = 1 } = $props();</script>")[0];
+        assert_eq!(prop_names(info), vec!["a"]);
+    }
+
+    #[test]
+    fn svelte_bindable_default_peeled() {
+        // The bindable form `let { a = $bindable() } = $props()`: `a` is still a
+        // declared prop (the default value is irrelevant to the local name).
+        let info = &svelte_props(r"<script>let { a = $bindable() } = $props();</script>")[0];
+        assert_eq!(prop_names(info), vec!["a"]);
+    }
+
+    #[test]
+    fn svelte_rest_element_sets_fallthrough_abstain() {
+        // AC-6: `let { a, ...rest } = $props()` sets has_props_attrs_fallthrough.
+        let info = &svelte_props(r"<script>let { a, ...rest } = $props();</script>")[0];
+        assert!(info.has_props_attrs_fallthrough);
+    }
+
+    #[test]
+    fn svelte_bare_identifier_binding_sets_unharvestable_abstain() {
+        // AC-7: `let p = $props()` (no destructure) sets has_unharvestable_props.
+        let info = &svelte_props(r"<script>let p = $props(); console.log(p.x);</script>")[0];
+        assert!(info.has_unharvestable_props);
+        assert!(info.component_props.is_empty());
+    }
+
+    #[test]
+    fn svelte_nested_destructure_sets_unharvestable_abstain() {
+        // A nested destructure (`{ a: { x } }`) cannot be flattened. Abstain.
+        let info = &svelte_props(r"<script>let { a: { x } } = $props();</script>")[0];
+        assert!(info.has_unharvestable_props);
+    }
+
+    #[test]
+    fn svelte_prop_used_only_in_markup_credited_as_template_root() {
+        // AC-8: a prop used only in markup (`{a}`) is credited via
+        // `apply_template_usage`, so `used_in_template` is set (parity with Vue).
+        let info = &svelte_props(r"<script>let { a } = $props();</script><p>{a}</p>")[0];
+        assert_eq!(prop_names(info), vec!["a"]);
+        assert!(
+            info.component_props[0].used_in_template,
+            "a is used in markup, so used_in_template should be true"
+        );
+    }
+
+    #[test]
+    fn svelte_module_script_props_not_harvested() {
+        // `$props()` is instance-only; a module-context script must not harvest.
+        let info = &svelte_props(
+            r"<script module>let { a } = $props();</script><script>let { b } = $props();</script>",
+        )[0];
+        // Only the instance script's `b` is harvested.
+        assert_eq!(prop_names(info), vec!["b"]);
+    }
+
+    // -- Svelte custom-event dispatch harvest (unused-svelte-event) ------------
+
+    fn dispatched_names(info: &crate::ModuleInfo) -> Vec<String> {
+        let mut names: Vec<String> = info
+            .svelte_dispatched_events
+            .iter()
+            .map(|e| e.name.clone())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn svelte_dispatch_literal_event_is_harvested() {
+        let info = &svelte_props(
+            r"<script>import { createEventDispatcher } from 'svelte';
+              const dispatch = createEventDispatcher();
+              function save() { dispatch('save'); }</script>",
+        )[0];
+        assert_eq!(dispatched_names(info), vec!["save"]);
+        assert!(!info.has_dynamic_dispatch);
+    }
+
+    #[test]
+    fn svelte_dispatch_without_svelte_import_is_ignored() {
+        // A local `createEventDispatcher` not imported from `svelte` is not a
+        // dispatcher; the `dispatch('save')` call records nothing.
+        let info = &svelte_props(
+            r"<script>function createEventDispatcher() { return () => {}; }
+              const dispatch = createEventDispatcher();
+              dispatch('save');</script>",
+        )[0];
+        assert!(info.svelte_dispatched_events.is_empty());
+    }
+
+    #[test]
+    fn svelte_dynamic_dispatch_sets_abstain() {
+        let info = &svelte_props(
+            r"<script>import { createEventDispatcher } from 'svelte';
+              const dispatch = createEventDispatcher();
+              function fire(name) { dispatch(name); }</script>",
+        )[0];
+        assert!(
+            info.has_dynamic_dispatch,
+            "a non-literal dispatch arg must set the abstain flag"
+        );
+    }
+
+    #[test]
+    fn svelte_dispatch_whole_value_use_sets_abstain() {
+        let info = &svelte_props(
+            r"<script>import { createEventDispatcher } from 'svelte';
+              const dispatch = createEventDispatcher();
+              forward(dispatch);</script>",
+        )[0];
+        assert!(
+            info.has_dynamic_dispatch,
+            "passing the dispatch binding as a whole value must set the abstain flag"
+        );
+    }
+
+    #[test]
+    fn svelte_listened_event_on_component_is_harvested() {
+        let info =
+            &svelte_props(r"<script>import Child from './Child.svelte';</script><Child on:save />")
+                [0];
+        assert!(info.svelte_listened_events.contains(&"save".to_string()));
     }
 }

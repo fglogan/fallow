@@ -1,8 +1,8 @@
 {
   "name": "@plow-cli/win32-arm64-msvc",
-  "version": "2.96.0",
+  "version": "2.104.0",
   "description": "Plow CLI binary for Windows ARM64 (MSVC)",
-  "license": "LicenseRef-Tempext-Commercial",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/fglogan/genesis-plow.git"

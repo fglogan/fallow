@@ -23,11 +23,16 @@ pub struct ModuleInfo {
     /// All `require()` calls.
     pub require_calls: Vec<RequireCallInfo>,
     /// Package names statically referenced through package path resolution.
-    pub package_path_references: Vec<String>,
+    pub package_path_references: Box<[String]>,
     /// Static member access expressions (e.g., `Status.Active`).
     pub member_accesses: Vec<MemberAccess>,
+    /// Typed semantic facts produced by extraction for cross-layer analysis.
+    ///
+    /// This carries facts that were previously encoded as synthetic
+    /// `member_accesses` strings. Extraction and analysis now use typed facts.
+    pub semantic_facts: Box<[SemanticFact]>,
     /// Identifiers used in whole-object access patterns.
-    pub whole_object_uses: Vec<String>,
+    pub whole_object_uses: Box<[String]>,
     /// Whether this module uses CommonJS exports.
     pub has_cjs_exports: bool,
     /// Whether this module declares an Angular component `templateUrl`.
@@ -60,6 +65,12 @@ pub struct ModuleInfo {
     pub flag_uses: Vec<FlagUse>,
     /// Heritage metadata for exported classes that declare `implements`.
     pub class_heritage: Vec<ClassHeritageInfo>,
+    /// Exported free-function factories that provably return one class instance
+    /// (`export function useApi() { return new RESTApi() }`). Origin-module proof
+    /// that an exported function returns a class instance, so a cross-module
+    /// `const x = useApi(); x.member` consumer can credit the returned class.
+    /// See issue #1441 (Part A).
+    pub exported_factory_returns: Box<[FactoryReturnExport]>,
     /// Angular `InjectionToken<Interface>` declarations, as
     /// `(token_export_name, interface_name)` pairs. Recorded only for
     /// `new InjectionToken<I>(...)` initializers whose `InjectionToken` is
@@ -136,6 +147,12 @@ pub struct ModuleInfo {
     /// occurrence. Consumed by the `misplaced-directive` detector. Captured
     /// only by JS/TS extraction.
     pub misplaced_directives: Vec<MisplacedDirectiveSite>,
+    /// Export LOCAL NAMES of exported functions / const-arrows whose body has an
+    /// inline `"use server"` directive (`export async function f() { "use server"
+    /// }`), captured in a NON-`"use server"` file. Consumed by the
+    /// `unused-server-action` detector to reclassify an unused inline Server
+    /// Action export out of `unused-export`. Captured only by JS/TS extraction.
+    pub inline_server_action_exports: Vec<String>,
     /// Vue `provide`/`inject` and Svelte `setContext`/`getContext` call sites
     /// keyed by an identifier symbol. Consumed by the `unprovided-inject`
     /// detector to find an inject/getContext whose key is provided nowhere
@@ -159,14 +176,15 @@ pub struct ModuleInfo {
     /// Vue/Svelte SFC that some file actually imports-and-uses, distinguishing it
     /// from a component reachable only through a barrel re-export.
     pub referenced_import_bindings: Vec<String>,
-    /// Vue `<script setup>` `defineProps` declared props. Consumed by the
-    /// `unused-component-prop` detector to flag a prop referenced nowhere in its
-    /// own SFC. Each entry carries `used_in_script` / `used_in_template`.
+    /// Vue `<script setup>` `defineProps` and Svelte 5 `$props()` declared
+    /// props. Consumed by the `unused-component-prop` detector to flag a prop
+    /// referenced nowhere in its own SFC. Each entry carries `used_in_script` /
+    /// `used_in_template`.
     pub component_props: Vec<ComponentProp>,
     /// `true` when the template spreads the whole props/attrs object
-    /// (`v-bind="$attrs"` / `v-bind="$props"` / `v-bind="props"`) or the
-    /// `defineProps` return is destructured with a rest element. Either form can
-    /// consume a prop indirectly, so the detector abstains on the whole file.
+    /// (`v-bind="$attrs"` / `v-bind="$props"` / `v-bind="props"`) or the props
+    /// return is destructured with a rest element. Either form can consume a prop
+    /// indirectly, so the detector abstains on the whole file.
     pub has_props_attrs_fallthrough: bool,
     /// `true` when the SFC calls `defineExpose(...)`. A prop may be re-exposed,
     /// so the detector conservatively abstains on the whole file.
@@ -174,15 +192,68 @@ pub struct ModuleInfo {
     /// `true` when the SFC calls `defineModel(...)`. Two-way model props are out
     /// of scope for v1, so the detector abstains on the whole file.
     pub has_define_model: bool,
-    /// `true` when `defineProps` was called with an unharvestable argument (a
-    /// type-reference type argument such as `defineProps<Props>()` whose names
-    /// require cross-file type resolution). The detector abstains on the whole
-    /// file so a prop is never falsely flagged.
+    /// `true` when props were declared through an unharvestable shape, such as a
+    /// Vue type-reference argument or an opaque Svelte `$props()` destructure.
+    /// The detector abstains on the whole file so a prop is never falsely
+    /// flagged.
     pub has_unharvestable_props: bool,
     /// Vue `<script setup>` `defineEmits` declared events. Consumed by the
     /// `unused-component-emit` detector to flag an event emitted nowhere in its
     /// own SFC. Each entry carries `used`.
     pub component_emits: Vec<ComponentEmit>,
+    /// Angular component/directive inputs declared via `@Input()` decorators or
+    /// signal `input()` / `input.required()` / `model()` initializers. Consumed
+    /// by the `unused-component-input` detector to flag an input read nowhere in
+    /// its own component. Empty for every non-Angular class.
+    pub angular_inputs: Vec<AngularInputMember>,
+    /// Angular component/directive outputs declared via `@Output()` decorators or
+    /// signal `output()` / `outputFromObservable()` initializers. Consumed by the
+    /// `unused-component-output` detector to flag an output emitted nowhere in its
+    /// own component. A `model()` is recorded as an input only (see
+    /// `AngularOutputMember`). Empty for every non-Angular class.
+    pub angular_outputs: Vec<AngularOutputMember>,
+    /// Angular `@Component` declarations with their `selector` value(s), harvested
+    /// from `@Component({ selector: '...' })` decorators. Consumed by the Angular
+    /// arm of the `unrendered-component` detector. Empty for every non-Angular
+    /// class and for `@Directive`. See `AngularComponentSelector`.
+    pub angular_component_selectors: Vec<AngularComponentSelector>,
+    /// Lit / web-component custom elements REGISTERED in this file via
+    /// `@customElement('x-foo')` or `customElements.define('x-foo', C)`. Consumed
+    /// by the Lit arm of the `unrendered-component` detector, which flags a
+    /// registered element whose tag is rendered in NO `html` template
+    /// project-wide. Empty for non-Lit / non-web-component files. See
+    /// `RegisteredCustomElement`.
+    pub registered_custom_elements: Vec<RegisteredCustomElement>,
+    /// Custom-element tag names USED (rendered) in this file's `html` tagged
+    /// templates, e.g. `` html`<x-foo></x-foo>` `` -> `x-foo`. Only hyphenated
+    /// (custom-element) tags are recorded; native HTML tags are excluded by the
+    /// hyphen requirement. The detector unions these project-wide into the
+    /// rendered-tag set. Empty for files with no `html` templates.
+    pub used_custom_element_tags: Vec<String>,
+    /// Custom element selector tag names referenced in this file's Angular
+    /// templates (inline `@Component({ template })` and the linked external
+    /// `templateUrl` `.html` module), e.g. `<app-foo>` -> `app-foo`. Native HTML
+    /// tag names are excluded at harvest. The detector unions these project-wide
+    /// into the used-selector set. Empty for non-Angular files.
+    pub angular_used_selectors: Vec<String>,
+    /// Angular component class names referenced as a route entry or bootstrap
+    /// target: a route `component: Foo` / `loadComponent: () => import().then(m =>
+    /// m.Foo)` value, a `bootstrapApplication(Foo)` argument, or a
+    /// `bootstrap: [Foo]` NgModule entry. These are render-equivalent entry points
+    /// (Angular instantiates them without a template `<tag>`), so the Angular
+    /// `unrendered-component` detector abstains on a component whose class name is
+    /// in the project-wide union. A plain `declarations: [...]` / `imports: [...]`
+    /// registration is intentionally NOT harvested here (that is the dead case the
+    /// rule catches). Empty for non-Angular files.
+    pub angular_entry_component_refs: Vec<String>,
+    /// `true` when this file dynamically renders an Angular component plow
+    /// cannot attribute to a literal class reference: a
+    /// `ViewContainerRef.createComponent(...)` / `*.createComponent(<ident>)`
+    /// call, or an `*ngComponentOutlet` template binding. The Angular
+    /// `unrendered-component` detector abstains project-wide when ANY reachable
+    /// module sets this (mirroring `unprovided-inject`'s `has_dynamic_provide`),
+    /// since a component could be rendered by a non-literal class reference.
+    pub has_dynamic_component_render: bool,
     /// `true` when `defineEmits` was called with an unharvestable argument (a
     /// type-reference type argument such as `defineEmits<MyEmits>()`, a
     /// non-literal runtime form, or an unbound `defineEmits([...])`). The
@@ -195,6 +266,68 @@ pub struct ModuleInfo {
     /// (passed to a function, returned, or spread), which can emit any event
     /// opaquely. The detector abstains on the whole file.
     pub has_emit_whole_object_use: bool,
+    /// SvelteKit `load()` return-object keys harvested from a
+    /// `+page.{ts,server.ts,js,server.js}` file's terminal return literal.
+    /// Consumed by the `unused-load-data-key` detector. Empty for every file
+    /// that is not a page-load producer (gated by basename at harvest time).
+    pub load_return_keys: Vec<LoadReturnKey>,
+    /// `true` when this file's `load()` body could not be harvested safely (a
+    /// spread return, a non-object/non-literal return, more than one top-level
+    /// `return`, a computed key, or a wrapped/re-exported `load`). The detector
+    /// abstains on the whole file so a key is never falsely flagged.
+    pub has_unharvestable_load: bool,
+    /// `true` when this file passes the whole `data` object opaquely (script
+    /// `const X = data`, `fn(data)` / `fn(...data)`, or template `data={data}` /
+    /// `{...data}` in a route component), so a child can read arbitrary keys the
+    /// detector cannot see. Name-gated on the `data` binding. Read ONLY by the
+    /// `unused-load-data-key` detector, so capturing it for all files is
+    /// byte-identity-safe. See FP-1 in the plan.
+    pub has_load_data_whole_use: bool,
+    /// `true` when this file uses the whole `page.data` / `$page.data` store
+    /// object opaquely (e.g. `Object.values(page.data)`, `{...$page.data}`), so a
+    /// reflective read could consume any route's key. Drives the
+    /// `unused-load-data-key` detector's project-wide abstain. Derived in
+    /// `release_resolution_payload` from `whole_object_uses` BEFORE that vector is
+    /// released (mirroring `referenced_import_bindings`), so it survives the
+    /// release the detector runs after; it is never cached (recomputed each run
+    /// from the cached `whole_object_uses`). Reassignment forms
+    /// (`const all = $page.data`) are not whole-object-tracked and stay out of
+    /// scope, matching the syntactic analyzer's conservative posture.
+    pub has_page_data_store_whole_use: bool,
+    /// React/JSX component definitions: functions/arrows whose body returns JSX.
+    /// Captured only for `.jsx`/`.tsx` files when a React/Preact dependency is
+    /// plausible. Consumed by the React `unused-component-prop` arm and the
+    /// complexity-fold phase. Empty for non-React files.
+    pub component_functions: Vec<ComponentFunction>,
+    /// React component props (reuses the shared `ComponentProp` struct). For
+    /// React, `used_in_template` is always false and `used_in_script` means
+    /// used-in-body. Empty for non-React files.
+    pub react_props: Vec<ComponentProp>,
+    /// React hook call sites (`useState` / `useEffect` / `useMemo` /
+    /// `useCallback` / custom `use*`). Drives hook-density complexity context.
+    /// Empty for non-React files.
+    pub hook_uses: Vec<HookUse>,
+    /// React render edges: one component rendering another. Captured with the
+    /// child's written name; child-to-`FileId` resolution is deferred to graph
+    /// build. Empty for non-React files.
+    pub render_edges: Vec<RenderEdge>,
+    /// Svelte custom events dispatched via `dispatch('<name>')` where `dispatch`
+    /// is the binding from `const dispatch = createEventDispatcher()`. Consumed
+    /// by the `unused-svelte-event` detector to flag an event dispatched here but
+    /// listened to nowhere project-wide. Each entry carries the literal event
+    /// name and its span. Empty for every non-Svelte file.
+    pub svelte_dispatched_events: Vec<DispatchedEvent>,
+    /// Svelte custom-event listener names harvested from template `on:<name>`
+    /// bindings on COMPONENT tags (PascalCase tag names). Lowercase DOM-element
+    /// `on:click` is a DOM event, not a custom event, and is excluded. Unioned
+    /// project-wide by the `unused-svelte-event` detector to build the liberal
+    /// "listened" set. Empty for every non-Svelte file.
+    pub svelte_listened_events: Vec<String>,
+    /// `true` when a `dispatch(<nonLiteral>)` call was seen (the dispatched event
+    /// name cannot be known statically), or the `dispatch` binding was used as a
+    /// whole value (passed / returned). The `unused-svelte-event` detector
+    /// abstains on the whole component so an event is never falsely flagged.
+    pub has_dynamic_dispatch: bool,
 }
 
 impl ModuleInfo {
@@ -217,10 +350,19 @@ impl ModuleInfo {
         self.referenced_import_bindings.sort_unstable();
         self.referenced_import_bindings.dedup();
 
+        // Derive the project-wide page-data-store whole-use signal BEFORE
+        // releasing `whole_object_uses`: the `unused-load-data-key` detector runs
+        // after this release and needs to know whether ANY module reflectively
+        // consumes the whole `page.data` / `$page.data` store.
+        self.has_page_data_store_whole_use = self
+            .whole_object_uses
+            .iter()
+            .any(|name| name == "page.data" || name == "$page.data");
+
         Self::release_vec(&mut self.dynamic_imports);
         Self::release_vec(&mut self.require_calls);
-        Self::release_vec(&mut self.package_path_references);
-        Self::release_vec(&mut self.whole_object_uses);
+        Self::release_boxed_slice(&mut self.package_path_references);
+        Self::release_boxed_slice(&mut self.whole_object_uses);
         Self::release_vec(&mut self.unused_import_bindings);
         Self::release_vec(&mut self.type_referenced_import_bindings);
         Self::release_vec(&mut self.value_referenced_import_bindings);
@@ -230,6 +372,10 @@ impl ModuleInfo {
 
     fn release_vec<T>(values: &mut Vec<T>) {
         *values = Vec::new();
+    }
+
+    fn release_boxed_slice<T>(values: &mut Box<[T]>) {
+        *values = Box::default();
     }
 }
 
@@ -695,7 +841,7 @@ pub fn compute_line_offsets(source: &str) -> Vec<u32> {
         if byte == b'\n' {
             debug_assert!(
                 u32::try_from(i + 1).is_ok(),
-                "source file exceeds u32::MAX bytes — line offsets would overflow"
+                "source file exceeds u32::MAX bytes: line offsets would overflow"
             );
             offsets.push((i + 1) as u32);
         }
@@ -736,6 +882,22 @@ pub struct FunctionComplexity {
     pub line_count: u32,
     /// Number of parameters (excluding TypeScript's `this` parameter).
     pub param_count: u8,
+    /// Number of React hook calls (`useState` / `useEffect` / `useMemo` /
+    /// `useCallback` / custom `use*`) made directly in this function's body.
+    /// Non-zero only for React components/hooks; descriptive context surfaced in
+    /// the hotspot drill-down, never a tunable threshold (anti-numerology).
+    pub react_hook_count: u16,
+    /// Maximum JSX element nesting depth reached in this function's body (the
+    /// deepest chain of element-inside-element). `0` when the function renders
+    /// no JSX. Descriptive context surfaced in the hotspot drill-down, never a
+    /// tunable threshold (anti-numerology).
+    pub react_jsx_max_depth: u16,
+    /// Number of props destructured from this component's first parameter (the
+    /// `{ a, b, c }` props object). `0` for non-component functions and for
+    /// components taking a bare `props` identifier (not statically countable).
+    /// Descriptive context surfaced in the hotspot drill-down, never a tunable
+    /// threshold (anti-numerology).
+    pub react_prop_count: u16,
     /// Content digest of the function's full-span source slice.
     pub source_hash: Option<String>,
     /// Per-decision-point breakdown explaining WHICH constructs drove the
@@ -744,6 +906,127 @@ pub struct FunctionComplexity {
     /// the two metrics accrue at different granularities). Always computed and
     /// cached; surfaced in JSON only behind `health --complexity-breakdown`.
     pub contributions: Vec<ComplexityContribution>,
+}
+
+/// Structural CSS metrics for a single style rule, computed from the parsed CSS
+/// syntax tree. A rule is recorded only when it crosses a structural floor (an
+/// id selector, a complex selector, a `!important` declaration, or deep
+/// nesting), so the vector stays bounded on normal stylesheets.
+///
+/// Not persisted in the extraction cache: `plow health` computes these
+/// on demand from the CSS source, so there is no `bitcode` derive.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CssRuleMetric {
+    /// 1-based line of the rule's first selector.
+    pub line: u32,
+    /// 1-based column of the rule's first selector.
+    pub col: u32,
+    /// Specificity component `a` (id selectors), max across the rule's selectors.
+    pub specificity_a: u16,
+    /// Specificity component `b` (class / attribute / pseudo-class selectors).
+    pub specificity_b: u16,
+    /// Specificity component `c` (type / pseudo-element selectors).
+    pub specificity_c: u16,
+    /// Largest selector component count across the rule's selector list.
+    pub complexity: u16,
+    /// Declaration count in the rule (normal plus `!important`).
+    pub declaration_count: u16,
+    /// `!important` declaration count in the rule.
+    pub important_count: u16,
+    /// Style-rule nesting depth (0 = top level).
+    pub nesting_depth: u8,
+}
+
+/// A style rule's declaration-block fingerprint and location, for cross-file
+/// duplicate-block detection. Only rules with a meaningful number of
+/// declarations are recorded (small blocks repeat legitimately). Internal
+/// staging only: this is consumed in-process by the health layer to build the
+/// grouped `duplicate_declaration_blocks` output and is never serialized.
+#[derive(Debug, Clone)]
+pub struct CssDeclarationBlock {
+    /// xxh3 fingerprint over the rule's normalized (sorted, `!important`-tagged)
+    /// declaration set.
+    pub fingerprint: u64,
+    /// 1-based line of the rule's first selector.
+    pub line: u32,
+    /// Declaration count in the rule (normal plus `!important`).
+    pub declaration_count: u16,
+}
+
+/// Stylesheet-level structural CSS analytics, computed from the parsed CSS
+/// syntax tree. Feeds `plow health` penalty weights and located findings,
+/// never a standalone CSS score.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CssAnalytics {
+    /// Total declarations across every style rule (normal plus `!important`).
+    pub total_declarations: u32,
+    /// Total `!important` declarations across every style rule.
+    pub important_declarations: u32,
+    /// Number of style rules.
+    pub rule_count: u32,
+    /// Number of style rules with no declarations.
+    pub empty_rule_count: u32,
+    /// Deepest style-rule nesting depth observed (0 = no nesting).
+    pub max_nesting_depth: u8,
+    /// Rules that crossed the structural floor, in source order. Bounded; see
+    /// [`Self::notable_truncated`]. The scalar aggregates above always reflect
+    /// the full stylesheet regardless of truncation.
+    pub notable_rules: Vec<CssRuleMetric>,
+    /// `true` when more rules crossed the structural floor than `notable_rules`
+    /// retains (compiled utility CSS can emit thousands of `!important` rules),
+    /// so consumers can note that per-rule findings were capped.
+    pub notable_truncated: bool,
+    /// Distinct color VALUES in the stylesheet, sorted (a palette-size /
+    /// design-token-sprawl signal). The parser canonicalizes notation, so the
+    /// authored format is NOT preserved: `red`, `#f00`, `#ff0000`, and
+    /// `rgb(255,0,0)` all collapse to one entry, and every legacy sRGB notation
+    /// renders as hex. Notation-MIXING (hex vs rgb vs hsl) is therefore not
+    /// detectable from this set; it would need a separate raw-token pass.
+    pub colors: Vec<String>,
+    /// Distinct `font-size` declaration values in the stylesheet, sorted.
+    pub font_sizes: Vec<String>,
+    /// Distinct `z-index` declaration values in the stylesheet, sorted.
+    pub z_indexes: Vec<String>,
+    /// Distinct `box-shadow` declaration values in the stylesheet, sorted. A
+    /// high count signals an uncontrolled shadow scale (design-token sprawl).
+    pub box_shadows: Vec<String>,
+    /// Distinct `border-radius` declaration values in the stylesheet, sorted.
+    pub border_radii: Vec<String>,
+    /// Distinct `line-height` declaration values in the stylesheet, sorted.
+    pub line_heights: Vec<String>,
+    /// Distinct custom properties (`--x`) DEFINED in the stylesheet, sorted.
+    pub defined_custom_properties: Vec<String>,
+    /// Distinct custom properties REFERENCED via `var()` in the stylesheet.
+    pub referenced_custom_properties: Vec<String>,
+    /// Distinct `@keyframes` names DEFINED in the stylesheet, sorted.
+    pub defined_keyframes: Vec<String>,
+    /// Distinct `@keyframes` names REFERENCED via `animation` / `animation-name`.
+    pub referenced_keyframes: Vec<String>,
+    /// Distinct custom properties REGISTERED via an `@property` rule, sorted.
+    pub registered_custom_properties: Vec<String>,
+    /// Distinct cascade layers DECLARED (via `@layer a, b;` statements or named
+    /// `@layer a { }` blocks), sorted.
+    pub declared_layers: Vec<String>,
+    /// Distinct cascade layers POPULATED by a named `@layer a { }` block, sorted.
+    /// A layer declared but never populated (and not imported into) is a
+    /// cleanup candidate.
+    pub populated_layers: Vec<String>,
+    /// Distinct font families DECLARED by an `@font-face` rule in the stylesheet,
+    /// sorted. A declared family referenced by no `font-family` anywhere is a
+    /// dead web-font payload (cleanup candidate).
+    pub defined_font_faces: Vec<String>,
+    /// Distinct font families REFERENCED via `font-family` / `font` in the
+    /// stylesheet, sorted (generic keywords like `serif` excluded).
+    pub referenced_font_families: Vec<String>,
+    /// Per-rule declaration-block fingerprints for rules at or above the minimum
+    /// block size, used to detect duplicate declaration blocks across the
+    /// project. Internal staging consumed by the health layer; never serialized
+    /// (the public output is the grouped `duplicate_declaration_blocks`).
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub declaration_blocks: Vec<CssDeclarationBlock>,
 }
 
 /// Which complexity metric a [`ComplexityContribution`] adds to.
@@ -805,6 +1088,19 @@ pub enum ComplexityContributionKind {
     LabeledBreak,
     /// A labeled `continue` (cognitive only).
     LabeledContinue,
+    /// Legacy JSX-depth contribution kind kept for schema compatibility. Current
+    /// extraction records JSX nesting as descriptive `react_jsx_max_depth`
+    /// context and does not emit this kind for layout depth.
+    JsxDepth,
+    /// React hook density (cognitive only). One contribution per hook call in a
+    /// component body (`useState` / `useEffect` / `useMemo` / `useCallback` /
+    /// custom `use*`); a hook-heavy component accrues cognitive load the same way
+    /// branching does.
+    HookDensity,
+    /// React prop count past the comfortable floor (cognitive only). A component
+    /// destructuring many props is doing many things; the props beyond the floor
+    /// fold into cognitive so a wide-interface component surfaces as a hotspot.
+    PropCount,
 }
 
 /// A single complexity increment, located at its source line/column.
@@ -876,7 +1172,7 @@ pub struct DynamicImportPattern {
 }
 
 /// Visibility tag from JSDoc/TSDoc comments that suppresses unused-export detection.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[repr(u8)]
 pub enum VisibilityTag {
@@ -927,6 +1223,9 @@ pub struct ExportInfo {
     /// Visibility tag from JSDoc/TSDoc comment.
     #[serde(default, skip_serializing_if = "VisibilityTag::is_none")]
     pub visibility: VisibilityTag,
+    /// Human-authored reason on `@expected-unused -- <reason>`, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_unused_reason: Option<String>,
     /// Source span of the export declaration.
     #[serde(serialize_with = "serialize_span")]
     pub span: Span,
@@ -959,6 +1258,31 @@ pub struct ClassHeritageInfo {
     /// Typed instance bindings used to resolve member-access chains in external templates.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub instance_bindings: Vec<(String, String)>,
+}
+
+/// An exported free-function factory proven to return one class instance.
+///
+/// `export function useApi() { return new RESTApi() }` records
+/// `FactoryReturnExport { export_name: "useApi", class_local_name: "RESTApi" }`.
+/// The `class_local_name` is the factory module's own LOCAL name, resolved at
+/// analyze time through that module's imports/exports to the real class export,
+/// so a cross-module `const x = useApi(); x.member` consumer credits the class
+/// across the boundary. See issue #1441 (Part A).
+#[derive(
+    Debug,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+    PartialEq,
+    Eq,
+)]
+pub struct FactoryReturnExport {
+    /// Public export name (honors `export { useApi as useRestApi }`).
+    pub export_name: String,
+    /// The returned class's local name within the factory module.
+    pub class_local_name: String,
 }
 
 /// A module-scope declaration that can be used as a TypeScript type.
@@ -1027,7 +1351,17 @@ pub struct MemberInfo {
 }
 
 /// The kind of member.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum MemberKind {
@@ -1053,6 +1387,457 @@ pub struct MemberAccess {
     /// The member being accessed.
     pub member: String,
 }
+
+/// A typed extraction fact for cross-layer analysis.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SemanticFact {
+    /// A class member referenced from an Angular template, host binding, or
+    /// component metadata entry.
+    AngularTemplateMemberAccess(AngularTemplateMemberAccessFact),
+    /// An Angular component spreads `this` into an object literal, so component
+    /// input/output usage is opaque.
+    AngularThisSpread(AngularThisSpreadFact),
+    /// A member access on a value returned by an imported static factory call.
+    FactoryCallMemberAccess(FactoryCallMemberAccessFact),
+    /// A member access on a value returned by an imported free-function factory
+    /// (`const x = importedFactory(); x.member`). See issue #1441 (Part A).
+    FactoryFnMemberAccess(FactoryFnMemberAccessFact),
+    /// A member access on a fluent chain rooted at an imported static factory.
+    FluentChainMemberAccess(FluentChainMemberAccessFact),
+    /// A member access on a fluent chain rooted at a `new` expression.
+    FluentChainNewMemberAccess(FluentChainNewMemberAccessFact),
+    /// A member access on a Playwright fixture object inside a test callback.
+    PlaywrightFixtureUse(PlaywrightFixtureUseFact),
+    /// A Playwright fixture definition declared by a typed `test.extend<T>()`.
+    PlaywrightFixtureDefinition(PlaywrightFixtureDefinitionFact),
+    /// A Playwright fixture wrapper alias declared by `mergeTests` or `.extend`.
+    PlaywrightFixtureAlias(PlaywrightFixtureAliasFact),
+    /// A nested Playwright fixture binding declared by a fixture type alias.
+    PlaywrightFixtureType(PlaywrightFixtureTypeFact),
+    /// An exported value whose runtime instance targets a local class or interface.
+    InstanceExportBinding(InstanceExportBindingFact),
+    /// A dynamic custom-element tag render that makes static Lit tag credit opaque.
+    DynamicCustomElementRender(DynamicCustomElementRenderFact),
+}
+
+/// Iterate Angular template member names from typed semantic facts.
+fn angular_template_member_names_from_parts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &str> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::AngularTemplateMemberAccess(access) = fact {
+            Some(access.member.as_str())
+        } else {
+            None
+        }
+    })
+}
+
+/// Iterate Angular template member names from a module's typed facts.
+pub fn angular_template_member_names(module: &ModuleInfo) -> impl Iterator<Item = &str> {
+    angular_template_member_names_from_parts(&module.semantic_facts)
+}
+
+/// Return true when the fact slice contains any Angular template member
+/// reference.
+#[must_use]
+fn has_angular_template_members_from_parts(semantic_facts: &[SemanticFact]) -> bool {
+    angular_template_member_names_from_parts(semantic_facts)
+        .next()
+        .is_some()
+}
+
+/// Return true when the module contains any Angular template member reference.
+#[must_use]
+pub fn has_angular_template_members(module: &ModuleInfo) -> bool {
+    has_angular_template_members_from_parts(&module.semantic_facts)
+}
+
+/// Return true when a module spreads `this` in Angular template context.
+#[must_use]
+pub fn has_angular_this_spread(module: &ModuleInfo) -> bool {
+    SemanticFactView::new(&module.semantic_facts, &module.member_accesses).has_angular_this_spread()
+}
+
+/// Return true when a module contains a dynamic custom-element render.
+#[must_use]
+pub fn has_dynamic_custom_element_render(module: &ModuleInfo) -> bool {
+    module
+        .semantic_facts
+        .iter()
+        .any(|fact| matches!(fact, SemanticFact::DynamicCustomElementRender(_)))
+}
+
+/// Typed-first view over semantic extraction facts.
+///
+/// Extraction populates `semantic_facts` directly. The `member_accesses` slice
+/// remains available for consumers that need ordinary source member accesses,
+/// but it is no longer decoded as a string protocol for semantic facts.
+#[derive(Debug, Clone, Copy)]
+pub struct SemanticFactView<'a> {
+    semantic_facts: &'a [SemanticFact],
+    member_accesses: &'a [MemberAccess],
+}
+
+impl<'a> SemanticFactView<'a> {
+    /// Create a typed semantic fact view from current semantic facts plus
+    /// ordinary source member accesses.
+    #[must_use]
+    pub const fn new(
+        semantic_facts: &'a [SemanticFact],
+        member_accesses: &'a [MemberAccess],
+    ) -> Self {
+        Self {
+            semantic_facts,
+            member_accesses,
+        }
+    }
+
+    /// Iterate typed semantic facts.
+    pub fn facts(self) -> impl Iterator<Item = &'a SemanticFact> + 'a {
+        self.semantic_facts.iter()
+    }
+
+    /// Iterate Angular template member references.
+    pub fn angular_template_member_names(self) -> impl Iterator<Item = &'a str> + 'a {
+        angular_template_member_names_from_parts(self.semantic_facts)
+    }
+
+    /// Return true when any Angular template member reference exists.
+    #[must_use]
+    pub fn has_angular_template_members(self) -> bool {
+        self.angular_template_member_names().next().is_some()
+    }
+
+    /// Return true when a module spreads `this` in Angular template context.
+    #[must_use]
+    pub fn has_angular_this_spread(self) -> bool {
+        self.semantic_facts
+            .iter()
+            .any(|fact| matches!(fact, SemanticFact::AngularThisSpread(_)))
+    }
+
+    /// Iterate ordinary source member accesses.
+    pub fn ordinary_member_accesses(self) -> impl Iterator<Item = &'a MemberAccess> + 'a {
+        self.member_accesses.iter()
+    }
+
+    /// Collect instance-export binding facts.
+    pub fn instance_export_bindings(self) -> Vec<InstanceExportBindingFact> {
+        instance_export_binding_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
+    /// Collect static factory call member facts.
+    pub fn factory_call_member_accesses(self) -> Vec<FactoryCallMemberAccessFact> {
+        factory_call_member_access_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
+    /// Collect free-function factory-return member facts.
+    pub fn factory_fn_member_accesses(self) -> Vec<FactoryFnMemberAccessFact> {
+        factory_fn_member_access_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
+    /// Collect static factory fluent-chain member facts.
+    pub fn fluent_chain_member_accesses(self) -> Vec<FluentChainMemberAccessFact> {
+        fluent_chain_member_access_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
+    /// Collect constructor-rooted fluent-chain member facts.
+    pub fn fluent_chain_new_member_accesses(self) -> Vec<FluentChainNewMemberAccessFact> {
+        fluent_chain_new_member_access_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
+    /// Collect Playwright fixture-use facts.
+    pub fn playwright_fixture_uses(self) -> Vec<PlaywrightFixtureUseFact> {
+        playwright_fixture_use_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
+    /// Collect Playwright fixture-definition facts.
+    pub fn playwright_fixture_definitions(self) -> Vec<PlaywrightFixtureDefinitionFact> {
+        playwright_fixture_definition_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
+    /// Collect Playwright fixture-alias facts.
+    pub fn playwright_fixture_aliases(self) -> Vec<PlaywrightFixtureAliasFact> {
+        playwright_fixture_alias_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
+    /// Collect Playwright fixture-type facts.
+    pub fn playwright_fixture_types(self) -> Vec<PlaywrightFixtureTypeFact> {
+        playwright_fixture_type_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+}
+
+/// Iterate ordinary whole-object uses.
+pub fn ordinary_whole_object_uses(whole_object_uses: &[String]) -> impl Iterator<Item = &str> {
+    whole_object_uses.iter().map(String::as_str)
+}
+
+/// Iterate typed instance-export binding facts.
+fn instance_export_binding_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &InstanceExportBindingFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::InstanceExportBinding(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+/// Iterate typed factory-call member facts.
+fn factory_call_member_access_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &FactoryCallMemberAccessFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::FactoryCallMemberAccess(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+/// Iterate typed free-function factory-return member facts.
+fn factory_fn_member_access_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &FactoryFnMemberAccessFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::FactoryFnMemberAccess(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+/// Iterate typed fluent-chain member facts.
+fn fluent_chain_member_access_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &FluentChainMemberAccessFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::FluentChainMemberAccess(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+/// Iterate typed constructor-rooted fluent-chain member facts.
+fn fluent_chain_new_member_access_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &FluentChainNewMemberAccessFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::FluentChainNewMemberAccess(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+/// Iterate typed Playwright fixture-use facts.
+fn playwright_fixture_use_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &PlaywrightFixtureUseFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::PlaywrightFixtureUse(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+/// Iterate typed Playwright fixture-definition facts.
+fn playwright_fixture_definition_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &PlaywrightFixtureDefinitionFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::PlaywrightFixtureDefinition(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+/// Iterate typed Playwright fixture-alias facts.
+fn playwright_fixture_alias_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &PlaywrightFixtureAliasFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::PlaywrightFixtureAlias(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+/// Iterate typed Playwright fixture-type facts.
+fn playwright_fixture_type_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &PlaywrightFixtureTypeFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::PlaywrightFixtureType(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+/// A member name referenced from an Angular template surface.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct AngularTemplateMemberAccessFact {
+    /// Referenced class member name.
+    pub member: String,
+}
+
+/// Opaque Angular `{ ...this }` forwarding marker.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct AngularThisSpreadFact;
+
+/// A member access on a static factory call result.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FactoryCallMemberAccessFact {
+    /// Local imported class or namespace object used as the factory callee.
+    pub callee_object: String,
+    /// Static factory method invoked on the callee object.
+    pub callee_method: String,
+    /// Member accessed on the returned instance-like object.
+    pub member: String,
+}
+
+/// A member access on a value returned by an imported free-function factory.
+///
+/// `const x = importedFactory(); x.member` emits one fact per first-level read
+/// on `x`. The analyze layer resolves `callee_name` through the consumer's
+/// imports to the factory's origin module, reads that module's
+/// `exported_factory_returns` to learn the returned class's local name, resolves
+/// THAT through the factory module's own imports to the class export, and
+/// credits `member` on the class. See issue #1441 (Part A).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FactoryFnMemberAccessFact {
+    /// Local imported function used as the factory callee.
+    pub callee_name: String,
+    /// Member accessed on the returned instance-like object.
+    pub member: String,
+}
+
+/// A member access on a fluent chain rooted at a static factory call.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FluentChainMemberAccessFact {
+    /// Local imported class or namespace object used as the chain root.
+    pub root_object: String,
+    /// Static factory method that starts the fluent chain.
+    pub root_method: String,
+    /// Intermediate fluent methods between the root method and final member.
+    pub chain: Vec<String>,
+    /// Member accessed at this chain step.
+    pub member: String,
+}
+
+/// A member access on a fluent chain rooted at a `new` expression.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FluentChainNewMemberAccessFact {
+    /// Local imported class constructed by the `new` expression.
+    pub class_name: String,
+    /// Intermediate fluent methods between construction and final member.
+    pub chain: Vec<String>,
+    /// Member accessed at this chain step.
+    pub member: String,
+}
+
+/// A member access on a Playwright fixture object inside a test callback.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PlaywrightFixtureUseFact {
+    /// Local test function or wrapper used as the callback callee.
+    pub test_name: String,
+    /// Fixture name or dotted fixture path referenced in the callback.
+    pub fixture_name: String,
+    /// Member accessed on the fixture target.
+    pub member: String,
+}
+
+/// A Playwright fixture definition declared by a typed `test.extend<T>()`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PlaywrightFixtureDefinitionFact {
+    /// Local test function or wrapper receiving the fixture definition.
+    pub test_name: String,
+    /// Fixture name or dotted fixture path declared by the fixture type.
+    pub fixture_name: String,
+    /// Local type symbol used as the fixture target.
+    pub type_name: String,
+}
+
+/// A Playwright fixture wrapper alias declared by `mergeTests` or `.extend`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PlaywrightFixtureAliasFact {
+    /// Local test function or wrapper that inherits fixture definitions.
+    pub test_name: String,
+    /// Local test function or wrapper inherited by `test_name`.
+    pub base_name: String,
+}
+
+/// A nested Playwright fixture binding declared by a fixture type alias.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PlaywrightFixtureTypeFact {
+    /// Local type alias containing the nested fixture binding.
+    pub alias_name: String,
+    /// Fixture name or dotted fixture path declared inside the type alias.
+    pub fixture_name: String,
+    /// Local type symbol used as the nested fixture target.
+    pub type_name: String,
+}
+
+/// An exported value whose runtime instance targets a local class or interface.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct InstanceExportBindingFact {
+    /// Exported binding name.
+    pub export_name: String,
+    /// Local class or interface symbol used as the instance target.
+    pub target_name: String,
+}
+
+/// Opaque marker for a dynamic custom-element render site.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DynamicCustomElementRenderFact;
 
 /// A statically flattenable callee path invoked in a module (e.g. `execSync`,
 /// `child_process.exec`, `console.log`). One entry per unique `callee_path`
@@ -1094,6 +1879,9 @@ pub enum DiFramework {
     Vue,
     /// Svelte `setContext` / `getContext` (from `svelte`).
     Svelte,
+    /// Angular `inject(TOKEN)` / `@Inject(TOKEN)` (from `@angular/core`),
+    /// matched against `{ provide: TOKEN, ... }` provider objects.
+    Angular,
 }
 
 /// A Vue `provide`/`inject` or Svelte `setContext`/`getContext` call site keyed
@@ -1113,29 +1901,44 @@ pub struct DiKeySite {
     pub span_start: u32,
 }
 
-/// A Vue `<script setup>` `defineProps` declared prop, harvested from the
-/// runtime object form (`defineProps({ foo: {...} })`) or the inline TS literal
-/// form (`defineProps<{ foo: T }>()`). `used_in_script` / `used_in_template`
-/// are set during extraction; the `unused-component-prop` detector flags a prop
-/// where neither is true. See `harvest_define_props` in `sfc.rs`.
+/// A component prop declared by Vue `<script setup>` `defineProps` or Svelte 5
+/// `$props()`. `used_in_script` / `used_in_template` are set during extraction;
+/// the `unused-component-prop` detector flags a prop where neither is true. See
+/// `harvest_define_props` and `harvest_svelte_props` in `sfc_props.rs`.
 #[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
 pub struct ComponentProp {
     /// The declared prop name.
     pub name: String,
     /// The template/script-visible local binding name: the destructure alias for
-    /// `const { name: alias } = defineProps()`, otherwise the prop name itself.
-    /// A renamed prop is read through this local, so usage must be checked against
+    /// `const { name: alias } = defineProps()` or
+    /// `let { name: alias } = $props()`, otherwise the prop name itself. A
+    /// renamed prop is read through this local, so usage must be checked against
     /// it, not the declared name.
     pub local: String,
     /// Start byte offset of the prop declaration (anchors the finding).
     pub span_start: u32,
     /// Whether this prop is referenced in the component's `<script>` (a
     /// destructured local binding with a resolved reference, or a `props.<name>`
-    /// member access).
+    /// member access). For React, this is set-in-body: a resolved reference to the
+    /// destructured local anywhere in the component function body.
     pub used_in_script: bool,
     /// Whether this prop name is referenced in the component's `<template>`.
     /// Set by `apply_template_usage` when the template scanner credits the name.
+    /// Always false for React (no template; React uses `used_in_script`).
     pub used_in_template: bool,
+    /// The enclosing component name. Empty for Vue SFCs (one component per file,
+    /// the file stem is the component, set by the detector). For React this is the
+    /// component function/arrow name a prop was declared on, so the detector can
+    /// emit the right `component_name` and apply the per-component abstain ladder
+    /// (a file can declare several React components).
+    pub component: String,
+    /// React-only: `true` when the destructured prop local is referenced at least
+    /// once OUTSIDE a child-JSX attribute value expression (a substantive
+    /// consumption: a hook arg, a host-element child, a non-JSX-attr read). When
+    /// `used_in_script` is true but this is false, the prop is referenced ONLY as
+    /// the root of forwarded child attribute values, i.e. a pure pass-through.
+    /// Always `false` for Vue (no forward-vs-consume distinction is computed).
+    pub used_outside_forward: bool,
 }
 
 /// A Vue `<script setup>` `defineEmits` declared event, harvested from the type
@@ -1155,6 +1958,268 @@ pub struct ComponentEmit {
     pub used: bool,
 }
 
+/// A Svelte custom event dispatched via `dispatch('<name>')`, where `dispatch`
+/// is the binding from a `const dispatch = createEventDispatcher()` call. Only
+/// literal-first-arg dispatches are recorded; a `dispatch(<nonLiteral>)` sets
+/// `ModuleInfo::has_dynamic_dispatch` instead. Consumed by the
+/// `unused-svelte-event` detector, which flags an event dispatched here but
+/// listened to nowhere project-wide (the cross-file dead-output direction). The
+/// span is a byte offset (not an `oxc_span::Span`) so the type round-trips
+/// through the bitcode cache directly, mirroring `ComponentEmit::span_start`.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode, PartialEq, Eq)]
+pub struct DispatchedEvent {
+    /// The dispatched event name (the literal first argument).
+    pub name: String,
+    /// Start byte offset of the `dispatch(...)` call (anchors the finding).
+    pub span_start: u32,
+}
+
+/// A declared Angular component/directive input, harvested from an `@Input()`
+/// decorator or a signal `input()` / `input.required()` / `model()` initializer
+/// on an Angular-decorated class. Consumed by the `unused-component-input`
+/// detector, which flags an input read nowhere in its own component (neither the
+/// template nor the class body). The span is stored as a byte offset (not an
+/// `oxc_span::Span`) so the type is cheap to mirror onto the cache, matching
+/// `ComponentEmit::span_start`. `ModuleInfo` is not serialized, so no serde
+/// attrs are derived here. `bitcode` derives let the type be mirrored directly
+/// onto `CachedModule` (the same pattern as `ComponentEmit`).
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode, PartialEq, Eq)]
+pub struct AngularInputMember {
+    /// The declared input name (the property key).
+    pub name: String,
+    /// Start byte offset of the property key (anchors the finding).
+    pub span_start: u32,
+}
+
+/// A declared Angular component/directive output, harvested from an `@Output()`
+/// decorator or a signal `output()` / `outputFromObservable()` initializer on an
+/// Angular-decorated class. Consumed by the `unused-component-output` detector,
+/// which flags an output emitted nowhere in its own component. A `model()` is an
+/// input and a framework-driven output, so it is recorded ONLY as an input and
+/// never appears here (the implicit `update:` emit is framework-managed). The
+/// span is a byte offset for the same reason as `AngularInputMember`.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode, PartialEq, Eq)]
+pub struct AngularOutputMember {
+    /// The declared output name (the property key).
+    pub name: String,
+    /// Start byte offset of the property key (anchors the finding).
+    pub span_start: u32,
+}
+
+/// A declared Angular `@Component` and its `selector` value(s), harvested from a
+/// `@Component({ selector: '...' })` decorator. Consumed by the Angular arm of
+/// the `unrendered-component` detector, which flags a component whose every
+/// element selector is used in NO template project-wide (and that is not
+/// referenced by class name anywhere, e.g. routed / bootstrapped / dynamically
+/// rendered). A multi-selector string (`'app-foo, [appBar]'`) is split into the
+/// `selectors` list. The span is stored as a byte offset (not an
+/// `oxc_span::Span`) so the type round-trips through the bitcode cache directly,
+/// mirroring `AngularInputMember::span_start`. `@Directive` is intentionally NOT
+/// harvested here (directives have no template render). `ModuleInfo` is not
+/// serialized, so no serde attrs are derived.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode, PartialEq, Eq)]
+pub struct AngularComponentSelector {
+    /// The declared selector strings for this component, split on `,`. A purely
+    /// element-selector component has only `app-foo`-shaped entries; attribute
+    /// (`[appFoo]`) and class (`.foo`) selectors are retained verbatim so the
+    /// detector can abstain when ANY non-element selector is present.
+    pub selectors: Vec<String>,
+    /// Start byte offset of the component class declaration (anchors the
+    /// finding).
+    pub span_start: u32,
+    /// The component class name (used to credit routed / bootstrapped / dynamic
+    /// class-name references project-wide).
+    pub class_name: String,
+}
+
+/// A Lit / web-component custom element registered in a module via
+/// `@customElement('x-foo')` or `customElements.define('x-foo', C)`. Consumed by
+/// the Lit arm of the `unrendered-component` detector. The span is stored as a
+/// byte offset (not an `oxc_span::Span`) so the type round-trips through the
+/// bitcode cache directly, mirroring `AngularComponentSelector::span_start`.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode, PartialEq, Eq)]
+pub struct RegisteredCustomElement {
+    /// The registered custom-element tag name (`x-foo`).
+    pub tag: String,
+    /// The registering class's local name, used for the public-API / export
+    /// abstain (an exported / published element is rendered by a downstream
+    /// consumer the scan cannot see). Empty for an anonymous
+    /// `export default @customElement('x-foo') class extends LitElement {}`.
+    pub class_local_name: String,
+    /// Start byte offset of the registering class declaration (anchors the
+    /// finding at the element, NOT line 1, since a `.ts` file can register
+    /// several custom elements).
+    pub span_start: u32,
+}
+
+/// A key returned from a SvelteKit route `load()` function's terminal return
+/// object literal. Harvested from `+page.{ts,server.ts,js,server.js}` files
+/// exporting a `load` function. Consumed by the `unused-load-data-key` detector,
+/// which flags a key read by no consumer. The span is stored as byte offsets
+/// (not an `oxc_span::Span`) so the type round-trips through the bitcode cache
+/// directly, mirroring `DiKeySite::span_start` / `ComponentEmit::span_start`.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode, PartialEq, Eq)]
+pub struct LoadReturnKey {
+    /// The returned-object property key name.
+    pub name: String,
+    /// Start byte offset of the key (anchors the finding).
+    pub span_start: u32,
+    /// End byte offset of the key.
+    pub span_end: u32,
+}
+
+/// The syntactic shape of an identified React component definition. Drives the
+/// abstain ladder later phases apply: a `forwardRef` / `memo` wrapper whose
+/// props come from an imported interface plow cannot resolve must abstain
+/// (ADR-001), not guess.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub enum ComponentFunctionKind {
+    /// A `function Foo() { return <.../> }` declaration.
+    FnDecl,
+    /// A `const Foo = () => <.../>` arrow (or function-expression) binding.
+    Arrow,
+    /// A `const Foo = forwardRef((props, ref) => <.../>)` wrapper.
+    ForwardRefWrapper,
+    /// A `const Foo = memo((props) => <.../>)` wrapper.
+    MemoWrapper,
+}
+
+/// An identified React component: a function/arrow whose body returns JSX.
+/// Captured by `visit_jsx_element`'s enclosing-component tracking. The
+/// `unused-component-prop` (React arm) and complexity-fold phases consume this;
+/// the abstain flags keep zero-FP on the cases ADR-001 cannot resolve.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
+pub struct ComponentFunction {
+    /// The component name (the binding or declaration identifier).
+    pub name: String,
+    /// Start byte offset of the component definition (anchors findings).
+    pub span_start: u32,
+    /// The syntactic shape of the definition.
+    pub kind: ComponentFunctionKind,
+    /// Whether the component is exported from its module (a named export, a
+    /// `export default`, or re-exported in the same module). Public-API
+    /// components abstain in the prop phase.
+    pub is_exported: bool,
+    /// `true` when the component's props are not statically harvestable: a
+    /// rest/spread in the signature (`{ ...rest }`), props passed wholesale to a
+    /// hook/helper, or a `forwardRef` / `memo` wrapper whose props come from an
+    /// imported interface generic plow cannot resolve (ADR-001). The prop
+    /// phase abstains on the whole component when set.
+    pub has_unharvestable_props: bool,
+    /// `true` when the component body calls `cloneElement` / `React.cloneElement`.
+    /// `cloneElement` injects props by reflection, so the static forward-set is
+    /// incomplete; the prop-drilling phase abstains on any chain through this
+    /// component (ADR-001, zero-FP).
+    pub uses_clone_element: bool,
+    /// `true` when the component renders a `*.Provider` member-expression tag
+    /// (`<FooContext.Provider>`). A context provider in the subtree means the
+    /// drilling may be a deliberate non-context choice (or the prop is about to
+    /// be provided); the prop-drilling phase downgrades/abstains.
+    pub renders_provider: bool,
+    /// `true` when the component passes a function as a child render value
+    /// (render-props / children-as-function: `<Foo>{() => ...}</Foo>` or
+    /// `<Foo render={() => ...}/>`). The forwarded shape is dynamic; the
+    /// prop-drilling phase abstains on chains through this component.
+    pub has_children_as_function: bool,
+    /// `true` when the component body is pure structural indirection: a single
+    /// statement returning exactly one capitalized/member-expression JSX element
+    /// (no host wrapper, no extra children, optionally a fragment wrapping a
+    /// single element) that forwards props via a bare spread of the component's
+    /// own props binding / rest local (`<Child {...props}/>`), with NO named
+    /// attributes alongside the spread and NO self-render. The cross-component
+    /// `thin-wrapper` phase joins this with hook-density / cyclomatic checks and
+    /// the resolved single render edge to flag a component that is a candidate
+    /// for inlining. Computed from the component's own AST only, so it caches
+    /// byte-identity-safe (ADR-001).
+    pub is_pure_passthrough: bool,
+}
+
+/// The kind of a React hook call. `Custom` covers any `use*`-named call that is
+/// not one of the built-in hooks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub enum HookUseKind {
+    /// `useState(...)`.
+    UseState,
+    /// `useEffect(...)`.
+    UseEffect,
+    /// `useMemo(...)`.
+    UseMemo,
+    /// `useCallback(...)`.
+    UseCallback,
+    /// Any other `use*`-named call (a custom hook).
+    Custom,
+}
+
+/// A React hook call site inside a component. Consumed by the complexity-fold
+/// phase (hook density) and surfaced as descriptive hotspot context.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
+pub struct HookUse {
+    /// The hook kind.
+    pub kind: HookUseKind,
+    /// The dependency-array arity, recorded ONLY when a literal array is present
+    /// at the dependency-array position (`[a, b]` -> `Some(2)`, `[]` ->
+    /// `Some(0)`). `None` when the call has no dependency array argument or the
+    /// argument is not a literal array (ADR-001: do not guess).
+    pub dep_array_arity: Option<u32>,
+    /// Start byte offset of the hook call (anchors findings).
+    pub span_start: u32,
+    /// The enclosing component name (the top of the visitor's component stack
+    /// when the hook call was recorded). Lets the descriptive per-component hook
+    /// summary attribute hooks exactly even when a file declares several
+    /// components. A hook recorded outside any component carries an empty string
+    /// (the visitor only records hooks inside a component, so this is the
+    /// rare top-level / unattributed case).
+    pub component: String,
+}
+
+/// A render edge: one component rendering another (a capitalized or
+/// member-expression JSX tag). Captured at extraction time with the child's
+/// written name; resolution of `child_component_name` to a `FileId`/export is
+/// deferred to graph build via the existing import map.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
+pub struct RenderEdge {
+    /// The name of the component that renders the child (the enclosing
+    /// component). Empty when the JSX is not inside an identified component (a
+    /// top-level render expression).
+    pub parent_component: String,
+    /// The rendered child component name as written (`Foo` or the full
+    /// member-expression path `Foo.Bar`).
+    pub child_component_name: String,
+    /// The attribute (prop) names passed at the render site, in source order.
+    pub attr_names: Vec<String>,
+    /// `true` when the render site contains a JSX spread (`{...x}`), so the
+    /// passed-prop set is not statically complete.
+    pub has_spread: bool,
+    /// The forwarded attributes at this render site: each pairs the child
+    /// attribute NAME with the identifier ROOT of its value expression
+    /// (`userName={user.name}` -> `{ attr: "userName", root: "user" }`;
+    /// `value={x}` -> `{ attr: "value", root: "x" }`). ONLY plain identifier or
+    /// member-root access values are recorded (`{x}`, `{x.y}`, `{x.y.z}`); a value
+    /// that is a call, an arrow/function, a conditional, a JSX element, or any
+    /// other complex expression is NOT recorded here (its root would not be a pure
+    /// forward) and sets `has_complex_forward` instead. The prop-drilling chain
+    /// walk uses this pairing to map "this component forwards prop P" to "the
+    /// child receives it as attribute A".
+    pub forward_attrs: Vec<ForwardAttr>,
+    /// `true` when at least one attribute value at this render site is a complex
+    /// expression (a call, an arrow/function render-prop, a conditional, a JSX
+    /// element-as-prop, a template literal, etc.) whose identifier root was NOT
+    /// recorded in `forward_attrs`. The prop-drilling phase abstains on a chain
+    /// whose forwarded prop flows through such a value (ADR-001, zero-FP).
+    pub has_complex_forward: bool,
+}
+
+/// One forwarded JSX attribute: the child attribute name plus the identifier
+/// root of its value expression. See [`RenderEdge::forward_attrs`].
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
+pub struct ForwardAttr {
+    /// The child attribute (prop) name as written (`userName`).
+    pub attr: String,
+    /// The identifier root of the attribute value expression (`user` for
+    /// `userName={user.name}`).
+    pub root: String,
+}
+
 #[expect(
     clippy::trivially_copy_pass_by_ref,
     reason = "serde serialize_with requires &T"
@@ -1168,7 +2233,7 @@ fn serialize_span<S: serde::Serializer>(span: &Span, serializer: S) -> Result<S:
 }
 
 /// Export identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ExportName {
     /// A named export (e.g., `export const foo`).
     Named(String),
@@ -1216,7 +2281,7 @@ pub struct ImportInfo {
 }
 
 /// How a symbol is imported.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ImportedName {
     /// A named import (e.g., `import { foo }`).
     Named(String),
@@ -1229,7 +2294,7 @@ pub enum ImportedName {
 }
 
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ExportInfo>() == 112);
+const _: () = assert!(std::mem::size_of::<ExportInfo>() == 136);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ImportInfo>() == 96);
 #[cfg(target_pointer_width = "64")]
@@ -1239,9 +2304,11 @@ const _: () = assert!(std::mem::size_of::<ImportedName>() == 24);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
+const _: () = assert!(std::mem::size_of::<SemanticFact>() == 96);
+#[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 944);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1320);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
@@ -1318,7 +2385,6 @@ mod tests {
     macro_rules! assert_released {
         ($values:expr) => {{
             assert!($values.is_empty());
-            assert_eq!($values.capacity(), 0);
         }};
     }
 
@@ -1340,6 +2406,276 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_access_helpers_keep_source_accesses() {
+        let member_accesses = vec![
+            MemberAccess {
+                object: "this".to_string(),
+                member: "render".to_string(),
+            },
+            MemberAccess {
+                object: "service".to_string(),
+                member: "run".to_string(),
+            },
+        ];
+        let ordinary = SemanticFactView::new(&[], &member_accesses)
+            .ordinary_member_accesses()
+            .map(|access| (access.object.as_str(), access.member.as_str()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(ordinary, vec![("this", "render"), ("service", "run")]);
+
+        let whole_object_uses = vec!["model".to_string(), "service".to_string()];
+
+        assert_eq!(
+            ordinary_whole_object_uses(&whole_object_uses).collect::<Vec<_>>(),
+            vec!["model", "service"]
+        );
+    }
+
+    #[test]
+    fn angular_template_member_names_use_typed_facts() {
+        let mut module = minimal_module_info();
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::AngularTemplateMemberAccess(AngularTemplateMemberAccessFact {
+                member: "typed".to_string(),
+            }),
+        );
+
+        let names: Vec<&str> = angular_template_member_names(&module).collect();
+
+        assert_eq!(names, vec!["typed"]);
+        assert!(has_angular_template_members(&module));
+    }
+
+    #[test]
+    fn angular_this_spread_uses_typed_fact() {
+        let mut typed = minimal_module_info();
+        push_semantic_fact(
+            &mut typed,
+            SemanticFact::AngularThisSpread(AngularThisSpreadFact),
+        );
+
+        assert!(has_angular_this_spread(&typed));
+        assert!(!has_angular_this_spread(&minimal_module_info()));
+    }
+
+    #[test]
+    fn semantic_fact_view_iterates_typed_facts() {
+        let mut module = minimal_module_info();
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::FactoryCallMemberAccess(FactoryCallMemberAccessFact {
+                callee_object: "Svc".to_string(),
+                callee_method: "make".to_string(),
+                member: "run".to_string(),
+            }),
+        );
+
+        let facts = SemanticFactView::new(&module.semantic_facts, &module.member_accesses)
+            .facts()
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            facts[0],
+            &SemanticFact::FactoryCallMemberAccess(FactoryCallMemberAccessFact {
+                callee_object: "Svc".to_string(),
+                callee_method: "make".to_string(),
+                member: "run".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn typed_fact_helpers_collect_each_family() {
+        let mut module = minimal_module_info();
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::InstanceExportBinding(InstanceExportBindingFact {
+                export_name: "exported".to_string(),
+                target_name: "target".to_string(),
+            }),
+        );
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::FactoryCallMemberAccess(FactoryCallMemberAccessFact {
+                callee_object: "Svc".to_string(),
+                callee_method: "create".to_string(),
+                member: "run".to_string(),
+            }),
+        );
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::FluentChainMemberAccess(FluentChainMemberAccessFact {
+                root_object: "Builder".to_string(),
+                root_method: "start".to_string(),
+                chain: vec!["next".to_string()],
+                member: "value".to_string(),
+            }),
+        );
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::FluentChainNewMemberAccess(FluentChainNewMemberAccessFact {
+                class_name: "Builder".to_string(),
+                chain: vec!["next".to_string(), "finish".to_string()],
+                member: "done".to_string(),
+            }),
+        );
+
+        assert_eq!(
+            SemanticFactView::new(&module.semantic_facts, &module.member_accesses)
+                .instance_export_bindings(),
+            vec![InstanceExportBindingFact {
+                export_name: "exported".to_string(),
+                target_name: "target".to_string(),
+            }]
+        );
+        assert_eq!(
+            SemanticFactView::new(&module.semantic_facts, &module.member_accesses)
+                .factory_call_member_accesses(),
+            vec![FactoryCallMemberAccessFact {
+                callee_object: "Svc".to_string(),
+                callee_method: "create".to_string(),
+                member: "run".to_string(),
+            }]
+        );
+        assert_eq!(
+            SemanticFactView::new(&module.semantic_facts, &module.member_accesses)
+                .fluent_chain_member_accesses(),
+            vec![FluentChainMemberAccessFact {
+                root_object: "Builder".to_string(),
+                root_method: "start".to_string(),
+                chain: vec!["next".to_string()],
+                member: "value".to_string(),
+            }]
+        );
+        assert_eq!(
+            SemanticFactView::new(&module.semantic_facts, &module.member_accesses)
+                .fluent_chain_new_member_accesses(),
+            vec![FluentChainNewMemberAccessFact {
+                class_name: "Builder".to_string(),
+                chain: vec!["next".to_string(), "finish".to_string()],
+                member: "done".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn semantic_fact_view_exposes_typed_first_contract() {
+        let mut module = minimal_module_info();
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::FactoryCallMemberAccess(FactoryCallMemberAccessFact {
+                callee_object: "Svc".to_string(),
+                callee_method: "create".to_string(),
+                member: "run".to_string(),
+            }),
+        );
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::PlaywrightFixtureUse(PlaywrightFixtureUseFact {
+                test_name: "test".to_string(),
+                fixture_name: "page".to_string(),
+                member: "goto".to_string(),
+            }),
+        );
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::InstanceExportBinding(InstanceExportBindingFact {
+                export_name: "exported".to_string(),
+                target_name: "target".to_string(),
+            }),
+        );
+
+        let view = SemanticFactView::new(&module.semantic_facts, &module.member_accesses);
+
+        assert_eq!(
+            view.factory_call_member_accesses(),
+            vec![FactoryCallMemberAccessFact {
+                callee_object: "Svc".to_string(),
+                callee_method: "create".to_string(),
+                member: "run".to_string(),
+            }]
+        );
+        assert_eq!(
+            view.playwright_fixture_uses(),
+            vec![PlaywrightFixtureUseFact {
+                test_name: "test".to_string(),
+                fixture_name: "page".to_string(),
+                member: "goto".to_string(),
+            }]
+        );
+        assert_eq!(
+            view.instance_export_bindings(),
+            vec![InstanceExportBindingFact {
+                export_name: "exported".to_string(),
+                target_name: "target".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn playwright_fixture_fact_helpers_select_each_fact_family() {
+        let mut module = minimal_module_info();
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::PlaywrightFixtureUse(PlaywrightFixtureUseFact {
+                test_name: "test".to_string(),
+                fixture_name: "page".to_string(),
+                member: "goto".to_string(),
+            }),
+        );
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::PlaywrightFixtureDefinition(PlaywrightFixtureDefinitionFact {
+                test_name: "test".to_string(),
+                fixture_name: "adminPage".to_string(),
+                type_name: "AdminPage".to_string(),
+            }),
+        );
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::PlaywrightFixtureAlias(PlaywrightFixtureAliasFact {
+                test_name: "mergedTest".to_string(),
+                base_name: "test".to_string(),
+            }),
+        );
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::PlaywrightFixtureType(PlaywrightFixtureTypeFact {
+                alias_name: "Pages".to_string(),
+                fixture_name: "adminPage".to_string(),
+                type_name: "AdminPage".to_string(),
+            }),
+        );
+
+        assert_eq!(
+            playwright_fixture_use_facts(&module.semantic_facts)
+                .map(|fact| fact.member.as_str())
+                .collect::<Vec<_>>(),
+            vec!["goto"]
+        );
+        assert_eq!(
+            playwright_fixture_definition_facts(&module.semantic_facts)
+                .map(|fact| fact.type_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["AdminPage"]
+        );
+        assert_eq!(
+            playwright_fixture_alias_facts(&module.semantic_facts)
+                .map(|fact| fact.base_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["test"]
+        );
+        assert_eq!(
+            playwright_fixture_type_facts(&module.semantic_facts)
+                .map(|fact| fact.fixture_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["adminPage"]
+        );
+    }
+
+    #[test]
     fn line_offsets_empty_string() {
         assert_eq!(compute_line_offsets(""), vec![0]);
     }
@@ -1358,6 +2694,7 @@ mod tests {
                 is_type_only: false,
                 is_side_effect_used: false,
                 visibility: VisibilityTag::None,
+                expected_unused_reason: None,
                 span: span(),
                 members: Vec::new(),
                 super_class: None,
@@ -1397,12 +2734,13 @@ mod tests {
                 destructured_names: Vec::new(),
                 local_name: Some("required".to_string()),
             }],
-            package_path_references: vec!["react".to_string()],
+            package_path_references: vec!["react".to_string()].into(),
             member_accesses: vec![MemberAccess {
                 object: "Status".to_string(),
                 member: "Active".to_string(),
             }],
-            whole_object_uses: vec!["Status".to_string()],
+            semantic_facts: Box::default(),
+            whole_object_uses: vec!["Status".to_string()].into(),
             has_cjs_exports: true,
             has_angular_component_template_url: true,
             content_hash: 42,
@@ -1420,6 +2758,9 @@ mod tests {
                 cognitive: 3,
                 line_count: 4,
                 param_count: 1,
+                react_hook_count: 0,
+                react_jsx_max_depth: 0,
+                react_prop_count: 0,
                 source_hash: Some("hash".to_string()),
                 contributions: Vec::new(),
             }],
@@ -1438,6 +2779,10 @@ mod tests {
                 implements: vec!["Contract".to_string()],
                 instance_bindings: Vec::new(),
             }],
+            exported_factory_returns: Box::from([FactoryReturnExport {
+                export_name: "useApi".to_string(),
+                class_local_name: "RESTApi".to_string(),
+            }]),
             injection_tokens: vec![("TOKEN".to_string(), "Contract".to_string())],
             local_type_declarations: vec![LocalTypeDeclaration {
                 name: "Contract".to_string(),
@@ -1466,6 +2811,7 @@ mod tests {
             security_control_sites: Vec::new(),
             callee_uses: Vec::new(),
             misplaced_directives: Vec::new(),
+            inline_server_action_exports: Vec::new(),
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
             referenced_import_bindings: Vec::new(),
@@ -1475,9 +2821,28 @@ mod tests {
             has_define_model: false,
             has_unharvestable_props: false,
             component_emits: Vec::new(),
+            angular_inputs: Vec::new(),
+            angular_outputs: Vec::new(),
+            angular_component_selectors: Vec::new(),
+            registered_custom_elements: Vec::new(),
+            used_custom_element_tags: Vec::new(),
+            angular_used_selectors: Vec::new(),
+            angular_entry_component_refs: Vec::new(),
+            has_dynamic_component_render: false,
             has_unharvestable_emits: false,
             has_dynamic_emit: false,
             has_emit_whole_object_use: false,
+            load_return_keys: Vec::new(),
+            has_unharvestable_load: false,
+            has_load_data_whole_use: false,
+            has_page_data_store_whole_use: false,
+            component_functions: Vec::new(),
+            react_props: Vec::new(),
+            hook_uses: Vec::new(),
+            render_edges: Vec::new(),
+            svelte_dispatched_events: Vec::new(),
+            svelte_listened_events: Vec::new(),
+            has_dynamic_dispatch: false,
         };
 
         module.release_resolution_payload();
@@ -1493,6 +2858,7 @@ mod tests {
         assert_eq!(module.complexity.len(), 1);
         assert_eq!(module.flag_uses.len(), 1);
         assert_eq!(module.class_heritage.len(), 1);
+        assert_eq!(module.exported_factory_returns.len(), 1);
         assert_eq!(module.injection_tokens.len(), 1);
         assert_eq!(module.local_type_declarations.len(), 1);
         assert_eq!(module.public_signature_type_references.len(), 1);
@@ -1837,6 +3203,886 @@ mod tests {
         assert_eq!((line, col), (1, 0));
     }
 
+    // --- VisibilityTag ---
+
+    #[test]
+    fn visibility_tag_default_is_none_variant() {
+        assert_eq!(VisibilityTag::default(), VisibilityTag::None);
+    }
+
+    #[test]
+    fn visibility_tag_is_none_only_for_none_variant() {
+        assert!(VisibilityTag::None.is_none());
+        assert!(!VisibilityTag::Public.is_none());
+        assert!(!VisibilityTag::Internal.is_none());
+        assert!(!VisibilityTag::Beta.is_none());
+        assert!(!VisibilityTag::Alpha.is_none());
+        assert!(!VisibilityTag::ExpectedUnused.is_none());
+    }
+
+    #[test]
+    fn visibility_tag_suppresses_unused_for_api_tags() {
+        assert!(VisibilityTag::Public.suppresses_unused());
+        assert!(VisibilityTag::Internal.suppresses_unused());
+        assert!(VisibilityTag::Beta.suppresses_unused());
+        assert!(VisibilityTag::Alpha.suppresses_unused());
+    }
+
+    #[test]
+    fn visibility_tag_does_not_suppress_none_or_expected_unused() {
+        assert!(!VisibilityTag::None.suppresses_unused());
+        assert!(!VisibilityTag::ExpectedUnused.suppresses_unused());
+    }
+
+    // --- is_public_env_path ---
+
+    #[test]
+    fn is_public_env_path_process_env_public_prefix() {
+        assert!(is_public_env_path("process.env.NEXT_PUBLIC_API_URL"));
+        assert!(is_public_env_path("process.env.VITE_APP_KEY"));
+        assert!(is_public_env_path("process.env.REACT_APP_TITLE"));
+        assert!(is_public_env_path("process.env.NODE_ENV"));
+    }
+
+    #[test]
+    fn is_public_env_path_import_meta_env_public_prefix() {
+        assert!(is_public_env_path("import.meta.env.VITE_BASE_URL"));
+        assert!(is_public_env_path("import.meta.env.PUBLIC_API"));
+    }
+
+    #[test]
+    fn is_public_env_path_secret_env_vars_are_not_public() {
+        assert!(!is_public_env_path("process.env.SECRET_KEY"));
+        assert!(!is_public_env_path("process.env.DATABASE_PASSWORD"));
+        assert!(!is_public_env_path("import.meta.env.API_TOKEN"));
+    }
+
+    #[test]
+    fn is_public_env_path_non_env_paths_are_not_public() {
+        assert!(!is_public_env_path("req.query.id"));
+        assert!(!is_public_env_path("process.argv"));
+        assert!(!is_public_env_path("window.location.href"));
+    }
+
+    // --- is_public_env_var edge cases ---
+
+    #[test]
+    fn is_public_env_var_exact_matches() {
+        assert!(is_public_env_var("NODE_ENV"));
+    }
+
+    #[test]
+    fn is_public_env_var_all_known_prefixes() {
+        assert!(is_public_env_var("NUXT_PUBLIC_API_URL"));
+        assert!(is_public_env_var("PUBLIC_API_KEY"));
+        assert!(is_public_env_var("GATSBY_APP_ID"));
+        assert!(is_public_env_var("EXPO_PUBLIC_SENTRY_DSN"));
+        assert!(is_public_env_var("STORYBOOK_ENV"));
+    }
+
+    #[test]
+    fn is_public_env_var_secret_token_beats_metadata_token() {
+        // "SECRET_SHA": has SECRET (wins) and SHA (metadata); should NOT be public
+        assert!(!is_public_env_var("SECRET_SHA"));
+        // "REF_TOKEN": has TOKEN (secret) and REF (metadata); should NOT be public
+        assert!(!is_public_env_var("REF_TOKEN"));
+    }
+
+    #[test]
+    fn is_public_env_var_plain_unknown_names_are_not_public() {
+        assert!(!is_public_env_var("MY_SERVICE_URL"));
+        assert!(!is_public_env_var("FEATURE_FLAG"));
+        assert!(!is_public_env_var("DATABASE_URL"));
+    }
+
+    // --- SinkSite::span ---
+
+    #[test]
+    fn sink_site_span_reconstructs_from_offsets() {
+        let site = SinkSite {
+            sink_shape: SinkShape::Call,
+            callee_path: "eval".to_string(),
+            arg_index: 0,
+            arg_is_non_literal: true,
+            arg_kind: SinkArgKind::Other,
+            arg_literal: None,
+            regex_pattern: None,
+            object_properties: Vec::new(),
+            object_property_keys: Vec::new(),
+            object_property_keys_complete: false,
+            arg_idents: Vec::new(),
+            arg_source_paths: Vec::new(),
+            span_start: 5,
+            span_end: 15,
+            url_arg_literal: None,
+            url_shape: None,
+        };
+        let s = site.span();
+        assert_eq!(s.start, 5);
+        assert_eq!(s.end, 15);
+    }
+
+    // --- SecurityControlKind ---
+
+    #[test]
+    fn security_control_kind_equality_and_ordering() {
+        assert_eq!(
+            SecurityControlKind::Sanitization,
+            SecurityControlKind::Sanitization
+        );
+        assert_eq!(
+            SecurityControlKind::Validation,
+            SecurityControlKind::Validation
+        );
+        assert_ne!(
+            SecurityControlKind::Sanitization,
+            SecurityControlKind::Validation
+        );
+        assert!(SecurityControlKind::Sanitization < SecurityControlKind::Validation);
+        assert!(SecurityControlKind::Authentication < SecurityControlKind::Authorization);
+    }
+
+    // --- SanitizerScope ---
+
+    #[test]
+    fn sanitizer_scope_equality_and_ordering() {
+        assert_eq!(SanitizerScope::Html, SanitizerScope::Html);
+        assert_eq!(SanitizerScope::Url, SanitizerScope::Url);
+        assert_eq!(SanitizerScope::Path, SanitizerScope::Path);
+        assert_eq!(SanitizerScope::SqlIdentifier, SanitizerScope::SqlIdentifier);
+        assert_ne!(SanitizerScope::Html, SanitizerScope::Url);
+        assert!(SanitizerScope::Html < SanitizerScope::Url);
+    }
+
+    // --- SkippedSecurityCalleeReason ---
+
+    #[test]
+    fn skipped_security_callee_reason_equality() {
+        assert_eq!(
+            SkippedSecurityCalleeReason::ComputedMember,
+            SkippedSecurityCalleeReason::ComputedMember
+        );
+        assert_ne!(
+            SkippedSecurityCalleeReason::ComputedMember,
+            SkippedSecurityCalleeReason::DynamicDispatch
+        );
+        assert_ne!(
+            SkippedSecurityCalleeReason::DynamicDispatch,
+            SkippedSecurityCalleeReason::UnsupportedAssignmentObject
+        );
+    }
+
+    // --- SkippedSecurityCalleeExpressionKind ---
+
+    #[test]
+    fn skipped_security_callee_expression_kind_equality() {
+        use SkippedSecurityCalleeExpressionKind as K;
+        assert_eq!(K::StaticMemberExpression, K::StaticMemberExpression);
+        assert_eq!(K::ComputedMemberExpression, K::ComputedMemberExpression);
+        assert_eq!(K::Identifier, K::Identifier);
+        assert_eq!(K::Other, K::Other);
+        assert_ne!(K::StaticMemberExpression, K::ComputedMemberExpression);
+        assert_ne!(K::Identifier, K::Other);
+    }
+
+    // --- SinkLiteralValue ---
+
+    #[test]
+    fn sink_literal_value_equality() {
+        assert_eq!(
+            SinkLiteralValue::String("x".to_string()),
+            SinkLiteralValue::String("x".to_string())
+        );
+        assert_ne!(
+            SinkLiteralValue::String("x".to_string()),
+            SinkLiteralValue::String("y".to_string())
+        );
+        assert_eq!(SinkLiteralValue::Integer(42), SinkLiteralValue::Integer(42));
+        assert_ne!(SinkLiteralValue::Integer(1), SinkLiteralValue::Integer(2));
+        assert_eq!(
+            SinkLiteralValue::Boolean(true),
+            SinkLiteralValue::Boolean(true)
+        );
+        assert_ne!(
+            SinkLiteralValue::Boolean(true),
+            SinkLiteralValue::Boolean(false)
+        );
+        assert_eq!(SinkLiteralValue::Null, SinkLiteralValue::Null);
+        assert_ne!(SinkLiteralValue::Null, SinkLiteralValue::Boolean(false));
+    }
+
+    // --- SecurityUrlShape ---
+
+    #[test]
+    fn security_url_shape_equality() {
+        assert_eq!(
+            SecurityUrlShape::FixedOriginDynamicPath,
+            SecurityUrlShape::FixedOriginDynamicPath
+        );
+        assert_eq!(
+            SecurityUrlShape::DynamicOrigin,
+            SecurityUrlShape::DynamicOrigin
+        );
+        assert_ne!(
+            SecurityUrlShape::FixedOriginDynamicPath,
+            SecurityUrlShape::DynamicOrigin
+        );
+    }
+
+    // --- FlagUseKind ---
+
+    #[test]
+    fn flag_use_kind_equality() {
+        assert_eq!(FlagUseKind::EnvVar, FlagUseKind::EnvVar);
+        assert_eq!(FlagUseKind::SdkCall, FlagUseKind::SdkCall);
+        assert_eq!(FlagUseKind::ConfigObject, FlagUseKind::ConfigObject);
+        assert_ne!(FlagUseKind::EnvVar, FlagUseKind::SdkCall);
+        assert_ne!(FlagUseKind::SdkCall, FlagUseKind::ConfigObject);
+    }
+
+    // --- ComplexityMetric ---
+
+    #[test]
+    fn complexity_metric_equality() {
+        assert_eq!(ComplexityMetric::Cyclomatic, ComplexityMetric::Cyclomatic);
+        assert_eq!(ComplexityMetric::Cognitive, ComplexityMetric::Cognitive);
+        assert_ne!(ComplexityMetric::Cyclomatic, ComplexityMetric::Cognitive);
+    }
+
+    // --- ComplexityContributionKind ---
+
+    #[test]
+    fn complexity_contribution_kind_equality_spot_check() {
+        use ComplexityContributionKind as K;
+        assert_eq!(K::If, K::If);
+        assert_eq!(K::Else, K::Else);
+        assert_eq!(K::ElseIf, K::ElseIf);
+        assert_eq!(K::Ternary, K::Ternary);
+        assert_eq!(K::LogicalAnd, K::LogicalAnd);
+        assert_eq!(K::LogicalOr, K::LogicalOr);
+        assert_eq!(K::NullishCoalescing, K::NullishCoalescing);
+        assert_eq!(K::LogicalAssignment, K::LogicalAssignment);
+        assert_eq!(K::OptionalChain, K::OptionalChain);
+        assert_eq!(K::For, K::For);
+        assert_eq!(K::ForIn, K::ForIn);
+        assert_eq!(K::ForOf, K::ForOf);
+        assert_eq!(K::While, K::While);
+        assert_eq!(K::DoWhile, K::DoWhile);
+        assert_eq!(K::Switch, K::Switch);
+        assert_eq!(K::Case, K::Case);
+        assert_eq!(K::Catch, K::Catch);
+        assert_eq!(K::LabeledBreak, K::LabeledBreak);
+        assert_eq!(K::LabeledContinue, K::LabeledContinue);
+        assert_eq!(K::JsxDepth, K::JsxDepth);
+        assert_eq!(K::HookDensity, K::HookDensity);
+        assert_eq!(K::PropCount, K::PropCount);
+        assert_ne!(K::If, K::Else);
+        assert_ne!(K::For, K::While);
+        assert_ne!(K::Switch, K::Case);
+    }
+
+    // --- MisplacedDirectiveSite ---
+
+    #[test]
+    fn misplaced_directive_site_equality() {
+        let client = MisplacedDirectiveSite {
+            is_server: false,
+            span_start: 10,
+        };
+        let server = MisplacedDirectiveSite {
+            is_server: true,
+            span_start: 10,
+        };
+        let client2 = MisplacedDirectiveSite {
+            is_server: false,
+            span_start: 10,
+        };
+        assert_eq!(client, client2);
+        assert_ne!(client, server);
+    }
+
+    #[test]
+    fn misplaced_directive_site_is_server_flag() {
+        let site = MisplacedDirectiveSite {
+            is_server: true,
+            span_start: 42,
+        };
+        assert!(site.is_server);
+        assert_eq!(site.span_start, 42);
+
+        let client_site = MisplacedDirectiveSite {
+            is_server: false,
+            span_start: 0,
+        };
+        assert!(!client_site.is_server);
+    }
+
+    // --- DiRole / DiFramework ---
+
+    #[test]
+    fn di_role_equality() {
+        assert_eq!(DiRole::Provide, DiRole::Provide);
+        assert_eq!(DiRole::Inject, DiRole::Inject);
+        assert_ne!(DiRole::Provide, DiRole::Inject);
+    }
+
+    #[test]
+    fn di_framework_equality() {
+        assert_eq!(DiFramework::Vue, DiFramework::Vue);
+        assert_eq!(DiFramework::Svelte, DiFramework::Svelte);
+        assert_eq!(DiFramework::Angular, DiFramework::Angular);
+        assert_ne!(DiFramework::Vue, DiFramework::Svelte);
+        assert_ne!(DiFramework::Svelte, DiFramework::Angular);
+    }
+
+    // --- ComponentEmit ---
+
+    #[test]
+    fn component_emit_equality() {
+        let a = ComponentEmit {
+            name: "close".to_string(),
+            span_start: 10,
+            used: true,
+        };
+        let b = ComponentEmit {
+            name: "close".to_string(),
+            span_start: 10,
+            used: true,
+        };
+        let different_used = ComponentEmit {
+            name: "close".to_string(),
+            span_start: 10,
+            used: false,
+        };
+        let different_name = ComponentEmit {
+            name: "open".to_string(),
+            span_start: 10,
+            used: true,
+        };
+        assert_eq!(a, b);
+        assert_ne!(a, different_used);
+        assert_ne!(a, different_name);
+    }
+
+    // --- DispatchedEvent ---
+
+    #[test]
+    fn dispatched_event_equality() {
+        let a = DispatchedEvent {
+            name: "myEvent".to_string(),
+            span_start: 20,
+        };
+        let b = DispatchedEvent {
+            name: "myEvent".to_string(),
+            span_start: 20,
+        };
+        let c = DispatchedEvent {
+            name: "otherEvent".to_string(),
+            span_start: 20,
+        };
+        let d = DispatchedEvent {
+            name: "myEvent".to_string(),
+            span_start: 99,
+        };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(a, d);
+    }
+
+    // --- AngularInputMember / AngularOutputMember ---
+
+    #[test]
+    fn angular_input_member_equality() {
+        let a = AngularInputMember {
+            name: "title".to_string(),
+            span_start: 5,
+        };
+        let b = AngularInputMember {
+            name: "title".to_string(),
+            span_start: 5,
+        };
+        let c = AngularInputMember {
+            name: "label".to_string(),
+            span_start: 5,
+        };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn angular_output_member_equality() {
+        let a = AngularOutputMember {
+            name: "clicked".to_string(),
+            span_start: 8,
+        };
+        let b = AngularOutputMember {
+            name: "clicked".to_string(),
+            span_start: 8,
+        };
+        let c = AngularOutputMember {
+            name: "hovered".to_string(),
+            span_start: 8,
+        };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    // --- AngularComponentSelector ---
+
+    #[test]
+    fn angular_component_selector_fields() {
+        let s = AngularComponentSelector {
+            selectors: vec!["app-foo".to_string(), "[appFoo]".to_string()],
+            span_start: 100,
+            class_name: "FooComponent".to_string(),
+        };
+        assert_eq!(s.selectors.len(), 2);
+        assert_eq!(s.selectors[0], "app-foo");
+        assert_eq!(s.selectors[1], "[appFoo]");
+        assert_eq!(s.class_name, "FooComponent");
+    }
+
+    #[test]
+    fn angular_component_selector_equality() {
+        let a = AngularComponentSelector {
+            selectors: vec!["app-bar".to_string()],
+            span_start: 0,
+            class_name: "BarComponent".to_string(),
+        };
+        let b = AngularComponentSelector {
+            selectors: vec!["app-bar".to_string()],
+            span_start: 0,
+            class_name: "BarComponent".to_string(),
+        };
+        let c = AngularComponentSelector {
+            selectors: vec!["app-baz".to_string()],
+            span_start: 0,
+            class_name: "BazComponent".to_string(),
+        };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    // --- LoadReturnKey ---
+
+    #[test]
+    fn load_return_key_equality() {
+        let a = LoadReturnKey {
+            name: "user".to_string(),
+            span_start: 50,
+            span_end: 54,
+        };
+        let b = LoadReturnKey {
+            name: "user".to_string(),
+            span_start: 50,
+            span_end: 54,
+        };
+        let c = LoadReturnKey {
+            name: "posts".to_string(),
+            span_start: 50,
+            span_end: 55,
+        };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn load_return_key_span_fields() {
+        let key = LoadReturnKey {
+            name: "data".to_string(),
+            span_start: 10,
+            span_end: 14,
+        };
+        assert_eq!(key.span_start, 10);
+        assert_eq!(key.span_end, 14);
+        assert_eq!(key.name, "data");
+    }
+
+    // --- ComponentFunctionKind ---
+
+    #[test]
+    fn component_function_kind_equality() {
+        assert_eq!(ComponentFunctionKind::FnDecl, ComponentFunctionKind::FnDecl);
+        assert_eq!(ComponentFunctionKind::Arrow, ComponentFunctionKind::Arrow);
+        assert_eq!(
+            ComponentFunctionKind::ForwardRefWrapper,
+            ComponentFunctionKind::ForwardRefWrapper
+        );
+        assert_eq!(
+            ComponentFunctionKind::MemoWrapper,
+            ComponentFunctionKind::MemoWrapper
+        );
+        assert_ne!(ComponentFunctionKind::FnDecl, ComponentFunctionKind::Arrow);
+        assert_ne!(
+            ComponentFunctionKind::ForwardRefWrapper,
+            ComponentFunctionKind::MemoWrapper
+        );
+    }
+
+    // --- HookUseKind ---
+
+    #[test]
+    fn hook_use_kind_equality() {
+        assert_eq!(HookUseKind::UseState, HookUseKind::UseState);
+        assert_eq!(HookUseKind::UseEffect, HookUseKind::UseEffect);
+        assert_eq!(HookUseKind::UseMemo, HookUseKind::UseMemo);
+        assert_eq!(HookUseKind::UseCallback, HookUseKind::UseCallback);
+        assert_eq!(HookUseKind::Custom, HookUseKind::Custom);
+        assert_ne!(HookUseKind::UseState, HookUseKind::UseEffect);
+        assert_ne!(HookUseKind::UseMemo, HookUseKind::Custom);
+    }
+
+    // --- HookUse ---
+
+    #[test]
+    fn hook_use_fields() {
+        let h = HookUse {
+            kind: HookUseKind::UseEffect,
+            dep_array_arity: Some(2),
+            span_start: 30,
+            component: "Widget".to_string(),
+        };
+        assert_eq!(h.kind, HookUseKind::UseEffect);
+        assert_eq!(h.dep_array_arity, Some(2));
+        assert_eq!(h.span_start, 30);
+        assert_eq!(h.component, "Widget");
+    }
+
+    #[test]
+    fn hook_use_no_dep_array() {
+        let h = HookUse {
+            kind: HookUseKind::UseCallback,
+            dep_array_arity: None,
+            span_start: 0,
+            component: String::new(),
+        };
+        assert!(h.dep_array_arity.is_none());
+    }
+
+    // --- MemberKind::StoreMember (missed in existing bitcode test) ---
+
+    #[test]
+    fn member_kind_store_member_bitcode_roundtrip() {
+        let kind = MemberKind::StoreMember;
+        let bytes = bitcode::encode(&kind);
+        let decoded: MemberKind = bitcode::decode(&bytes).unwrap();
+        assert_eq!(decoded, kind);
+    }
+
+    // --- RenderEdge / ForwardAttr ---
+
+    #[test]
+    fn render_edge_fields() {
+        let edge = RenderEdge {
+            parent_component: "Parent".to_string(),
+            child_component_name: "Child".to_string(),
+            attr_names: vec!["title".to_string(), "onClick".to_string()],
+            has_spread: false,
+            forward_attrs: vec![ForwardAttr {
+                attr: "title".to_string(),
+                root: "props".to_string(),
+            }],
+            has_complex_forward: false,
+        };
+        assert_eq!(edge.parent_component, "Parent");
+        assert_eq!(edge.child_component_name, "Child");
+        assert_eq!(edge.attr_names.len(), 2);
+        assert!(!edge.has_spread);
+        assert_eq!(edge.forward_attrs.len(), 1);
+        assert_eq!(edge.forward_attrs[0].attr, "title");
+        assert_eq!(edge.forward_attrs[0].root, "props");
+        assert!(!edge.has_complex_forward);
+    }
+
+    #[test]
+    fn render_edge_with_spread() {
+        let edge = RenderEdge {
+            parent_component: "Wrapper".to_string(),
+            child_component_name: "Inner".to_string(),
+            attr_names: Vec::new(),
+            has_spread: true,
+            forward_attrs: Vec::new(),
+            has_complex_forward: true,
+        };
+        assert!(edge.has_spread);
+        assert!(edge.has_complex_forward);
+    }
+
+    // --- ComponentFunction ---
+
+    #[test]
+    fn component_function_fields() {
+        let cf = ComponentFunction {
+            name: "MyButton".to_string(),
+            span_start: 0,
+            kind: ComponentFunctionKind::Arrow,
+            is_exported: true,
+            has_unharvestable_props: false,
+            uses_clone_element: false,
+            renders_provider: false,
+            has_children_as_function: false,
+            is_pure_passthrough: false,
+        };
+        assert_eq!(cf.name, "MyButton");
+        assert_eq!(cf.kind, ComponentFunctionKind::Arrow);
+        assert!(cf.is_exported);
+        assert!(!cf.has_unharvestable_props);
+        assert!(!cf.is_pure_passthrough);
+    }
+
+    #[test]
+    fn component_function_passthrough_flag() {
+        let cf = ComponentFunction {
+            name: "Passthrough".to_string(),
+            span_start: 5,
+            kind: ComponentFunctionKind::FnDecl,
+            is_exported: false,
+            has_unharvestable_props: false,
+            uses_clone_element: false,
+            renders_provider: false,
+            has_children_as_function: false,
+            is_pure_passthrough: true,
+        };
+        assert!(cf.is_pure_passthrough);
+        assert!(!cf.is_exported);
+    }
+
+    // --- DiKeySite ---
+
+    #[test]
+    fn di_key_site_fields() {
+        let site = DiKeySite {
+            key_local: "MY_KEY".to_string(),
+            role: DiRole::Provide,
+            framework: DiFramework::Vue,
+            span_start: 77,
+        };
+        assert_eq!(site.key_local, "MY_KEY");
+        assert_eq!(site.role, DiRole::Provide);
+        assert_eq!(site.framework, DiFramework::Vue);
+        assert_eq!(site.span_start, 77);
+    }
+
+    #[test]
+    fn di_key_site_inject_svelte() {
+        let site = DiKeySite {
+            key_local: "ctx_key".to_string(),
+            role: DiRole::Inject,
+            framework: DiFramework::Svelte,
+            span_start: 0,
+        };
+        assert_eq!(site.role, DiRole::Inject);
+        assert_eq!(site.framework, DiFramework::Svelte);
+    }
+
+    // --- release_resolution_payload: page data store whole-use derivation ---
+
+    #[test]
+    fn release_payload_derives_page_data_store_whole_use_from_page_data() {
+        let mut m = minimal_module_info();
+        m.whole_object_uses = vec!["page.data".to_string()].into();
+        m.release_resolution_payload();
+        assert!(m.has_page_data_store_whole_use);
+    }
+
+    #[test]
+    fn release_payload_derives_page_data_store_whole_use_from_dollar_page_data() {
+        let mut m = minimal_module_info();
+        m.whole_object_uses = vec!["$page.data".to_string()].into();
+        m.release_resolution_payload();
+        assert!(m.has_page_data_store_whole_use);
+    }
+
+    #[test]
+    fn release_payload_does_not_set_page_data_store_whole_use_for_other_names() {
+        let mut m = minimal_module_info();
+        m.whole_object_uses = vec!["data".to_string(), "page".to_string()].into();
+        m.release_resolution_payload();
+        assert!(!m.has_page_data_store_whole_use);
+    }
+
+    // --- release_resolution_payload: referenced_import_bindings derivation ---
+
+    #[test]
+    fn release_payload_referenced_bindings_excludes_empty_local_names() {
+        let mut m = minimal_module_info();
+        m.imports = vec![
+            ImportInfo {
+                source: "./styles.css".to_string(),
+                imported_name: ImportedName::SideEffect,
+                local_name: String::new(), // empty = side-effect import
+                is_type_only: false,
+                from_style: true,
+                span: span(),
+                source_span: span(),
+            },
+            ImportInfo {
+                source: "react".to_string(),
+                imported_name: ImportedName::Default,
+                local_name: "React".to_string(),
+                is_type_only: false,
+                from_style: false,
+                span: span(),
+                source_span: span(),
+            },
+        ];
+        m.unused_import_bindings = vec!["React".to_string()];
+        m.release_resolution_payload();
+        // "React" was unused, empty local is filtered; result should be empty
+        assert!(m.referenced_import_bindings.is_empty());
+    }
+
+    #[test]
+    fn release_payload_referenced_bindings_sorted_and_deduped() {
+        let mut m = minimal_module_info();
+        // Two imports with the same local name (unusual but possible via re-exports)
+        m.imports = vec![
+            ImportInfo {
+                source: "a".to_string(),
+                imported_name: ImportedName::Named("foo".to_string()),
+                local_name: "foo".to_string(),
+                is_type_only: false,
+                from_style: false,
+                span: span(),
+                source_span: span(),
+            },
+            ImportInfo {
+                source: "b".to_string(),
+                imported_name: ImportedName::Named("bar".to_string()),
+                local_name: "bar".to_string(),
+                is_type_only: false,
+                from_style: false,
+                span: span(),
+                source_span: span(),
+            },
+            ImportInfo {
+                source: "c".to_string(),
+                imported_name: ImportedName::Named("foo".to_string()),
+                local_name: "foo".to_string(),
+                is_type_only: false,
+                from_style: false,
+                span: span(),
+                source_span: span(),
+            },
+        ];
+        m.unused_import_bindings = Vec::new();
+        m.release_resolution_payload();
+        // sorted: ["bar", "foo"] with "foo" deduped
+        assert_eq!(
+            m.referenced_import_bindings,
+            vec!["bar".to_string(), "foo".to_string()]
+        );
+    }
+
+    // --- CalleeUse ---
+
+    #[test]
+    fn callee_use_fields() {
+        let cu = CalleeUse {
+            callee_path: "child_process.exec".to_string(),
+            span_start: 100,
+        };
+        assert_eq!(cu.callee_path, "child_process.exec");
+        assert_eq!(cu.span_start, 100);
+    }
+
+    // --- Helper to build a minimal ModuleInfo for targeted tests ---
+
+    fn minimal_module_info() -> ModuleInfo {
+        ModuleInfo {
+            file_id: FileId(0),
+            exports: Vec::new(),
+            imports: Vec::new(),
+            re_exports: Vec::new(),
+            dynamic_imports: Vec::new(),
+            dynamic_import_patterns: Vec::new(),
+            require_calls: Vec::new(),
+            package_path_references: Box::default(),
+            member_accesses: Vec::new(),
+            semantic_facts: Box::default(),
+            whole_object_uses: Box::default(),
+            has_cjs_exports: false,
+            has_angular_component_template_url: false,
+            content_hash: 0,
+            suppressions: Vec::new(),
+            unknown_suppression_kinds: Vec::new(),
+            unused_import_bindings: Vec::new(),
+            type_referenced_import_bindings: Vec::new(),
+            value_referenced_import_bindings: Vec::new(),
+            line_offsets: Vec::new(),
+            complexity: Vec::new(),
+            flag_uses: Vec::new(),
+            class_heritage: Vec::new(),
+            exported_factory_returns: Box::default(),
+            injection_tokens: Vec::new(),
+            local_type_declarations: Vec::new(),
+            public_signature_type_references: Vec::new(),
+            namespace_object_aliases: Vec::new(),
+            iconify_prefixes: Vec::new(),
+            iconify_icon_names: Vec::new(),
+            auto_import_candidates: Vec::new(),
+            directives: Vec::new(),
+            client_only_dynamic_import_spans: Vec::new(),
+            security_sinks: Vec::new(),
+            security_sinks_skipped: 0,
+            security_unresolved_callee_sites: Vec::new(),
+            tainted_bindings: Vec::new(),
+            sanitized_sink_args: Vec::new(),
+            security_control_sites: Vec::new(),
+            callee_uses: Vec::new(),
+            misplaced_directives: Vec::new(),
+            inline_server_action_exports: Vec::new(),
+            di_key_sites: Vec::new(),
+            has_dynamic_provide: false,
+            referenced_import_bindings: Vec::new(),
+            component_props: Vec::new(),
+            has_props_attrs_fallthrough: false,
+            has_define_expose: false,
+            has_define_model: false,
+            has_unharvestable_props: false,
+            component_emits: Vec::new(),
+            angular_inputs: Vec::new(),
+            angular_outputs: Vec::new(),
+            angular_component_selectors: Vec::new(),
+            registered_custom_elements: Vec::new(),
+            used_custom_element_tags: Vec::new(),
+            angular_used_selectors: Vec::new(),
+            angular_entry_component_refs: Vec::new(),
+            has_dynamic_component_render: false,
+            has_unharvestable_emits: false,
+            has_dynamic_emit: false,
+            has_emit_whole_object_use: false,
+            load_return_keys: Vec::new(),
+            has_unharvestable_load: false,
+            has_load_data_whole_use: false,
+            has_page_data_store_whole_use: false,
+            component_functions: Vec::new(),
+            react_props: Vec::new(),
+            hook_uses: Vec::new(),
+            render_edges: Vec::new(),
+            svelte_dispatched_events: Vec::new(),
+            svelte_listened_events: Vec::new(),
+            has_dynamic_dispatch: false,
+        }
+    }
+
+    fn push_semantic_fact(module: &mut ModuleInfo, fact: SemanticFact) {
+        let mut facts = std::mem::take(&mut module.semantic_facts).into_vec();
+        facts.push(fact);
+        module.semantic_facts = facts.into_boxed_slice();
+    }
+
+    #[test]
+    fn dynamic_custom_element_render_helper_prefers_typed_fact() {
+        let mut module = minimal_module_info();
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::DynamicCustomElementRender(DynamicCustomElementRenderFact),
+        );
+
+        assert!(has_dynamic_custom_element_render(&module));
+    }
+
     #[test]
     fn function_complexity_bitcode_roundtrip() {
         let fc = FunctionComplexity {
@@ -1847,6 +4093,9 @@ mod tests {
             cognitive: 25,
             line_count: 80,
             param_count: 3,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
             source_hash: Some("0123456789abcdef".to_string()),
             contributions: vec![
                 ComplexityContribution {

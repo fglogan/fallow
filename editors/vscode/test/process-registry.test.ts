@@ -48,6 +48,7 @@ vi.mock("../src/binary-utils.js", () => ({
   getExecutableExtension: () => "",
   findLocalBinary: () => null,
   findBinaryInPath: () => null,
+  resolveConfiguredBinaryPath: () => null,
 }));
 
 vi.mock("../src/download.js", () => ({

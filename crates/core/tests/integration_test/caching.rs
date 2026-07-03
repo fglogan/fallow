@@ -3,6 +3,10 @@ use std::path::PathBuf;
 use super::common::{create_config, create_config_with_cache, fixture_path};
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "roundtrip fixture enumerates cache fields"
+)]
 fn cache_roundtrip() {
     use plow_core::cache::CacheStore;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -19,7 +23,7 @@ fn cache_roundtrip() {
 
     let cached = plow_core::cache::CachedModule {
         content_hash: 12345,
-        mtime_secs: 0,
+        mtime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -27,9 +31,10 @@ fn cache_roundtrip() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
-        package_path_references: vec![],
+        package_path_references: Box::default(),
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: None,
+        whole_object_uses: Box::default(),
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
         has_angular_component_template_url: false,
@@ -42,6 +47,7 @@ fn cache_roundtrip() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
+        exported_factory_returns: None,
         injection_tokens: vec![],
         local_type_declarations: vec![],
         public_signature_type_references: vec![],
@@ -59,6 +65,7 @@ fn cache_roundtrip() {
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
         misplaced_directives: Vec::new(),
+        inline_server_action_exports: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
         component_props: Vec::new(),
@@ -67,9 +74,27 @@ fn cache_roundtrip() {
         has_define_model: false,
         has_unharvestable_props: false,
         component_emits: Vec::new(),
+        angular_inputs: Vec::new(),
+        angular_outputs: Vec::new(),
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
+        component_functions: Vec::new(),
+        react_props: Vec::new(),
+        hook_uses: Vec::new(),
+        render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        angular_component_selectors: Vec::new(),
+        registered_custom_elements: Vec::new(),
+        used_custom_element_tags: Vec::new(),
+        angular_used_selectors: Vec::new(),
+        angular_entry_component_refs: Vec::new(),
+        has_dynamic_component_render: false,
+        has_dynamic_dispatch: false,
     };
 
     store.insert(std::path::Path::new("test.ts"), cached);
@@ -178,7 +203,13 @@ fn incremental_with_cache_all_hits() {
     let mut cache_store = plow_core::cache::CacheStore::new();
     for module in &first.modules {
         if let Some(file) = files.get(module.file_id.0 as usize) {
-            cache_store.insert(&file.path, plow_core::cache::module_to_cached(module, 0, 0));
+            cache_store.insert(
+                &file.path,
+                plow_core::cache::module_to_cached(
+                    module,
+                    plow_types::source_fingerprint::SourceFingerprint::new(0, 0),
+                ),
+            );
         }
     }
 
@@ -198,7 +229,13 @@ fn incremental_results_identical() {
     let mut cache_store = plow_core::cache::CacheStore::new();
     for module in &first.modules {
         if let Some(file) = files.get(module.file_id.0 as usize) {
-            cache_store.insert(&file.path, plow_core::cache::module_to_cached(module, 0, 0));
+            cache_store.insert(
+                &file.path,
+                plow_core::cache::module_to_cached(
+                    module,
+                    plow_types::source_fingerprint::SourceFingerprint::new(0, 0),
+                ),
+            );
         }
     }
 
@@ -241,7 +278,7 @@ fn incremental_cache_prune_stale_entries() {
     let mut store = plow_core::cache::CacheStore::new();
     let make_module = || plow_core::cache::CachedModule {
         content_hash: 1,
-        mtime_secs: 0,
+        mtime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -249,9 +286,10 @@ fn incremental_cache_prune_stale_entries() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
-        package_path_references: vec![],
+        package_path_references: Box::default(),
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: None,
+        whole_object_uses: Box::default(),
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
         has_angular_component_template_url: false,
@@ -264,6 +302,7 @@ fn incremental_cache_prune_stale_entries() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
+        exported_factory_returns: None,
         injection_tokens: vec![],
         local_type_declarations: vec![],
         public_signature_type_references: vec![],
@@ -281,6 +320,7 @@ fn incremental_cache_prune_stale_entries() {
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
         misplaced_directives: Vec::new(),
+        inline_server_action_exports: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
         component_props: Vec::new(),
@@ -289,9 +329,27 @@ fn incremental_cache_prune_stale_entries() {
         has_define_model: false,
         has_unharvestable_props: false,
         component_emits: Vec::new(),
+        angular_inputs: Vec::new(),
+        angular_outputs: Vec::new(),
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
+        component_functions: Vec::new(),
+        react_props: Vec::new(),
+        hook_uses: Vec::new(),
+        render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        angular_component_selectors: Vec::new(),
+        registered_custom_elements: Vec::new(),
+        used_custom_element_tags: Vec::new(),
+        angular_used_selectors: Vec::new(),
+        angular_entry_component_refs: Vec::new(),
+        has_dynamic_component_render: false,
+        has_dynamic_dispatch: false,
     };
 
     store.insert(std::path::Path::new("/project/existing.ts"), make_module());

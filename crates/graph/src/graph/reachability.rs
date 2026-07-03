@@ -138,6 +138,7 @@ mod tests {
                         local_name: Some("x".to_string()),
                         is_type_only: false,
                         visibility: VisibilityTag::None,
+                        expected_unused_reason: None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
                         is_side_effect_used: false,
@@ -148,13 +149,15 @@ mod tests {
                     resolved_dynamic_imports: vec![],
                     resolved_dynamic_patterns: vec![],
                     member_accesses: vec![],
-                    whole_object_uses: vec![],
+                    semantic_facts: Box::default(),
+                    whole_object_uses: Box::default(),
                     has_cjs_exports: false,
                     has_angular_component_template_url: false,
                     unused_import_bindings: FxHashSet::default(),
                     type_referenced_import_bindings: vec![],
                     value_referenced_import_bindings: vec![],
                     namespace_object_aliases: vec![],
+                    exported_factory_returns: Box::default(),
                 }
             })
             .collect();

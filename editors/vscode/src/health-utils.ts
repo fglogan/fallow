@@ -249,6 +249,7 @@ const PENALTY_LABELS: Record<keyof HealthScorePenalties, string> = {
   unit_size: "Unit size",
   coupling: "Coupling",
   duplication: "Duplication",
+  prop_drilling: "Prop drilling",
 };
 
 /**
@@ -283,20 +284,6 @@ export const topPenalties = (
 
   contributions.sort((a, b) => b.points - a.points);
   return contributions.slice(0, Math.max(0, limit));
-};
-
-/**
- * Total number of items the Health view will render across its findings,
- * hotspots, and targets sections. Used for the view badge. Tolerates sparse or
- * absent sections (no git means no hotspots; `--targets` may be empty).
- */
-export const countHealthItems = (report: HealthReport | null): number => {
-  if (!report) {
-    return 0;
-  }
-  return (
-    (report.findings?.length ?? 0) + (report.hotspots?.length ?? 0) + (report.targets?.length ?? 0)
-  );
 };
 
 /** Compact one-line label for a hotspot row: `score · N commits`. */

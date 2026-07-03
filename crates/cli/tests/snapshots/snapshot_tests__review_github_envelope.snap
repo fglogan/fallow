@@ -4,10 +4,10 @@ expression: json_str
 ---
 {
   "event": "COMMENT",
-  "body": "### Plow dead-code report\n\n24 inline findings selected for GitHub review.\n\n<!-- plow-review -->\n\n<!-- plow-fingerprint:v2: b3d854677ac90ba1 -->",
+  "body": "### Plow dead-code report\n\n27 inline findings selected for GitHub review.\n\n<!-- plow-review -->\n\n<!-- plow-fingerprint:v2: 5e7b5a47bc47cafe -->",
   "summary": {
-    "body": "### Plow dead-code report\n\n24 inline findings selected for GitHub review.\n\n<!-- plow-review -->\n\n<!-- plow-fingerprint:v2: b3d854677ac90ba1 -->",
-    "fingerprint": "b3d854677ac90ba1"
+    "body": "### Plow dead-code report\n\n27 inline findings selected for GitHub review.\n\n<!-- plow-review -->\n\n<!-- plow-fingerprint:v2: 5e7b5a47bc47cafe -->",
+    "fingerprint": "5e7b5a47bc47cafe"
   },
   "comments": [
     {
@@ -86,6 +86,13 @@ expression: json_str
       "side": "RIGHT",
       "body": "**warn** `plow/unused-catalog-entry`: Catalog entry 'old-thing' \\(catalog 'legacy'\\) is not referenced by any workspace package\n\n<!-- plow-fingerprint:v2: 291da29e40ca77e0 -->",
       "fingerprint": "291da29e40ca77e0"
+    },
+    {
+      "path": "src/Child.svelte",
+      "line": 6,
+      "side": "RIGHT",
+      "body": "**warn** `plow/unused-svelte-event`: event \\`dead\\` is dispatched by component \\`Child\\` but listened to nowhere in the project \\(remove it or listen for it\\)\n\n<!-- plow-fingerprint:v2: b5004391914737c9 -->",
+      "fingerprint": "b5004391914737c9"
     },
     {
       "path": "src/a.ts",
@@ -170,6 +177,20 @@ expression: json_str
       "side": "RIGHT",
       "body": "**warn** `plow/unprovided-inject`: inject\\(\\`THEME\\_KEY\\`\\) has no matching provide\\(\\`THEME\\_KEY\\`\\) in this project; at runtime it returns undefined \\(provide the key or remove this inject\\)\n\n<!-- plow-fingerprint:v2: 4e4a7216bbdc8cfa -->",
       "fingerprint": "4e4a7216bbdc8cfa"
+    },
+    {
+      "path": "src/user-card.component.ts",
+      "line": 12,
+      "side": "RIGHT",
+      "body": "**warn** `plow/unused-component-input`: input \\`variant\\` is declared but referenced nowhere in component \\`UserCardComponent\\` \\(remove it or use it\\)\n\n<!-- plow-fingerprint:v2: 8a93cdfaa7cabafc -->",
+      "fingerprint": "8a93cdfaa7cabafc"
+    },
+    {
+      "path": "src/user-card.component.ts",
+      "line": 15,
+      "side": "RIGHT",
+      "body": "**warn** `plow/unused-component-output`: output \\`selected\\` is declared but emitted nowhere in component \\`UserCardComponent\\` \\(remove it or emit it\\)\n\n<!-- plow-fingerprint:v2: d1644f190d895a1a -->",
+      "fingerprint": "d1644f190d895a1a"
     },
     {
       "path": "src/utils.ts",

@@ -2,7 +2,7 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use plow_config::{OutputFormat, ResolvedConfig};
-use plow_core::duplicates::{DefaultIgnoreSkips, DuplicationReport};
+use plow_types::duplicates::{DefaultIgnoreSkips, DuplicationReport};
 
 use crate::baseline::{DuplicationBaselineData, filter_new_clone_groups, recompute_stats};
 use crate::check::{get_changed_files, resolve_workspace_scope};
@@ -102,15 +102,15 @@ fn parse_trace_spec(spec: &str) -> Result<(&str, usize), &'static str> {
 /// `--format json`); `FILE:LINE` resolves the clone(s) containing a source
 /// location.
 fn run_clone_trace(
-    report: &plow_core::duplicates::DuplicationReport,
+    report: &plow_types::duplicates::DuplicationReport,
     root: &std::path::Path,
     trace_spec: &str,
     output: OutputFormat,
 ) -> ExitCode {
     let (trace_result, not_found) =
-        if let Some(fp) = trace_spec.strip_prefix(plow_core::duplicates::FINGERPRINT_PREFIX) {
-            let fingerprint = format!("{}{fp}", plow_core::duplicates::FINGERPRINT_PREFIX);
-            let result = plow_core::trace::trace_clone_by_fingerprint(report, root, &fingerprint);
+        if let Some(fp) = trace_spec.strip_prefix(plow_engine::FINGERPRINT_PREFIX) {
+            let fingerprint = format!("{}{fp}", plow_engine::FINGERPRINT_PREFIX);
+            let result = plow_engine::trace_clone_by_fingerprint(report, root, &fingerprint);
             (
                 result,
                 format!("no clone group with fingerprint {fingerprint}"),
@@ -120,7 +120,7 @@ fn run_clone_trace(
                 Ok(parsed) => parsed,
                 Err(msg) => return emit_error(msg, 2, output),
             };
-            let result = plow_core::trace::trace_clone(report, root, file_path, line);
+            let result = plow_engine::trace_clone(report, root, file_path, line);
             (result, format!("no clone found at {file_path}:{line}"))
         };
     if trace_result.matched_instance.is_none() {
@@ -175,7 +175,7 @@ fn exceeds_threshold(threshold: f64, duplication_percentage: f64) -> bool {
     threshold > 0.0 && duplication_percentage > threshold
 }
 
-use plow_core::changed_files::filter_duplication_by_changed_files as filter_by_changed_files;
+use plow_engine::filter_duplication_by_changed_files as filter_by_changed_files;
 
 /// Filter a duplication report to only retain clone groups where at least one
 /// instance belongs to a file under one of the given workspace roots. Mirrors
@@ -187,7 +187,7 @@ use plow_core::changed_files::filter_duplication_by_changed_files as filter_by_c
 /// reported duplication percentage reflects the scoped slice, not the whole
 /// repo.
 fn filter_by_workspaces(
-    report: &mut plow_core::duplicates::DuplicationReport,
+    report: &mut plow_types::duplicates::DuplicationReport,
     ws_roots: &[std::path::PathBuf],
     root: &std::path::Path,
 ) {
@@ -196,10 +196,7 @@ fn filter_by_workspaces(
             .iter()
             .any(|i| ws_roots.iter().any(|r| i.file.starts_with(r)))
     });
-    report.clone_families =
-        plow_core::duplicates::families::group_into_families(&report.clone_groups, root);
-    report.mirrored_directories =
-        plow_core::duplicates::families::detect_mirrored_directories(&report.clone_families, root);
+    plow_engine::refresh_clone_families(report, root);
     report.stats = recompute_stats(report);
 }
 
@@ -214,13 +211,13 @@ fn filter_by_workspaces(
 /// Families and stats are rebuilt from the surviving groups so that the
 /// reported duplication percentage reflects the scoped slice.
 fn filter_by_diff(
-    report: &mut plow_core::duplicates::DuplicationReport,
+    report: &mut plow_types::duplicates::DuplicationReport,
     diff_index: &crate::report::ci::diff_filter::DiffIndex,
     root: &std::path::Path,
 ) {
     use crate::report::ci::diff_filter::relative_to_diff_path;
 
-    let instance_overlaps = |instance: &plow_core::duplicates::CloneInstance| -> bool {
+    let instance_overlaps = |instance: &plow_types::duplicates::CloneInstance| -> bool {
         let Some(rel) = relative_to_diff_path(&instance.file, root) else {
             return true;
         };
@@ -232,10 +229,7 @@ fn filter_by_diff(
     report
         .clone_groups
         .retain(|g| g.instances.iter().any(instance_overlaps));
-    report.clone_families =
-        plow_core::duplicates::families::group_into_families(&report.clone_groups, root);
-    report.mirrored_directories =
-        plow_core::duplicates::families::detect_mirrored_directories(&report.clone_families, root);
+    plow_engine::refresh_clone_families(report, root);
     report.stats = recompute_stats(report);
 }
 
@@ -272,27 +266,73 @@ pub fn execute_dupes_with_files(
     execute_dupes_inner(opts, Some(files))
 }
 
+/// Load the resolved config for a duplication run, folding the CLI/config
+/// production precedence into the `production_override`.
+fn load_dupes_config_for_analysis(opts: &DupesOptions<'_>) -> Result<ResolvedConfig, ExitCode> {
+    load_config_for_analysis(
+        opts.root,
+        opts.config_path,
+        crate::ConfigLoadOptions {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production_override: opts
+                .production_override
+                .or_else(|| opts.production.then_some(true)),
+            quiet: opts.quiet,
+        },
+        plow_config::ProductionAnalysis::Dupes,
+    )
+}
+
+/// Apply the changed-files, diff-index, workspace-scope, and top-N filters to
+/// the duplication report in order. Mirrors the standalone scoping pipeline.
+fn filter_dupes_report(
+    report: &mut DuplicationReport,
+    opts: &DupesOptions<'_>,
+    config: &ResolvedConfig,
+    effective_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+) -> Result<(), ExitCode> {
+    if let Some(changed) = effective_changed_files {
+        filter_by_changed_files(report, changed, &config.root);
+    }
+
+    if let Some(diff_index) = match opts.diff_index {
+        Some(index) => Some(index),
+        None if opts.use_shared_diff_index => crate::report::ci::diff_filter::shared_diff_index(),
+        None => None,
+    } {
+        filter_by_diff(report, diff_index, &config.root);
+    }
+
+    if let Some(ws_roots) = resolve_workspace_scope(
+        opts.root,
+        opts.workspace,
+        opts.changed_workspaces,
+        opts.output,
+    )? {
+        filter_by_workspaces(report, &ws_roots, &config.root);
+    }
+
+    if let Some(n) = opts.top
+        && opts.group_by.is_none()
+    {
+        apply_top(report, n, &config.root);
+    }
+    Ok(())
+}
+
 fn execute_dupes_inner(
     opts: &DupesOptions<'_>,
     pre_discovered: Option<Vec<plow_types::discover::DiscoveredFile>>,
 ) -> Result<DupesResult, ExitCode> {
     let start = Instant::now();
 
-    let config = load_config_for_analysis(
-        opts.root,
-        opts.config_path,
-        opts.output,
-        opts.no_cache,
-        opts.threads,
-        opts.production_override
-            .or_else(|| opts.production.then_some(true)),
-        opts.quiet,
-        plow_config::ProductionAnalysis::Dupes,
-    )?;
+    let config = load_dupes_config_for_analysis(opts)?;
 
     let dupes_config = build_dupes_config(opts, &config.duplicates);
-    let files = pre_discovered
-        .unwrap_or_else(|| plow_core::discover::discover_files_with_plugin_scopes(&config));
+    let files =
+        pre_discovered.unwrap_or_else(|| plow_engine::discover_files_with_plugin_scopes(&config));
 
     let changed_files_from_since = resolve_changed_since(opts);
     let effective_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>> =
@@ -307,43 +347,20 @@ fn execute_dupes_inner(
     );
 
     if let Some(trace_spec) = opts.trace {
-        return Err(run_clone_trace(
-            &report,
-            &config.root,
-            trace_spec,
-            opts.output,
-        ));
+        // The trace view ran the full duplication analysis; record its find-state
+        // for telemetry before the focused early-return so the Dupes workflow's
+        // findings_present stays populated regardless of the output view (issue
+        // #1650). A trace error (exit 2) is a failed run and is left unset.
+        let code = run_clone_trace(&report, &config.root, trace_spec, opts.output);
+        if code == ExitCode::SUCCESS {
+            crate::telemetry::note_result_count(report.clone_groups.len());
+        }
+        return Err(code);
     }
 
     save_duplication_baseline(&report, &config, opts)?;
     apply_duplication_baseline(&mut report, &config, opts)?;
-
-    if let Some(changed) = effective_changed_files {
-        filter_by_changed_files(&mut report, changed, &config.root);
-    }
-
-    if let Some(diff_index) = match opts.diff_index {
-        Some(index) => Some(index),
-        None if opts.use_shared_diff_index => crate::report::ci::diff_filter::shared_diff_index(),
-        None => None,
-    } {
-        filter_by_diff(&mut report, diff_index, &config.root);
-    }
-
-    if let Some(ws_roots) = resolve_workspace_scope(
-        opts.root,
-        opts.workspace,
-        opts.changed_workspaces,
-        opts.output,
-    )? {
-        filter_by_workspaces(&mut report, &ws_roots, &config.root);
-    }
-
-    if let Some(n) = opts.top
-        && opts.group_by.is_none()
-    {
-        apply_top(&mut report, n, &config.root);
-    }
+    filter_dupes_report(&mut report, opts, &config, effective_changed_files)?;
 
     let elapsed = start.elapsed();
 
@@ -525,10 +542,7 @@ fn apply_top(report: &mut DuplicationReport, n: usize, root: &std::path::Path) {
             })
     });
     report.clone_groups.truncate(n);
-    report.clone_families =
-        plow_core::duplicates::families::group_into_families(&report.clone_groups, root);
-    report.mirrored_directories =
-        plow_core::duplicates::families::detect_mirrored_directories(&report.clone_families, root);
+    plow_engine::refresh_clone_families(report, root);
     report.stats.clone_groups = report.clone_groups.len();
     report.stats.clone_instances = report.clone_groups.iter().map(|g| g.instances.len()).sum();
     report.sort();
@@ -541,37 +555,20 @@ fn run_duplication_analysis(
     dupes_config: &plow_config::DuplicatesConfig,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
 ) -> (DuplicationReport, DefaultIgnoreSkips) {
-    if let Some(changed_files) = changed_files {
-        if opts.no_cache {
-            plow_core::duplicates::find_duplicates_touching_files_with_default_ignore_skips(
-                &config.root,
-                files,
-                dupes_config,
-                changed_files,
-            )
-        } else {
-            plow_core::duplicates::find_duplicates_touching_files_cached_with_default_ignore_skips(
-                &config.root,
-                files,
-                dupes_config,
-                changed_files,
-                &config.cache_dir,
-            )
-        }
-    } else if opts.no_cache {
-        plow_core::duplicates::find_duplicates_with_default_ignore_skips(
+    let cache_dir = (!opts.no_cache).then_some(config.cache_dir.as_path());
+    let analysis = if let Some(changed_files) = changed_files {
+        let changed_files = changed_files.iter().cloned().collect::<Vec<_>>();
+        plow_engine::find_duplicates_touching_files_with_defaults(
             &config.root,
             files,
             dupes_config,
+            &changed_files,
+            cache_dir,
         )
     } else {
-        plow_core::duplicates::find_duplicates_cached_with_default_ignore_skips(
-            &config.root,
-            files,
-            dupes_config,
-            &config.cache_dir,
-        )
-    }
+        plow_engine::find_duplicates_with_defaults(&config.root, files, dupes_config, cache_dir)
+    };
+    (analysis.report, analysis.default_ignore_skips)
 }
 
 /// Print duplication results and return appropriate exit code.
@@ -597,6 +594,7 @@ pub fn print_dupes_result(
         baseline_matched: None,
         config_fixable: false,
         skip_score_and_trend: false,
+        css_requested: false,
     };
     print_default_ignore_note(result, quiet);
     print_min_occurrences_note(result, quiet);
@@ -634,15 +632,15 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
         Ok(r) => r,
         Err(code) => return code,
     };
-    print_dupes_result_with_grouping(
-        &result,
-        opts.quiet,
-        opts.explain,
-        resolver,
-        opts.summary,
-        true,
-        true,
-    )
+    print_dupes_result_with_grouping(DupesResultGroupingInput {
+        result: &result,
+        quiet: opts.quiet,
+        explain: opts.explain,
+        group_by: resolver,
+        summary: opts.summary,
+        summary_heading: true,
+        show_explain_tip: true,
+    })
 }
 
 /// Emit a stderr timing panel for `plow dupes --performance`. Stays out of
@@ -701,33 +699,37 @@ fn print_dupes_performance(result: &DupesResult, output: OutputFormat) {
     }
 }
 
-fn print_dupes_result_with_grouping(
-    result: &DupesResult,
+struct DupesResultGroupingInput<'a> {
+    result: &'a DupesResult,
     quiet: bool,
     explain: bool,
     group_by: Option<report::OwnershipResolver>,
     summary: bool,
     summary_heading: bool,
     show_explain_tip: bool,
-) -> ExitCode {
+}
+
+fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> ExitCode {
+    let result = input.result;
     let ctx = report::ReportContext {
         root: &result.config.root,
         rules: &result.config.rules,
         elapsed: result.elapsed,
-        quiet,
-        explain,
-        group_by,
+        quiet: input.quiet,
+        explain: input.explain,
+        group_by: input.group_by,
         top: None,
-        summary,
-        summary_heading,
-        show_explain_tip,
+        summary: input.summary,
+        summary_heading: input.summary_heading,
+        show_explain_tip: input.show_explain_tip,
         baseline_matched: None,
         config_fixable: false,
         skip_score_and_trend: false,
+        css_requested: false,
     };
-    print_default_ignore_note(result, quiet);
-    print_min_occurrences_note(result, quiet);
-    print_ignore_imports_note(result, quiet);
+    print_default_ignore_note(result, input.quiet);
+    print_min_occurrences_note(result, input.quiet);
+    print_ignore_imports_note(result, input.quiet);
     report::print_duplication_report(&result.report, &ctx, result.config.output)
 }
 
@@ -799,11 +801,10 @@ pub fn print_min_occurrences_note(result: &DupesResult, quiet: bool) {
     );
 }
 
-/// Emit a stderr note when import declarations were excluded from clone
-/// detection (the default since #1224). Human-format only, so machine readers
-/// never see decorative stderr noise. Fires only when clone groups were
-/// reported, so a clean run stays quiet; it tells users the report excludes a
-/// category and how to opt back in.
+/// Emit a stderr note when module wiring was excluded from clone detection.
+/// Human-format only, so machine readers never see decorative stderr noise.
+/// Fires only when clone groups were reported, so a clean run stays quiet; it
+/// tells users the report excludes a category and how to opt back in.
 pub fn print_ignore_imports_note(result: &DupesResult, quiet: bool) {
     if quiet
         || !result.ignore_imports
@@ -822,7 +823,7 @@ pub fn print_ignore_imports_note(result: &DupesResult, quiet: bool) {
     }
 
     eprintln!(
-        "note: import declarations excluded from clone detection (--no-ignore-imports to include them)"
+        "note: module wiring excluded from clone detection (--no-ignore-imports to include it)"
     );
 }
 
@@ -831,7 +832,7 @@ mod tests {
     use super::*;
     use crate::baseline::{DuplicationBaselineData, filter_new_clone_groups, recompute_stats};
     use plow_config::{DetectionMode, DuplicatesConfig, NormalizationConfig};
-    use plow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
+    use plow_types::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
     use std::path::{Path, PathBuf};
 
     fn instance(file: &str, start: usize, end: usize) -> CloneInstance {
@@ -878,7 +879,7 @@ mod tests {
         }
     }
 
-    /// Build a `DupesOptions` with the legacy CLI-default scalars preset
+    /// Build a `DupesOptions` with the command-default scalars preset
     /// (`min_tokens=50`, `min_lines=5`, `threshold=0.0`). Tests that exercise
     /// CLI-override semantics still need a concrete value, so we wrap each
     /// scalar in `Some(...)` here. Tests that want the config-fallback path

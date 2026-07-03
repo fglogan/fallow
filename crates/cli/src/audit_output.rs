@@ -2,7 +2,13 @@ use std::io::IsTerminal;
 use std::process::ExitCode;
 
 use colored::Colorize;
+use plow_api::{
+    AuditCodeClimateOutputInput, AuditJsonHeaderInput, AuditJsonOutputInput, AuditSarifOutputInput,
+    DupesReportPayload,
+};
 use plow_config::{AuditGate, OutputFormat};
+use plow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
+use plow_types::results::AnalysisResults;
 
 use crate::error::emit_error;
 use crate::report;
@@ -85,71 +91,9 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
     let has_check_issues = result.summary.dead_code_issues > 0;
     let has_health_findings = result.summary.complexity_findings > 0;
     let has_dupe_groups = result.summary.duplication_clone_groups > 0;
-    let has_any_findings = has_check_issues || has_health_findings || has_dupe_groups;
 
-    if has_any_findings {
-        if show_headers && std::io::stdout().is_terminal() && !crate::report::sink::is_redirected()
-        {
-            println!(
-                "{}",
-                "Tip: run `plow explain <issue label>`; spaces and hyphens both work, e.g. `plow explain unused files`."
-                    .dimmed()
-            );
-            println!();
-        }
-
-        if result.verdict != AuditVerdict::Fail && !quiet {
-            print_audit_vital_signs(result);
-        }
-
-        if has_check_issues && let Some(ref check) = result.check {
-            if show_headers {
-                eprintln!();
-                eprintln!("── Dead Code ──────────────────────────────────────");
-            }
-            crate::check::print_check_result(
-                check,
-                crate::check::PrintCheckOptions {
-                    quiet,
-                    explain,
-                    regression_json: false,
-                    group_by: None,
-                    top: None,
-                    summary: false,
-                    summary_heading: true,
-                    show_explain_tip: false,
-                },
-            );
-        }
-
-        if has_dupe_groups && let Some(ref dupes) = result.dupes {
-            if show_headers {
-                eprintln!();
-                eprintln!("── Duplication ────────────────────────────────────");
-            }
-            crate::dupes::print_dupes_result(dupes, quiet, explain, false, true, false);
-        }
-
-        if has_health_findings && let Some(ref health) = result.health {
-            if show_headers {
-                eprintln!();
-                eprintln!("── Complexity ─────────────────────────────────────");
-            }
-            crate::health::print_health_result(
-                health,
-                crate::health::HealthPrintOptions {
-                    quiet,
-                    explain,
-                    min_score: None,
-                    min_severity: None,
-                    report_only: false,
-                    summary: false,
-                    summary_heading: true,
-                    show_explain_tip: false,
-                    skip_score_and_trend: false,
-                },
-            );
-        }
+    if has_check_issues || has_health_findings || has_dupe_groups {
+        print_audit_findings(result, quiet, explain, show_headers);
     }
 
     if !has_dupe_groups && let Some(ref dupes) = result.dupes {
@@ -159,6 +103,90 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
 
     if !quiet {
         print_audit_status_line(result);
+    }
+}
+
+/// Print the per-analysis findings sections (dead code, duplication, complexity)
+/// plus the explain tip and vital signs, with section headers when enabled.
+pub fn print_audit_findings(result: &AuditResult, quiet: bool, explain: bool, show_headers: bool) {
+    print_audit_explain_tip(show_headers);
+
+    if result.verdict != AuditVerdict::Fail && !quiet {
+        print_audit_vital_signs(result);
+    }
+
+    if result.summary.dead_code_issues > 0
+        && let Some(ref check) = result.check
+    {
+        print_audit_section_header(
+            show_headers,
+            "── Dead Code ──────────────────────────────────────",
+        );
+        crate::check::print_check_result(
+            check,
+            crate::check::PrintCheckOptions {
+                quiet,
+                explain,
+                regression_json: false,
+                group_by: None,
+                top: None,
+                summary: false,
+                summary_heading: true,
+                show_explain_tip: false,
+            },
+        );
+    }
+
+    if result.summary.duplication_clone_groups > 0
+        && let Some(ref dupes) = result.dupes
+    {
+        print_audit_section_header(
+            show_headers,
+            "── Duplication ────────────────────────────────────",
+        );
+        crate::dupes::print_dupes_result(dupes, quiet, explain, false, true, false);
+    }
+
+    if result.summary.complexity_findings > 0
+        && let Some(ref health) = result.health
+    {
+        print_audit_section_header(
+            show_headers,
+            "── Complexity ─────────────────────────────────────",
+        );
+        crate::health::print_health_result(
+            health,
+            crate::health::HealthPrintOptions {
+                quiet,
+                explain,
+                gates: plow_engine::HealthGateOptions::default(),
+                summary: false,
+                summary_heading: true,
+                show_explain_tip: false,
+                skip_score_and_trend: false,
+                css_requested: false,
+            },
+        );
+    }
+}
+
+/// Print the TTY-only explain tip above the findings sections.
+fn print_audit_explain_tip(show_headers: bool) {
+    if show_headers && std::io::stdout().is_terminal() && !crate::report::sink::is_redirected() {
+        println!(
+            "{}",
+            "Tip: run `plow explain <issue label>`; spaces and hyphens both work, e.g. `plow explain unused files`."
+                .dimmed()
+        );
+        println!();
+    }
+}
+
+/// Emit a blank line followed by a section header when headers are enabled.
+fn print_audit_section_header(show_headers: bool, header: &str) {
+    if show_headers {
+        eprintln!();
+        eprintln!("{header}");
     }
 }
 
@@ -307,118 +335,116 @@ fn print_audit_status_line(result: &AuditResult) {
 }
 
 fn print_audit_json(result: &AuditResult) -> ExitCode {
-    let mut obj = serde_json::Map::new();
-    insert_audit_json_header(&mut obj, result);
-
-    if let Some(ref check) = result.check
-        && let Err(code) = insert_audit_dead_code_json(&mut obj, result, check)
-    {
-        return code;
-    }
-
-    if let Some(ref dupes) = result.dupes
-        && let Err(code) = insert_audit_duplication_json(&mut obj, result, dupes)
-    {
-        return code;
-    }
-
-    if let Some(ref health) = result.health
-        && let Err(code) = insert_audit_health_json(&mut obj, result, health)
-    {
-        return code;
-    }
-
-    insert_audit_next_steps_json(&mut obj, result);
-
-    let mut output = serde_json::Value::Object(obj);
-    crate::output_envelope::apply_root_kind(&mut output, "audit");
-    report::harmonize_multi_kind_suppress_line_actions(&mut output);
-    crate::output_envelope::attach_telemetry_meta(&mut output);
+    let output = match build_audit_json_output(result) {
+        Ok(output) => output,
+        Err(code) => return code,
+    };
     report::emit_json(&output, "audit")
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "elapsed milliseconds won't exceed u64::MAX"
-)]
-fn insert_audit_json_header(
-    obj: &mut serde_json::Map<String, serde_json::Value>,
-    result: &AuditResult,
-) {
-    obj.insert(
-        "schema_version".into(),
-        serde_json::Value::Number(crate::report::SCHEMA_VERSION.into()),
+fn build_audit_json_output(result: &AuditResult) -> Result<serde_json::Value, ExitCode> {
+    let mut check_results = result.check.as_ref().map(|check| check.results.clone());
+    let mut health_report = result.health.as_ref().map(|health| health.report.clone());
+    plow_output::harmonize_dead_code_health_suppress_line_actions(
+        check_results.as_mut(),
+        health_report.as_mut(),
     );
-    obj.insert(
-        "version".into(),
-        serde_json::Value::String(env!("CARGO_PKG_VERSION").to_string()),
-    );
-    obj.insert(
-        "command".into(),
-        serde_json::Value::String("audit".to_string()),
-    );
-    obj.insert(
-        "verdict".into(),
-        serde_json::to_value(result.verdict).unwrap_or(serde_json::Value::Null),
-    );
-    obj.insert(
-        "changed_files_count".into(),
-        serde_json::Value::Number(result.changed_files_count.into()),
-    );
-    obj.insert(
-        "base_ref".into(),
-        serde_json::Value::String(result.base_ref.clone()),
-    );
-    if let Some(ref description) = result.base_description {
-        obj.insert(
-            "base_description".into(),
-            serde_json::Value::String(description.clone()),
-        );
-    }
-    if let Some(ref sha) = result.head_sha {
-        obj.insert("head_sha".into(), serde_json::Value::String(sha.clone()));
-    }
-    obj.insert(
-        "elapsed_ms".into(),
-        serde_json::Value::Number(serde_json::Number::from(result.elapsed.as_millis() as u64)),
-    );
-    if result.performance {
-        obj.insert(
-            "base_snapshot_skipped".into(),
-            serde_json::Value::Bool(result.base_snapshot_skipped),
-        );
-    }
 
-    if let Ok(summary_val) = serde_json::to_value(&result.summary) {
-        obj.insert("summary".into(), summary_val);
-    }
-    if let Ok(attribution_val) = serde_json::to_value(&result.attribution) {
-        obj.insert("attribution".into(), attribution_val);
+    let dead_code = match (result.check.as_ref(), check_results.as_ref()) {
+        (Some(check), Some(results)) => Some(build_audit_dead_code_json_with_results(
+            result, check, results,
+        )?),
+        _ => None,
+    };
+    let duplication = result
+        .dupes
+        .as_ref()
+        .map(|dupes| build_audit_duplication_json(result, dupes))
+        .transpose()?;
+    let complexity = match (result.health.as_ref(), health_report.as_ref()) {
+        (Some(health), Some(report)) => {
+            Some(build_audit_health_json_with_report(result, health, report)?)
+        }
+        _ => None,
+    };
+
+    plow_api::serialize_audit_json(
+        AuditJsonOutputInput {
+            header: audit_json_header_input(result),
+            dead_code,
+            duplication,
+            complexity,
+            next_steps: audit_next_steps(result),
+        },
+        crate::output_runtime::current_root_envelope_mode(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+    )
+    .map_err(|err| {
+        emit_error(
+            &format!("JSON serialization error: {err}"),
+            2,
+            OutputFormat::Json,
+        )
+    })
+}
+
+fn elapsed_ms_for_output(elapsed: std::time::Duration) -> u64 {
+    u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+}
+
+fn changed_files_count_for_output(changed_files_count: usize) -> u32 {
+    u32::try_from(changed_files_count).unwrap_or(u32::MAX)
+}
+
+pub fn audit_json_header_input(result: &AuditResult) -> AuditJsonHeaderInput {
+    AuditJsonHeaderInput {
+        schema_version: SchemaVersion(crate::report::SCHEMA_VERSION),
+        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
+        verdict: result.verdict,
+        changed_files_count: changed_files_count_for_output(result.changed_files_count),
+        base_ref: result.base_ref.clone(),
+        base_description: result.base_description.clone(),
+        head_sha: result.head_sha.clone(),
+        elapsed_ms: ElapsedMs(elapsed_ms_for_output(result.elapsed)),
+        base_snapshot_skipped: result.performance.then_some(result.base_snapshot_skipped),
+        summary: result.summary.clone(),
+        attribution: result.attribution.clone(),
     }
 }
 
-fn insert_audit_dead_code_json(
+pub fn insert_audit_dead_code_json(
     obj: &mut serde_json::Map<String, serde_json::Value>,
     result: &AuditResult,
     check: &crate::check::CheckResult,
 ) -> Result<(), ExitCode> {
-    match report::build_check_json_payload_with_config_fixable(
-        &check.results,
+    let json = build_audit_dead_code_json(result, check)?;
+    obj.insert("dead_code".into(), json);
+    Ok(())
+}
+
+fn build_audit_dead_code_json(
+    result: &AuditResult,
+    check: &crate::check::CheckResult,
+) -> Result<serde_json::Value, ExitCode> {
+    build_audit_dead_code_json_with_results(result, check, &check.results)
+}
+
+fn build_audit_dead_code_json_with_results(
+    result: &AuditResult,
+    check: &crate::check::CheckResult,
+    results: &AnalysisResults,
+) -> Result<serde_json::Value, ExitCode> {
+    match report::api_check_json_payload_with_config_fixable(
+        results,
         &check.config.root,
         check.elapsed,
         check.config_fixable,
     ) {
         Ok(mut json) => {
             if let Some(ref base) = result.base_snapshot {
-                annotate_dead_code_json(
-                    &mut json,
-                    &check.results,
-                    &check.config.root,
-                    &base.dead_code,
-                );
+                annotate_dead_code_json(&mut json, results, &check.config.root, &base.dead_code);
             }
-            obj.insert("dead_code".into(), json);
-            Ok(())
+            Ok(json)
         }
         Err(e) => Err(emit_error(
             &format!("JSON serialization error: {e}"),
@@ -428,12 +454,21 @@ fn insert_audit_dead_code_json(
     }
 }
 
-fn insert_audit_duplication_json(
+pub fn insert_audit_duplication_json(
     obj: &mut serde_json::Map<String, serde_json::Value>,
     result: &AuditResult,
     dupes: &crate::dupes::DupesResult,
 ) -> Result<(), ExitCode> {
-    let payload = crate::output_dupes::DupesReportPayload::from_report(&dupes.report);
+    let json = build_audit_duplication_json(result, dupes)?;
+    obj.insert("duplication".into(), json);
+    Ok(())
+}
+
+fn build_audit_duplication_json(
+    result: &AuditResult,
+    dupes: &crate::dupes::DupesResult,
+) -> Result<serde_json::Value, ExitCode> {
+    let payload = DupesReportPayload::from_report(&dupes.report);
     match serde_json::to_value(&payload) {
         Ok(mut json) => {
             let root_prefix = format!("{}/", dupes.config.root.display());
@@ -441,8 +476,7 @@ fn insert_audit_duplication_json(
             if let Some(ref base) = result.base_snapshot {
                 annotate_dupes_json(&mut json, &dupes.report, &dupes.config.root, &base.dupes);
             }
-            obj.insert("duplication".into(), json);
-            Ok(())
+            Ok(json)
         }
         Err(e) => Err(emit_error(
             &format!("JSON serialization error: {e}"),
@@ -452,20 +486,36 @@ fn insert_audit_duplication_json(
     }
 }
 
-fn insert_audit_health_json(
+pub fn insert_audit_health_json(
     obj: &mut serde_json::Map<String, serde_json::Value>,
     result: &AuditResult,
     health: &crate::health::HealthResult,
 ) -> Result<(), ExitCode> {
-    match serde_json::to_value(&health.report) {
+    let json = build_audit_health_json(result, health)?;
+    obj.insert("complexity".into(), json);
+    Ok(())
+}
+
+fn build_audit_health_json(
+    result: &AuditResult,
+    health: &crate::health::HealthResult,
+) -> Result<serde_json::Value, ExitCode> {
+    build_audit_health_json_with_report(result, health, &health.report)
+}
+
+fn build_audit_health_json_with_report(
+    result: &AuditResult,
+    health: &crate::health::HealthResult,
+    report: &plow_output::HealthReport,
+) -> Result<serde_json::Value, ExitCode> {
+    match serde_json::to_value(report) {
         Ok(mut json) => {
             let root_prefix = format!("{}/", health.config.root.display());
             report::strip_root_prefix(&mut json, &root_prefix);
             if let Some(ref base) = result.base_snapshot {
-                annotate_health_json(&mut json, &health.report, &health.config.root, &base.health);
+                annotate_health_json(&mut json, report, &health.config.root, &base.health);
             }
-            obj.insert("complexity".into(), json);
-            Ok(())
+            Ok(json)
         }
         Err(e) => Err(emit_error(
             &format!("JSON serialization error: {e}"),
@@ -475,68 +525,30 @@ fn insert_audit_health_json(
     }
 }
 
-fn insert_audit_next_steps_json(
-    obj: &mut serde_json::Map<String, serde_json::Value>,
-    result: &AuditResult,
-) {
-    let next_steps = crate::report::suggestions::build_audit_next_steps(
+fn audit_next_steps(result: &AuditResult) -> Vec<plow_types::output::NextStep> {
+    let input = plow_output::build_audit_next_steps_input(
         result
             .check
             .as_ref()
             .map(|check| (&check.results, check.config.root.as_path())),
         result.health.as_ref().map(|health| &health.report),
+        crate::report::suggestions::suggestions_enabled(),
     );
-    if !next_steps.is_empty()
-        && let Ok(value) = serde_json::to_value(&next_steps)
-    {
-        obj.insert("next_steps".into(), value);
-    }
+    plow_output::build_audit_next_steps(&input)
 }
 
 fn print_audit_sarif(result: &AuditResult) -> ExitCode {
-    let mut all_runs = Vec::new();
-
-    if let Some(ref check) = result.check {
-        let sarif = report::build_sarif(&check.results, &check.config.root, &check.config.rules);
-        if let Some(runs) = sarif.get("runs").and_then(|r| r.as_array()) {
-            all_runs.extend(runs.iter().cloned());
-        }
-    }
-
-    if let Some(ref dupes) = result.dupes
-        && !dupes.report.clone_groups.is_empty()
-    {
-        let run = serde_json::json!({
-            "tool": {
-                "driver": {
-                    "name": "plow",
-                    "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/fglogan/genesis-plow",
-                }
-            },
-            "automationDetails": { "id": "plow/audit/dupes" },
-            "results": dupes.report.clone_groups.iter().enumerate().map(|(i, g)| {
-                serde_json::json!({
-                    "ruleId": "plow/code-duplication",
-                    "level": "warning",
-                    "message": { "text": format!("Clone group {} ({} lines, {} instances)", i + 1, g.line_count, g.instances.len()) },
-                })
-            }).collect::<Vec<_>>()
-        });
-        all_runs.push(run);
-    }
-
-    if let Some(ref health) = result.health {
-        let sarif = report::build_health_sarif(&health.report, &health.config.root);
-        if let Some(runs) = sarif.get("runs").and_then(|r| r.as_array()) {
-            all_runs.extend(runs.iter().cloned());
-        }
-    }
-
-    let combined = serde_json::json!({
-        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-        "version": "2.1.0",
-        "runs": all_runs,
+    let check_sarif = result.check.as_ref().map(|check| {
+        report::api_sarif_document(&check.results, &check.config.root, &check.config.rules)
+    });
+    let health_sarif = result
+        .health
+        .as_ref()
+        .map(|health| report::api_health_sarif_document(&health.report, &health.config.root));
+    let combined = plow_api::build_audit_sarif(AuditSarifOutputInput {
+        dead_code: check_sarif.as_ref(),
+        duplication: result.dupes.as_ref().map(|dupes| &dupes.report),
+        health: health_sarif.as_ref(),
     });
 
     report::emit_json(&combined, "SARIF audit")
@@ -547,45 +559,69 @@ fn print_audit_codeclimate(result: &AuditResult) -> ExitCode {
     report::emit_json(&value, "CodeClimate audit")
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "CodeClimate issue envelope contains only infallibly serializable fields"
-)]
 fn build_audit_codeclimate(result: &AuditResult) -> serde_json::Value {
-    let mut all_issues: Vec<crate::output_envelope::CodeClimateIssue> = Vec::new();
-
-    if let Some(ref check) = result.check {
-        all_issues.extend(report::build_codeclimate(
-            &check.results,
-            &check.config.root,
-            &check.config.rules,
-        ));
-    }
-
-    if let Some(ref dupes) = result.dupes {
-        all_issues.extend(report::build_duplication_codeclimate(
-            &dupes.report,
-            &dupes.config.root,
-        ));
-    }
-
-    if let Some(ref health) = result.health {
-        all_issues.extend(report::build_health_codeclimate(
-            &health.report,
-            &health.config.root,
-        ));
-    }
-
-    serde_json::to_value(&all_issues).expect("CodeClimateIssue serializes infallibly")
+    plow_api::build_audit_codeclimate(AuditCodeClimateOutputInput {
+        dead_code: result.check.as_ref().map_or_else(Vec::new, |check| {
+            plow_api::build_codeclimate(&check.results, &check.config.root, &check.config.rules)
+        }),
+        duplication: result.dupes.as_ref().map_or_else(Vec::new, |dupes| {
+            plow_api::build_duplication_codeclimate(&dupes.report, &dupes.config.root)
+        }),
+        health: result.health.as_ref().map_or_else(Vec::new, |health| {
+            plow_api::build_health_codeclimate(&health.report, &health.config.root)
+        }),
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::audit::AuditSummary;
+    use std::process::ExitCode;
+    use std::time::Duration;
+
+    use plow_config::{AuditGate, OutputFormat};
+
+    use crate::audit::{AuditAttribution, AuditResult, AuditSummary, AuditVerdict};
 
     use super::{
-        build_status_parts, build_vital_sign_parts, format_scope_line_parts, short_base_ref,
+        build_audit_codeclimate, build_audit_json_output, build_status_parts,
+        build_vital_sign_parts, format_scope_line_parts, print_audit_result, short_base_ref,
     };
+
+    fn audit_result(verdict: AuditVerdict, output: OutputFormat) -> AuditResult {
+        AuditResult {
+            verdict,
+            summary: AuditSummary {
+                dead_code_issues: 0,
+                dead_code_has_errors: false,
+                complexity_findings: 0,
+                max_cyclomatic: None,
+                duplication_clone_groups: 0,
+            },
+            attribution: AuditAttribution {
+                gate: AuditGate::NewOnly,
+                ..AuditAttribution::default()
+            },
+            base_snapshot: None,
+            base_snapshot_skipped: false,
+            changed_files_count: 0,
+            changed_files: Vec::new(),
+            base_ref: "origin/main".to_string(),
+            base_description: None,
+            head_sha: None,
+            output,
+            performance: false,
+            check: None,
+            dupes: None,
+            health: None,
+            elapsed: Duration::ZERO,
+            review_deltas: None,
+            weakening_signals: Vec::new(),
+            routing: None,
+            decision_surface: None,
+            graph_snapshot_hash: None,
+            change_anchors: Vec::new(),
+        }
+    }
 
     #[test]
     fn short_base_ref_abbreviates_full_sha() {
@@ -693,5 +729,145 @@ mod tests {
                 "duplication 0".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn build_audit_codeclimate_returns_empty_issue_list_without_findings() {
+        let result = audit_result(AuditVerdict::Pass, OutputFormat::CodeClimate);
+
+        assert_eq!(build_audit_codeclimate(&result), serde_json::json!([]));
+    }
+
+    #[test]
+    fn print_audit_result_rejects_badge_format() {
+        let result = audit_result(AuditVerdict::Pass, OutputFormat::Badge);
+
+        assert_eq!(print_audit_result(&result, true, false), ExitCode::from(2));
+    }
+
+    #[test]
+    fn print_audit_result_maps_fail_verdict_to_error_exit() {
+        let result = audit_result(AuditVerdict::Fail, OutputFormat::Human);
+
+        assert_eq!(print_audit_result(&result, true, false), ExitCode::from(1));
+    }
+
+    fn audit_result_with_findings(verdict: AuditVerdict, output: OutputFormat) -> AuditResult {
+        let mut result = audit_result(verdict, output);
+        result.summary = AuditSummary {
+            dead_code_issues: 2,
+            dead_code_has_errors: true,
+            complexity_findings: 1,
+            max_cyclomatic: Some(14),
+            duplication_clone_groups: 3,
+        };
+        result.changed_files_count = 4;
+        result
+    }
+
+    #[test]
+    fn print_audit_json_emits_optional_header_fields() {
+        let mut result = audit_result(AuditVerdict::Pass, OutputFormat::Json);
+        result.base_description = Some("merge-base with origin/main".to_string());
+        result.head_sha = Some("abc123".to_string());
+        result.performance = true;
+        result.base_snapshot_skipped = true;
+        result.changed_files_count = 5;
+
+        // Pass verdict + successful JSON emit (no sub-results) maps to success;
+        // Exercises the typed audit header's optional base_description /
+        // head_sha / performance branches and the empty next-steps path.
+        assert_eq!(print_audit_result(&result, true, false), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn build_audit_json_output_uses_typed_audit_contract() {
+        let mut result = audit_result(AuditVerdict::Pass, OutputFormat::Json);
+        result.base_description = Some("merge-base with origin/main".to_string());
+        result.head_sha = Some("abc123".to_string());
+        result.performance = true;
+        result.base_snapshot_skipped = true;
+        result.changed_files_count = 5;
+
+        let json = build_audit_json_output(&result).expect("audit JSON should build");
+
+        assert_eq!(json["kind"], "audit");
+        assert_eq!(json["command"], "audit");
+        assert_eq!(json["base_description"], "merge-base with origin/main");
+        assert_eq!(json["head_sha"], "abc123");
+        assert_eq!(json["base_snapshot_skipped"], true);
+        assert_eq!(json["changed_files_count"], 5);
+    }
+
+    #[test]
+    fn print_audit_result_renders_sarif_skeleton_without_findings() {
+        let result = audit_result(AuditVerdict::Pass, OutputFormat::Sarif);
+
+        assert_eq!(print_audit_result(&result, true, false), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn print_audit_result_renders_codeclimate_without_findings() {
+        let result = audit_result(AuditVerdict::Pass, OutputFormat::CodeClimate);
+
+        assert_eq!(print_audit_result(&result, true, false), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn print_audit_result_renders_pr_comment_for_both_providers() {
+        for format in [OutputFormat::PrCommentGithub, OutputFormat::PrCommentGitlab] {
+            let result = audit_result(AuditVerdict::Pass, format);
+            assert_eq!(print_audit_result(&result, true, false), ExitCode::SUCCESS);
+        }
+    }
+
+    #[test]
+    fn print_audit_result_renders_review_envelope_for_both_providers() {
+        for format in [OutputFormat::ReviewGithub, OutputFormat::ReviewGitlab] {
+            let result = audit_result(AuditVerdict::Pass, format);
+            assert_eq!(print_audit_result(&result, true, false), ExitCode::SUCCESS);
+        }
+    }
+
+    #[test]
+    fn print_audit_result_compact_and_markdown_use_human_path() {
+        for format in [OutputFormat::Compact, OutputFormat::Markdown] {
+            let result = audit_result(AuditVerdict::Pass, format);
+            assert_eq!(print_audit_result(&result, true, false), ExitCode::SUCCESS);
+        }
+    }
+
+    #[test]
+    fn print_audit_result_human_pass_renders_scope_and_status_line() {
+        let mut result = audit_result(AuditVerdict::Pass, OutputFormat::Human);
+        result.changed_files_count = 2;
+
+        // quiet=false drives the scope line + the green "no issues" status line.
+        assert_eq!(print_audit_result(&result, false, false), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn print_audit_result_human_warn_renders_vital_signs_and_notes() {
+        let mut result = audit_result_with_findings(AuditVerdict::Warn, OutputFormat::Human);
+        result.attribution = AuditAttribution {
+            gate: AuditGate::NewOnly,
+            dead_code_inherited: 2,
+            complexity_inherited: 1,
+            duplication_inherited: 0,
+            ..AuditAttribution::default()
+        };
+        result.performance = true;
+
+        // Warn + findings (without sub-results) covers the explain tip, vital
+        // signs, the gate-excluded inherited note, and the performance note.
+        assert_eq!(print_audit_result(&result, false, false), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn print_audit_result_human_fail_renders_red_status_line() {
+        let result = audit_result_with_findings(AuditVerdict::Fail, OutputFormat::Human);
+
+        // Fail maps to exit 1 and renders the red status line via build_status_parts.
+        assert_eq!(print_audit_result(&result, false, false), ExitCode::from(1));
     }
 }

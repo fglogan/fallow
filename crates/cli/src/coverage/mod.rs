@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use plow_config::{OutputFormat, PackageJson, WorkspaceInfo, atomic_write, discover_workspaces};
-use plow_core::git_env::clear_ambient_git_env;
+use plow_engine::clear_ambient_git_env;
 use plow_license::{DEFAULT_HARD_FAIL_DAYS, LicenseStatus};
 use plow_types::serde_path;
 use serde::{Deserialize, Serialize};
@@ -36,6 +36,7 @@ pub use upload_static_findings::UploadStaticFindingsArgs;
 
 mod analyze;
 mod cloud_client;
+mod upload_common;
 mod upload_inventory;
 mod upload_source_maps;
 mod upload_static_findings;
@@ -725,17 +726,16 @@ fn run_setup_json(root: &Path, explain: bool) -> ExitCode {
 )]
 fn build_setup_json(root: &Path, explain: bool) -> serde_json::Value {
     let envelope = build_setup_envelope(root, explain);
-    crate::output_envelope::serialize_root_output(
-        crate::output_envelope::PlowOutput::CoverageSetup(envelope),
+    plow_output::serialize_coverage_setup_json_output(
+        envelope,
+        crate::output_runtime::current_root_envelope_mode(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )
     .expect("CoverageSetupOutput serializes infallibly")
 }
 
-fn build_setup_envelope(root: &Path, explain: bool) -> crate::output_envelope::CoverageSetupOutput {
-    use crate::output_envelope::{
-        CoverageSetupFramework, CoverageSetupOutput, CoverageSetupRuntimeTarget,
-        CoverageSetupSchemaVersion,
-    };
+fn build_setup_envelope(root: &Path, explain: bool) -> plow_output::CoverageSetupOutput {
+    use plow_output::{CoverageSetupFramework, CoverageSetupOutput, CoverageSetupSchemaVersion};
 
     let members = detect_setup_members(root);
     let primary_member = members.first();
@@ -748,12 +748,8 @@ fn build_setup_envelope(root: &Path, explain: bool) -> crate::output_envelope::C
     let snippets = primary_member.map_or_else(Vec::new, |_| setup_snippets(&primary));
     let files_to_edit = snippets_to_files(&snippets, &primary_prefix);
     let snippet_values = snippets_to_typed(&snippets, &primary_prefix);
-    let runtime_targets: Vec<CoverageSetupRuntimeTarget> =
-        union_runtime_targets(members.iter().map(|member| &member.context))
-            .into_iter()
-            .map(runtime_target_from_str)
-            .collect();
-    let member_values: Vec<crate::output_envelope::CoverageSetupMember> = members
+    let runtime_targets = union_setup_runtime_targets(&members);
+    let member_values: Vec<plow_output::CoverageSetupMember> = members
         .iter()
         .map(|member| setup_member_typed(root, member))
         .collect();
@@ -761,15 +757,7 @@ fn build_setup_envelope(root: &Path, explain: bool) -> crate::output_envelope::C
         framework_to_typed(primary.framework)
     });
     let dockerfile = primary_member.and_then(|_| dockerfile_snippet_string(&primary));
-    let mut warnings = primary_member.map_or_else(
-        || setup_json_warnings(root, &fallback),
-        |_| setup_json_warnings(root, &primary),
-    );
-    if primary_member.is_none() {
-        warnings.push(
-            "No runtime workspace members were detected; emitted install commands only.".to_owned(),
-        );
-    }
+    let warnings = build_setup_envelope_warnings(root, primary_member, &fallback, &primary);
 
     CoverageSetupOutput {
         schema_version: CoverageSetupSchemaVersion::V1,
@@ -800,8 +788,38 @@ fn build_setup_envelope(root: &Path, explain: bool) -> crate::output_envelope::C
     }
 }
 
-fn framework_to_typed(kind: FrameworkKind) -> crate::output_envelope::CoverageSetupFramework {
-    use crate::output_envelope::CoverageSetupFramework as F;
+/// Collect the union of runtime targets across all detected setup members.
+fn union_setup_runtime_targets(
+    members: &[CoverageSetupMember],
+) -> Vec<plow_output::CoverageSetupRuntimeTarget> {
+    union_runtime_targets(members.iter().map(|member| &member.context))
+        .into_iter()
+        .map(runtime_target_from_str)
+        .collect()
+}
+
+/// Derive the setup-envelope warnings, appending a no-members notice when no
+/// runtime workspace member was detected.
+fn build_setup_envelope_warnings(
+    root: &Path,
+    primary_member: Option<&CoverageSetupMember>,
+    fallback: &CoverageSetupContext,
+    primary: &CoverageSetupContext,
+) -> Vec<String> {
+    let mut warnings = primary_member.map_or_else(
+        || setup_json_warnings(root, fallback),
+        |_| setup_json_warnings(root, primary),
+    );
+    if primary_member.is_none() {
+        warnings.push(
+            "No runtime workspace members were detected; emitted install commands only.".to_owned(),
+        );
+    }
+    warnings
+}
+
+fn framework_to_typed(kind: FrameworkKind) -> plow_output::CoverageSetupFramework {
+    use plow_output::CoverageSetupFramework as F;
     match kind {
         FrameworkKind::NextJs => F::NextJs,
         FrameworkKind::NestJs => F::NestJs,
@@ -815,10 +833,8 @@ fn framework_to_typed(kind: FrameworkKind) -> crate::output_envelope::CoverageSe
     }
 }
 
-fn package_manager_to_typed(
-    pm: PackageManager,
-) -> crate::output_envelope::CoverageSetupPackageManager {
-    use crate::output_envelope::CoverageSetupPackageManager as P;
+fn package_manager_to_typed(pm: PackageManager) -> plow_output::CoverageSetupPackageManager {
+    use plow_output::CoverageSetupPackageManager as P;
     match pm {
         PackageManager::Npm => P::Npm,
         PackageManager::Pnpm => P::Pnpm,
@@ -827,8 +843,8 @@ fn package_manager_to_typed(
     }
 }
 
-fn runtime_target_from_str(target: &str) -> crate::output_envelope::CoverageSetupRuntimeTarget {
-    use crate::output_envelope::CoverageSetupRuntimeTarget as T;
+fn runtime_target_from_str(target: &str) -> plow_output::CoverageSetupRuntimeTarget {
+    use plow_output::CoverageSetupRuntimeTarget as T;
     match target {
         "browser" => T::Browser,
         _ => T::Node,
@@ -845,11 +861,11 @@ struct SetupSnippet {
 fn setup_member_typed(
     root: &Path,
     member: &CoverageSetupMember,
-) -> crate::output_envelope::CoverageSetupMember {
+) -> plow_output::CoverageSetupMember {
     let member_path = display_member_path(root, &member.root);
     let prefix = member_path_prefix(&member_path);
     let snippets = setup_snippets(&member.context);
-    crate::output_envelope::CoverageSetupMember {
+    plow_output::CoverageSetupMember {
         name: member.name.clone(),
         path: member_path,
         framework_detected: framework_to_typed(member.context.framework),
@@ -871,10 +887,10 @@ fn setup_member_typed(
 fn snippets_to_files(
     snippets: &[SetupSnippet],
     prefix: &str,
-) -> Vec<crate::output_envelope::CoverageSetupFileToEdit> {
+) -> Vec<plow_output::CoverageSetupFileToEdit> {
     snippets
         .iter()
-        .map(|snippet| crate::output_envelope::CoverageSetupFileToEdit {
+        .map(|snippet| plow_output::CoverageSetupFileToEdit {
             path: prefixed_member_path(prefix, &snippet.path),
             reason: snippet.reason.to_owned(),
         })
@@ -884,10 +900,10 @@ fn snippets_to_files(
 fn snippets_to_typed(
     snippets: &[SetupSnippet],
     prefix: &str,
-) -> Vec<crate::output_envelope::CoverageSetupSnippet> {
+) -> Vec<plow_output::CoverageSetupSnippet> {
     snippets
         .iter()
-        .map(|snippet| crate::output_envelope::CoverageSetupSnippet {
+        .map(|snippet| plow_output::CoverageSetupSnippet {
             label: snippet.label.to_owned(),
             path: prefixed_member_path(prefix, &snippet.path),
             content: snippet.content.clone(),

@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use plow_types::source_fingerprint::SourceFingerprint;
 use rustc_hash::FxHashMap;
 
 use bitcode::{Decode, Encode};
@@ -180,12 +181,11 @@ impl CacheStore {
     pub fn get_by_metadata(
         &self,
         path: &Path,
-        mtime_secs: u64,
-        file_size: u64,
+        fingerprint: SourceFingerprint,
     ) -> Option<&CachedModule> {
         let key = path.to_string_lossy();
         let entry = self.entries.get(key.as_ref())?;
-        if entry.mtime_secs == mtime_secs && entry.file_size == file_size && mtime_secs > 0 {
+        if entry.source_fingerprint() == fingerprint && fingerprint.has_known_mtime() {
             Some(entry)
         } else {
             None
@@ -200,13 +200,17 @@ impl CacheStore {
     }
 
     /// Remove cache entries for files that are no longer in the project.
-    pub fn retain_paths(&mut self, files: &[plow_types::discover::DiscoveredFile]) {
+    ///
+    /// Returns `true` when any entry was removed.
+    pub fn retain_paths(&mut self, files: &[plow_types::discover::DiscoveredFile]) -> bool {
         use rustc_hash::FxHashSet;
         let current_paths: FxHashSet<String> = files
             .iter()
             .map(|f| f.path.to_string_lossy().to_string())
             .collect();
+        let before = self.entries.len();
         self.entries.retain(|key, _| current_paths.contains(key));
+        self.entries.len() != before
     }
 
     /// Number of cached entries.

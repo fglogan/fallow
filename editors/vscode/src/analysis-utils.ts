@@ -25,6 +25,7 @@ const VERSION_GATED_FLAGS: Readonly<Record<string, string>> = {
   // (< 2.96.0) the dupes default was already "count imports", so omitting the
   // flag yields the same behavior the user is asking for; degrade silently.
   "--dupes-no-ignore-imports": "2.96.0",
+  "--complexity-breakdown": "2.89.0",
 };
 
 interface AnalysisArgsOptions {
@@ -286,6 +287,21 @@ export const countCheckIssues = (result: PlowCheckResult | null): number => {
     (result.unused_optional_dependencies?.length ?? 0) +
     result.unused_enum_members.length +
     result.unused_class_members.length +
+    (result.unused_store_members?.length ?? 0) +
+    (result.unused_server_actions?.length ?? 0) +
+    (result.unused_load_data_keys?.length ?? 0) +
+    (result.unused_component_props?.length ?? 0) +
+    (result.unused_component_emits?.length ?? 0) +
+    (result.unused_component_inputs?.length ?? 0) +
+    (result.unused_component_outputs?.length ?? 0) +
+    (result.unused_svelte_events?.length ?? 0) +
+    (result.unrendered_components?.length ?? 0) +
+    (result.unprovided_injects?.length ?? 0) +
+    (result.invalid_client_exports?.length ?? 0) +
+    (result.mixed_client_server_barrels?.length ?? 0) +
+    (result.misplaced_directives?.length ?? 0) +
+    (result.route_collisions?.length ?? 0) +
+    (result.dynamic_segment_name_conflicts?.length ?? 0) +
     result.unresolved_imports.length +
     result.unlisted_dependencies.length +
     result.duplicate_exports.length +
@@ -294,6 +310,9 @@ export const countCheckIssues = (result: PlowCheckResult | null): number => {
     (result.circular_dependencies?.length ?? 0) +
     (result.re_export_cycles?.length ?? 0) +
     (result.boundary_violations?.length ?? 0) +
+    (result.boundary_coverage_violations?.length ?? 0) +
+    (result.boundary_call_violations?.length ?? 0) +
+    (result.policy_violations?.length ?? 0) +
     (result.stale_suppressions?.length ?? 0) +
     (result.unused_catalog_entries?.length ?? 0) +
     // empty_catalog_groups has no per-type toggle (it is not in IssueTypeConfig),
@@ -302,6 +321,26 @@ export const countCheckIssues = (result: PlowCheckResult | null): number => {
     (result.empty_catalog_groups?.length ?? 0) +
     (result.unresolved_catalog_references?.length ?? 0) +
     (result.unused_dependency_overrides?.length ?? 0) +
+    (result.misconfigured_dependency_overrides?.length ?? 0)
+  );
+};
+
+export const countDiagnosticErrorIssues = (result: PlowCheckResult | null): number => {
+  if (!result) {
+    return 0;
+  }
+
+  // Only categories the LSP renders at DiagnosticSeverity::ERROR, so the badge's
+  // "N errors" matches the red squiggles in the editor. The four RSC structural
+  // checks (unprovided_injects, invalid_client_exports, mixed_client_server_barrels,
+  // misplaced_directives) are emitted at WARNING (see
+  // crates/lsp/src/diagnostics/structural.rs) and are deliberately excluded.
+  return (
+    result.unresolved_imports.length +
+    (result.route_collisions?.length ?? 0) +
+    (result.dynamic_segment_name_conflicts?.length ?? 0) +
+    (result.policy_violations?.filter((finding) => finding.severity === "error").length ?? 0) +
+    (result.unresolved_catalog_references?.length ?? 0) +
     (result.misconfigured_dependency_overrides?.length ?? 0)
   );
 };

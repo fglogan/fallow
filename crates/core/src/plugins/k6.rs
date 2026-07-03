@@ -33,7 +33,10 @@ impl Plugin for K6Plugin {
         deps: &[String],
         root: &Path,
         discovered_files: &[PathBuf],
+        _candidate_index: Option<&super::registry::ConfigCandidateIndex>,
     ) -> bool {
+        // *.k6.* test scripts are source files already in `discovered_files`,
+        // so this scan is cheap and does not consult the candidate index.
         self.is_enabled_with_deps(deps, root)
             || discovered_files.iter().any(|path| is_k6_script_path(path))
     }
@@ -68,7 +71,7 @@ mod tests {
         let deps = vec!["k6".to_string()];
 
         assert!(plugin.is_enabled_with_deps(&deps, Path::new("/project")));
-        assert!(plugin.is_enabled_with_files(&deps, Path::new("/project"), &[]));
+        assert!(plugin.is_enabled_with_files(&deps, Path::new("/project"), &[], None));
     }
 
     #[test]
@@ -76,7 +79,7 @@ mod tests {
         let plugin = K6Plugin;
         let files = vec![PathBuf::from("/project/load/smoke.k6.js")];
 
-        assert!(plugin.is_enabled_with_files(&[], Path::new("/project"), &files));
+        assert!(plugin.is_enabled_with_files(&[], Path::new("/project"), &files, None));
     }
 
     #[test]
@@ -88,7 +91,7 @@ mod tests {
             PathBuf::from("/project/load/k6.ts"),
         ];
 
-        assert!(!plugin.is_enabled_with_files(&[], Path::new("/project"), &files));
+        assert!(!plugin.is_enabled_with_files(&[], Path::new("/project"), &files, None));
     }
 
     #[test]

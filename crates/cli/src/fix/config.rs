@@ -34,83 +34,40 @@ use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::path::{Component, Path, PathBuf};
 
-use plow_config::{IgnoreExportRule, OutputFormat, PlowConfig, add_ignore_exports_rule_to_string};
-use plow_core::results::{AnalysisResults, DuplicateExportFinding};
+use plow_config::{
+    ConfigFixPlan as ResolvedConfigPlan, IgnoreExportRule, OutputFormat,
+    add_ignore_exports_rule_to_string, classify_config_fix_plan as classify_plan,
+};
+use plow_types::output_dead_code::DuplicateExportFinding;
+use plow_types::results::AnalysisResults;
 use rustc_hash::FxHashSet;
 
 use super::io::atomic_write;
 use crate::init;
 
-/// Classification of whether `plow fix` can apply config edits at `root`.
-///
-/// Separated from the apply path so the same classification feeds the
-/// dry-run preview, the apply branch, and the JSON-layer `auto_fixable`
-/// computation. The `ResolvedConfigPlan` distinguishes the three real
-/// outcomes the orchestrator must dispatch on.
-#[derive(Debug, Clone)]
-pub enum ResolvedConfigPlan {
-    /// A plow config file exists; append entries in place.
-    Edit { config_path: PathBuf },
-    /// No plow config exists, but a workspace marker sits above `root`,
-    /// so creating one inside this subpackage would fragment the monorepo.
-    /// `plow fix` refuses; the user must run `plow init` at
-    /// `workspace_root` instead.
-    BlockedMonorepo { workspace_root: PathBuf },
-    /// No plow config exists and `--no-create-config` was passed.
-    BlockedNoCreate { target: PathBuf },
-    /// No plow config exists; the writer will create one at `target`.
-    Create { target: PathBuf },
+/// Inputs for [`apply_config_fixes`], bundled so the entry point takes one
+/// parameter struct instead of seven (mirrors the `*FixInput` convention used
+/// by the dependency and export fixers in this module).
+pub(super) struct ConfigFixInput<'a> {
+    pub(super) root: &'a Path,
+    pub(super) config_path: Option<&'a PathBuf>,
+    pub(super) results: &'a AnalysisResults,
+    pub(super) output: OutputFormat,
+    pub(super) dry_run: bool,
+    pub(super) no_create_config: bool,
+    pub(super) fixes: &'a mut Vec<serde_json::Value>,
 }
 
-/// Classify how `plow fix` should behave for `root` given the user's
-/// explicit `--config <path>` (if any) and `--no-create-config` flag.
-///
-/// This is the single source of truth for both the apply path and the
-/// JSON-layer `auto_fixable` field. Keep them aligned: a wire `auto_fixable: true`
-/// MUST mean the next `plow fix --yes` invocation will not refuse.
-pub fn classify_plan(
-    root: &Path,
-    explicit: Option<&PathBuf>,
-    no_create_config: bool,
-) -> ResolvedConfigPlan {
-    if let Some(existing) = resolve_existing_config_path(root, explicit) {
-        return ResolvedConfigPlan::Edit {
-            config_path: existing,
-        };
-    }
-    let target = root.join(".plowrc.json");
-    if let Some(workspace_root) = find_workspace_root_above(root) {
-        return ResolvedConfigPlan::BlockedMonorepo { workspace_root };
-    }
-    if no_create_config {
-        return ResolvedConfigPlan::BlockedNoCreate { target };
-    }
-    ResolvedConfigPlan::Create { target }
-}
-
-/// Whether `plow fix --yes` (with the default `--no-create-config=false`)
-/// could apply config edits at `root`. Drives the JSON `auto_fixable` bool.
-///
-/// Aligned with [`classify_plan`]: returns `true` for `Edit` and `Create`,
-/// `false` for `BlockedMonorepo`. (`BlockedNoCreate` cannot happen here
-/// because that branch only fires when the user passes `--no-create-config`
-/// to `plow fix`, which doesn't propagate to non-fix commands.)
-pub fn is_config_fixable(root: &Path, explicit: Option<&PathBuf>) -> bool {
-    matches!(
-        classify_plan(root, explicit, false),
-        ResolvedConfigPlan::Edit { .. } | ResolvedConfigPlan::Create { .. }
-    )
-}
-
-pub(super) fn apply_config_fixes(
-    root: &Path,
-    config_path: Option<&PathBuf>,
-    results: &AnalysisResults,
-    output: OutputFormat,
-    dry_run: bool,
-    no_create_config: bool,
-    fixes: &mut Vec<serde_json::Value>,
-) -> bool {
+pub(super) fn apply_config_fixes(input: ConfigFixInput<'_>) -> bool {
+    let ConfigFixInput {
+        root,
+        config_path,
+        results,
+        output,
+        dry_run,
+        no_create_config,
+        fixes,
+    } = input;
     if results.duplicate_exports.is_empty() {
         return false;
     }
@@ -159,43 +116,7 @@ fn apply_edit(
     let config_file = display_path(root, config_path);
 
     if dry_run {
-        let current = match std::fs::read_to_string(config_path) {
-            Ok(content) => content,
-            Err(e) => {
-                eprintln!("Error: failed to read {config_file} for dry-run preview: {e}");
-                return true;
-            }
-        };
-        let proposed = match add_ignore_exports_rule_to_string(config_path, &current, &entries) {
-            Ok(content) => content,
-            Err(e) => {
-                eprintln!("Error: failed to compute proposed config edit for {config_file}: {e}");
-                return true;
-            }
-        };
-        if current == proposed {
-            return false;
-        }
-        let diff = render_unified_diff(&config_file, &current, &proposed);
-        let mut entry = serde_json::json!({
-            "type": "add_ignore_exports",
-            "config_key": "ignoreExports",
-            "file": config_file,
-            "entries": &entries,
-            "proposed_diff": diff,
-        });
-        if !matches!(output, OutputFormat::Json) {
-            eprintln!(
-                "Would append {} ignoreExports rule(s) to {config_file}:",
-                entries.len()
-            );
-            eprintln!("{diff}");
-        }
-        if let Some(obj) = entry.as_object_mut() {
-            obj.insert("dry_run".to_owned(), serde_json::Value::Bool(true));
-        }
-        fixes.push(entry);
-        return false;
+        return apply_edit_dry_run(config_path, &config_file, &entries, output, fixes);
     }
 
     match plow_config::add_ignore_exports_rule(config_path, &entries) {
@@ -217,6 +138,54 @@ fn apply_edit(
             true
         }
     }
+}
+
+/// Render the dry-run preview (diff + JSON entry) for the config-edit path.
+/// Returns the orchestrator's `had_write_error` bool.
+fn apply_edit_dry_run(
+    config_path: &Path,
+    config_file: &str,
+    entries: &[IgnoreExportRule],
+    output: OutputFormat,
+    fixes: &mut Vec<serde_json::Value>,
+) -> bool {
+    let current = match std::fs::read_to_string(config_path) {
+        Ok(content) => content,
+        Err(e) => {
+            eprintln!("Error: failed to read {config_file} for dry-run preview: {e}");
+            return true;
+        }
+    };
+    let proposed = match add_ignore_exports_rule_to_string(config_path, &current, entries) {
+        Ok(content) => content,
+        Err(e) => {
+            eprintln!("Error: failed to compute proposed config edit for {config_file}: {e}");
+            return true;
+        }
+    };
+    if current == proposed {
+        return false;
+    }
+    let diff = render_unified_diff(config_file, &current, &proposed);
+    let mut entry = serde_json::json!({
+        "type": "add_ignore_exports",
+        "config_key": "ignoreExports",
+        "file": config_file,
+        "entries": entries,
+        "proposed_diff": diff,
+    });
+    if !matches!(output, OutputFormat::Json) {
+        eprintln!(
+            "Would append {} ignoreExports rule(s) to {config_file}:",
+            entries.len()
+        );
+        eprintln!("{diff}");
+    }
+    if let Some(obj) = entry.as_object_mut() {
+        obj.insert("dry_run".to_owned(), serde_json::Value::Bool(true));
+    }
+    fixes.push(entry);
+    false
 }
 
 fn apply_create(
@@ -244,23 +213,7 @@ fn apply_create(
     };
 
     if dry_run {
-        let diff = render_create_diff(&target_display, &proposed);
-        if !matches!(output, OutputFormat::Json) {
-            eprintln!(
-                "Would create {target_display} with {} ignoreExports rule(s):",
-                entries.len()
-            );
-            eprintln!("{diff}");
-        }
-        fixes.push(serde_json::json!({
-            "type": "add_ignore_exports",
-            "config_key": "ignoreExports",
-            "file": target_display,
-            "entries": &entries,
-            "proposed_diff": diff,
-            "created_files": [target_display],
-            "dry_run": true,
-        }));
+        apply_create_dry_run(&target_display, &entries, &proposed, output, fixes);
         return false;
     }
 
@@ -283,6 +236,33 @@ fn apply_create(
         "applied": true,
     }));
     false
+}
+
+/// Render the dry-run preview (diff + JSON entry) for the config-create path.
+fn apply_create_dry_run(
+    target_display: &str,
+    entries: &[IgnoreExportRule],
+    proposed: &str,
+    output: OutputFormat,
+    fixes: &mut Vec<serde_json::Value>,
+) {
+    let diff = render_create_diff(target_display, proposed);
+    if !matches!(output, OutputFormat::Json) {
+        eprintln!(
+            "Would create {target_display} with {} ignoreExports rule(s):",
+            entries.len()
+        );
+        eprintln!("{diff}");
+    }
+    fixes.push(serde_json::json!({
+        "type": "add_ignore_exports",
+        "config_key": "ignoreExports",
+        "file": target_display,
+        "entries": entries,
+        "proposed_diff": diff,
+        "created_files": [target_display],
+        "dry_run": true,
+    }));
 }
 
 fn emit_blocked_monorepo(
@@ -408,67 +388,6 @@ fn render_unified_diff(path_display: &str, current: &str, proposed: &str) -> Str
     out
 }
 
-fn resolve_existing_config_path(root: &Path, explicit: Option<&PathBuf>) -> Option<PathBuf> {
-    if let Some(path) = explicit {
-        let absolute = if path.is_absolute() {
-            path.clone()
-        } else {
-            std::env::current_dir().map_or_else(|_| path.clone(), |cwd| cwd.join(path))
-        };
-        if absolute.exists() {
-            return Some(absolute);
-        }
-        return None;
-    }
-    PlowConfig::find_config_path(root)
-}
-
-/// Walk strictly upward from `start` (skipping `start` itself) looking for
-/// workspace markers. Returns `Some(ancestor)` when found, `None` otherwise.
-///
-/// Markers, in order of detection cost (cheapest first):
-/// - `pnpm-workspace.yaml`
-/// - `turbo.json`
-/// - `lerna.json`
-/// - `rush.json`
-/// - `package.json` with a `workspaces` key (yarn/npm classic + bun)
-fn find_workspace_root_above(start: &Path) -> Option<PathBuf> {
-    let mut current = start.parent()?;
-    loop {
-        if has_workspace_marker(current) {
-            return Some(current.to_path_buf());
-        }
-        current = current.parent()?;
-    }
-}
-
-fn has_workspace_marker(dir: &Path) -> bool {
-    const SENTINELS: &[&str] = &[
-        "pnpm-workspace.yaml",
-        "turbo.json",
-        "lerna.json",
-        "rush.json",
-    ];
-    for name in SENTINELS {
-        if dir.join(name).exists() {
-            return true;
-        }
-    }
-    let pkg_path = dir.join("package.json");
-    if !pkg_path.exists() {
-        return false;
-    }
-    let Ok(content) = std::fs::read_to_string(&pkg_path) else {
-        return false;
-    };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
-        return false;
-    };
-    value
-        .get("workspaces")
-        .is_some_and(|v| v.is_array() || v.is_object())
-}
-
 fn ignore_export_entries(
     root: &Path,
     config_path: &Path,
@@ -540,7 +459,7 @@ fn display_path(root: &Path, path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plow_core::results::{DuplicateExport, DuplicateLocation};
+    use plow_types::results::{DuplicateExport, DuplicateLocation};
 
     fn duplicate(paths: &[PathBuf]) -> DuplicateExportFinding {
         DuplicateExportFinding::with_actions(DuplicateExport {
@@ -618,7 +537,7 @@ mod tests {
     #[cfg(not(miri))]
     mod fs {
         use super::*;
-        use plow_core::results::AnalysisResults;
+        use plow_types::results::AnalysisResults;
 
         fn results_with_duplicate(root: &Path, name: &str) -> AnalysisResults {
             AnalysisResults {
@@ -737,15 +656,15 @@ mod tests {
             let root = dir.path();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            let err = apply_config_fixes(
-                root,
-                None,
-                &results,
-                OutputFormat::Human,
-                /* dry_run */ true,
-                /* no_create_config */ false,
-                &mut fixes,
-            );
+            let err = apply_config_fixes(ConfigFixInput {
+                    root,
+                    config_path: None,
+                    results: &results,
+                    output: OutputFormat::Human,
+                    dry_run: /* dry_run */ true,
+                    no_create_config: /* no_create_config */ false,
+                    fixes: &mut fixes,
+            });
             assert!(!err);
             assert!(
                 !root.join(".plowrc.json").exists(),
@@ -774,15 +693,15 @@ mod tests {
 
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            let err = apply_config_fixes(
-                root,
-                None,
-                &results,
-                OutputFormat::Human,
-                /* dry_run */ false,
-                /* no_create_config */ false,
-                &mut fixes,
-            );
+            let err = apply_config_fixes(ConfigFixInput {
+                    root,
+                    config_path: None,
+                    results: &results,
+                    output: OutputFormat::Human,
+                    dry_run: /* dry_run */ false,
+                    no_create_config: /* no_create_config */ false,
+                    fixes: &mut fixes,
+            });
             assert!(!err);
             assert_eq!(fixes.len(), 1);
             assert_eq!(fixes[0]["applied"], serde_json::json!(true));
@@ -822,15 +741,15 @@ mod tests {
             let root = dir.path();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            let err = apply_config_fixes(
-                root,
-                None,
-                &results,
-                OutputFormat::Human,
-                /* dry_run */ false,
-                /* no_create_config */ true,
-                &mut fixes,
-            );
+            let err = apply_config_fixes(ConfigFixInput {
+                    root,
+                    config_path: None,
+                    results: &results,
+                    output: OutputFormat::Human,
+                    dry_run: /* dry_run */ false,
+                    no_create_config: /* no_create_config */ true,
+                    fixes: &mut fixes,
+            });
             assert!(!err);
             assert!(!root.join(".plowrc.json").exists());
             assert_eq!(fixes.len(), 1);
@@ -851,15 +770,15 @@ mod tests {
             std::fs::create_dir_all(&sub).unwrap();
             let results = results_with_duplicate(&sub, "Card");
             let mut fixes = Vec::new();
-            let err = apply_config_fixes(
-                &sub,
-                None,
-                &results,
-                OutputFormat::Human,
-                /* dry_run */ false,
-                /* no_create_config */ false,
-                &mut fixes,
-            );
+            let err = apply_config_fixes(ConfigFixInput {
+                    root: &sub,
+                    config_path: None,
+                    results: &results,
+                    output: OutputFormat::Human,
+                    dry_run: /* dry_run */ false,
+                    no_create_config: /* no_create_config */ false,
+                    fixes: &mut fixes,
+            });
             assert!(!err);
             assert!(!sub.join(".plowrc.json").exists());
             assert_eq!(fixes.len(), 1);
@@ -877,15 +796,15 @@ mod tests {
             let before = std::fs::read_to_string(&cfg_path).unwrap();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            apply_config_fixes(
+            apply_config_fixes(ConfigFixInput {
                 root,
-                None,
-                &results,
-                OutputFormat::Human,
-                true,
-                false,
-                &mut fixes,
-            );
+                config_path: None,
+                results: &results,
+                output: OutputFormat::Human,
+                dry_run: true,
+                no_create_config: false,
+                fixes: &mut fixes,
+            });
             assert_eq!(
                 std::fs::read_to_string(&cfg_path).unwrap(),
                 before,
@@ -905,15 +824,15 @@ mod tests {
             std::fs::write(&cfg_path, "production = true\n").unwrap();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            apply_config_fixes(
+            apply_config_fixes(ConfigFixInput {
                 root,
-                None,
-                &results,
-                OutputFormat::Human,
-                true,
-                false,
-                &mut fixes,
-            );
+                config_path: None,
+                results: &results,
+                output: OutputFormat::Human,
+                dry_run: true,
+                no_create_config: false,
+                fixes: &mut fixes,
+            });
             assert_eq!(
                 std::fs::read_to_string(&cfg_path).unwrap(),
                 "production = true\n"
@@ -931,15 +850,15 @@ mod tests {
             std::fs::write(&cfg_path, "").unwrap();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            apply_config_fixes(
+            apply_config_fixes(ConfigFixInput {
                 root,
-                None,
-                &results,
-                OutputFormat::Human,
-                true,
-                false,
-                &mut fixes,
-            );
+                config_path: None,
+                results: &results,
+                output: OutputFormat::Human,
+                dry_run: true,
+                no_create_config: false,
+                fixes: &mut fixes,
+            });
             assert_eq!(fixes.len(), 1);
             let diff = fixes[0]["proposed_diff"].as_str().unwrap();
             assert!(diff.contains("[[ignoreExports]]"));
@@ -953,15 +872,15 @@ mod tests {
             std::fs::write(&cfg_path, "{\n}\n").unwrap();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            apply_config_fixes(
+            apply_config_fixes(ConfigFixInput {
                 root,
-                None,
-                &results,
-                OutputFormat::Human,
-                true,
-                false,
-                &mut fixes,
-            );
+                config_path: None,
+                results: &results,
+                output: OutputFormat::Human,
+                dry_run: true,
+                no_create_config: false,
+                fixes: &mut fixes,
+            });
             assert_eq!(fixes.len(), 1);
             let diff = fixes[0]["proposed_diff"].as_str().unwrap();
             assert!(diff.contains("ignoreExports"));
@@ -974,15 +893,15 @@ mod tests {
             let root = dir.path();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            apply_config_fixes(
+            apply_config_fixes(ConfigFixInput {
                 root,
-                None,
-                &results,
-                OutputFormat::Json,
-                true,
-                false,
-                &mut fixes,
-            );
+                config_path: None,
+                results: &results,
+                output: OutputFormat::Json,
+                dry_run: true,
+                no_create_config: false,
+                fixes: &mut fixes,
+            });
             assert_eq!(fixes.len(), 1);
             assert!(fixes[0]["proposed_diff"].is_string());
         }
@@ -991,13 +910,13 @@ mod tests {
         fn is_config_fixable_true_when_config_exists() {
             let dir = tempfile::tempdir().unwrap();
             std::fs::write(dir.path().join(".plowrc.json"), "{}\n").unwrap();
-            assert!(is_config_fixable(dir.path(), None));
+            assert!(plow_config::is_config_fixable(dir.path(), None));
         }
 
         #[test]
         fn is_config_fixable_true_when_can_create_at_root() {
             let dir = tempfile::tempdir().unwrap();
-            assert!(is_config_fixable(dir.path(), None));
+            assert!(plow_config::is_config_fixable(dir.path(), None));
         }
 
         #[test]
@@ -1006,7 +925,7 @@ mod tests {
             std::fs::write(dir.path().join("pnpm-workspace.yaml"), "packages:\n").unwrap();
             let sub = dir.path().join("packages/ui");
             std::fs::create_dir_all(&sub).unwrap();
-            assert!(!is_config_fixable(&sub, None));
+            assert!(!plow_config::is_config_fixable(&sub, None));
         }
     }
 }

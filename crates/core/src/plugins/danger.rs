@@ -47,7 +47,10 @@ impl Plugin for DangerPlugin {
         deps: &[String],
         root: &Path,
         discovered_files: &[PathBuf],
+        _candidate_index: Option<&super::registry::ConfigCandidateIndex>,
     ) -> bool {
+        // dangerfile.* is a source file already in `discovered_files`, so this
+        // scan is cheap and does not consult the candidate index.
         self.is_enabled_with_deps(deps, root)
             || discovered_files.iter().any(|path| is_dangerfile_path(path))
     }
@@ -95,7 +98,7 @@ mod tests {
         let deps = vec!["danger".to_string()];
 
         assert!(plugin.is_enabled_with_deps(&deps, Path::new("/project")));
-        assert!(plugin.is_enabled_with_files(&deps, Path::new("/project"), &[]));
+        assert!(plugin.is_enabled_with_files(&deps, Path::new("/project"), &[], None));
     }
 
     #[test]
@@ -103,7 +106,7 @@ mod tests {
         let plugin = DangerPlugin;
         let files = vec![PathBuf::from("/project/dangerfile.js")];
 
-        assert!(plugin.is_enabled_with_files(&[], Path::new("/project"), &files));
+        assert!(plugin.is_enabled_with_files(&[], Path::new("/project"), &files, None));
     }
 
     #[test]
@@ -111,7 +114,7 @@ mod tests {
         let plugin = DangerPlugin;
         let files = vec![PathBuf::from("/project/packages/foo/dangerfile.ts")];
 
-        assert!(plugin.is_enabled_with_files(&[], Path::new("/project"), &files));
+        assert!(plugin.is_enabled_with_files(&[], Path::new("/project"), &files, None));
     }
 
     #[test]
@@ -124,7 +127,7 @@ mod tests {
             PathBuf::from("/project/danger.js"),
         ];
 
-        assert!(!plugin.is_enabled_with_files(&[], Path::new("/project"), &files));
+        assert!(!plugin.is_enabled_with_files(&[], Path::new("/project"), &files, None));
     }
 
     #[test]

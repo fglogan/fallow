@@ -4,8 +4,8 @@
 //! declaration AST nodes, binding patterns, and require/import patterns.
 
 use oxc_ast::ast::{
-    Argument, BindingPattern, CallExpression, Declaration, ImportExpression, TSEnumMemberName,
-    TSModuleDeclarationName, VariableDeclarator,
+    Argument, BindingPattern, CallExpression, Declaration, Expression, ImportExpression,
+    TSEnumMemberName, TSModuleDeclarationName, VariableDeclarator,
 };
 
 use crate::{
@@ -30,6 +30,9 @@ impl ModuleInfoExtractor {
             Declaration::VariableDeclaration(var) => {
                 for declarator in &var.declarations {
                     self.extract_binding_pattern_names(&declarator.id, is_type_only);
+                    if !is_type_only {
+                        self.record_inline_server_action_const(declarator);
+                    }
                 }
             }
             Declaration::FunctionDeclaration(func) => {
@@ -39,6 +42,16 @@ impl ModuleInfoExtractor {
                         id.span,
                         is_type_only,
                     );
+                    // An exported `async function f() { "use server" }` in a
+                    // non-`"use server"` file is an inline Server Action; record
+                    // its export name so the `unused-server-action` reclassifier
+                    // can move a dead one out of `unused-export`. Only exported
+                    // declarations reach this path, so capture is exported-only.
+                    if !is_type_only
+                        && super::visit_impl::function_body_has_use_server(func.body.as_deref())
+                    {
+                        self.inline_server_action_exports.push(id.name.to_string());
+                    }
                 }
             }
             Declaration::ClassDeclaration(class) => {
@@ -76,6 +89,7 @@ impl ModuleInfoExtractor {
                 local_name: Some(name.to_string()),
                 is_type_only,
                 visibility: VisibilityTag::None,
+                expected_unused_reason: None,
                 span,
                 members: vec![],
                 is_side_effect_used: false,
@@ -93,6 +107,7 @@ impl ModuleInfoExtractor {
             return;
         };
         let is_angular = has_angular_class_decorator(class);
+        self.record_angular_inputs_outputs(class, is_angular);
         let members = extract_class_members(class, is_angular);
         let super_class = extract_super_class_name(class);
         let implemented_interfaces = extract_implemented_interface_names(class);
@@ -117,6 +132,7 @@ impl ModuleInfoExtractor {
             is_type_only,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span: id.span,
             members,
             super_class,
@@ -156,6 +172,7 @@ impl ModuleInfoExtractor {
             local_name: Some(enumd.id.name.to_string()),
             is_type_only,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span: enumd.id.span,
             members,
             is_side_effect_used: false,
@@ -178,6 +195,7 @@ impl ModuleInfoExtractor {
             local_name: Some(name),
             is_type_only: ns_type_only,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span,
             members: vec![],
             is_side_effect_used: false,
@@ -196,11 +214,39 @@ impl ModuleInfoExtractor {
                 local_name: Some(id.name.to_string()),
                 is_type_only,
                 visibility: VisibilityTag::None,
+                expected_unused_reason: None,
                 span: id.span,
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
             });
+        }
+    }
+
+    /// Record an exported `const f = () => { "use server" }` /
+    /// `const f = async () => {...}` / `const f = function() {...}` inline Server
+    /// Action by its binding name, so the `unused-server-action` reclassifier can
+    /// move a dead one out of `unused-export`. Only fires for a plain identifier
+    /// binding whose initializer is an arrow / function expression with a body
+    /// carrying an inline `"use server"` directive.
+    fn record_inline_server_action_const(&mut self, declarator: &VariableDeclarator<'_>) {
+        let Some(init) = declarator.init.as_ref() else {
+            return;
+        };
+        let body_has_use_server = match init {
+            Expression::ArrowFunctionExpression(arrow) => {
+                super::visit_impl::function_body_has_use_server(Some(&arrow.body))
+            }
+            Expression::FunctionExpression(func) => {
+                super::visit_impl::function_body_has_use_server(func.body.as_deref())
+            }
+            _ => false,
+        };
+        if !body_has_use_server {
+            return;
+        }
+        if let BindingPattern::BindingIdentifier(id) = &declarator.id {
+            self.inline_server_action_exports.push(id.name.to_string());
         }
     }
 
@@ -212,104 +258,54 @@ impl ModuleInfoExtractor {
         match decl {
             Declaration::FunctionDeclaration(func) => {
                 if let Some(id) = func.id.as_ref() {
-                    self.pending_namespace_members.push(MemberInfo {
-                        name: id.name.to_string(),
-                        kind: MemberKind::NamespaceMember,
-                        span: id.span,
-                        has_decorator: false,
-                        decorator_names: Vec::new(),
-                        is_instance_returning_static: false,
-                        is_self_returning: false,
-                    });
+                    self.push_namespace_member(id.name.to_string(), id.span);
                 }
             }
             Declaration::VariableDeclaration(var) => {
                 for declarator in &var.declarations {
                     for id in declarator.id.get_binding_identifiers() {
-                        self.pending_namespace_members.push(MemberInfo {
-                            name: id.name.to_string(),
-                            kind: MemberKind::NamespaceMember,
-                            span: id.span,
-                            has_decorator: false,
-                            decorator_names: Vec::new(),
-                            is_instance_returning_static: false,
-                            is_self_returning: false,
-                        });
+                        self.push_namespace_member(id.name.to_string(), id.span);
                     }
                 }
             }
             Declaration::ClassDeclaration(class) => {
                 if let Some(id) = class.id.as_ref() {
-                    self.pending_namespace_members.push(MemberInfo {
-                        name: id.name.to_string(),
-                        kind: MemberKind::NamespaceMember,
-                        span: id.span,
-                        has_decorator: false,
-                        decorator_names: Vec::new(),
-                        is_instance_returning_static: false,
-                        is_self_returning: false,
-                    });
+                    self.push_namespace_member(id.name.to_string(), id.span);
                 }
             }
             Declaration::TSEnumDeclaration(enumd) => {
-                self.pending_namespace_members.push(MemberInfo {
-                    name: enumd.id.name.to_string(),
-                    kind: MemberKind::NamespaceMember,
-                    span: enumd.id.span,
-                    has_decorator: false,
-                    decorator_names: Vec::new(),
-                    is_instance_returning_static: false,
-                    is_self_returning: false,
-                });
+                self.push_namespace_member(enumd.id.name.to_string(), enumd.id.span);
             }
             Declaration::TSInterfaceDeclaration(iface) => {
-                self.pending_namespace_members.push(MemberInfo {
-                    name: iface.id.name.to_string(),
-                    kind: MemberKind::NamespaceMember,
-                    span: iface.id.span,
-                    has_decorator: false,
-                    decorator_names: Vec::new(),
-                    is_instance_returning_static: false,
-                    is_self_returning: false,
-                });
+                self.push_namespace_member(iface.id.name.to_string(), iface.id.span);
             }
             Declaration::TSTypeAliasDeclaration(alias) => {
-                self.pending_namespace_members.push(MemberInfo {
-                    name: alias.id.name.to_string(),
-                    kind: MemberKind::NamespaceMember,
-                    span: alias.id.span,
-                    has_decorator: false,
-                    decorator_names: Vec::new(),
-                    is_instance_returning_static: false,
-                    is_self_returning: false,
-                });
+                self.push_namespace_member(alias.id.name.to_string(), alias.id.span);
             }
             Declaration::TSModuleDeclaration(module) => match &module.id {
                 TSModuleDeclarationName::Identifier(id) => {
-                    self.pending_namespace_members.push(MemberInfo {
-                        name: id.name.to_string(),
-                        kind: MemberKind::NamespaceMember,
-                        span: id.span,
-                        has_decorator: false,
-                        decorator_names: Vec::new(),
-                        is_instance_returning_static: false,
-                        is_self_returning: false,
-                    });
+                    self.push_namespace_member(id.name.to_string(), id.span);
                 }
                 TSModuleDeclarationName::StringLiteral(lit) => {
-                    self.pending_namespace_members.push(MemberInfo {
-                        name: lit.value.to_string(),
-                        kind: MemberKind::NamespaceMember,
-                        span: lit.span,
-                        has_decorator: false,
-                        decorator_names: Vec::new(),
-                        is_instance_returning_static: false,
-                        is_self_returning: false,
-                    });
+                    self.push_namespace_member(lit.value.to_string(), lit.span);
                 }
             },
             _ => {}
         }
+    }
+
+    /// Push a single namespace-member entry with the shared `NamespaceMember`
+    /// defaults (no decorator / static / self-return signals).
+    fn push_namespace_member(&mut self, name: String, span: oxc_span::Span) {
+        self.pending_namespace_members.push(MemberInfo {
+            name,
+            kind: MemberKind::NamespaceMember,
+            span,
+            has_decorator: false,
+            decorator_names: Vec::new(),
+            is_instance_returning_static: false,
+            is_self_returning: false,
+        });
     }
 
     /// Handle `const x = require('./y')` patterns, recording the require call

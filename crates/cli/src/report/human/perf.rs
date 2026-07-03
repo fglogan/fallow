@@ -1,5 +1,5 @@
 use colored::Colorize;
-use plow_core::trace::PipelineTimings;
+use plow_types::trace::PipelineTimings;
 
 /// Stages below this wall-clock time are too cheap to annotate as parallel;
 /// the multiplier would be noise.
@@ -164,13 +164,13 @@ fn push_performance_total_lines(lines: &mut Vec<String>, t: &PipelineTimings) {
     lines.push(String::new());
 }
 
-pub(in crate::report) fn print_health_performance_human(t: &crate::health_types::HealthTimings) {
+pub(in crate::report) fn print_health_performance_human(t: &plow_output::HealthTimings) {
     for line in build_health_performance_lines(t) {
         eprintln!("{line}");
     }
 }
 
-fn build_health_performance_lines(t: &crate::health_types::HealthTimings) -> Vec<String> {
+fn build_health_performance_lines(t: &plow_output::HealthTimings) -> Vec<String> {
     let mut lines = Vec::new();
 
     push_health_performance_header(&mut lines);
@@ -188,10 +188,7 @@ fn push_health_performance_header(lines: &mut Vec<String>) {
     );
 }
 
-fn push_health_performance_stage_lines(
-    lines: &mut Vec<String>,
-    t: &crate::health_types::HealthTimings,
-) {
+fn push_health_performance_stage_lines(lines: &mut Vec<String>, t: &plow_output::HealthTimings) {
     push_dimmed(
         lines,
         &format!("│  config:           {:>8.1}ms", t.config_ms),
@@ -246,7 +243,7 @@ fn push_health_performance_stage_lines(
     );
 }
 
-fn health_performance_stage_sum(t: &crate::health_types::HealthTimings) -> f64 {
+fn health_performance_stage_sum(t: &plow_output::HealthTimings) -> f64 {
     t.config_ms
         + t.discover_ms
         + t.parse_ms
@@ -258,10 +255,7 @@ fn health_performance_stage_sum(t: &crate::health_types::HealthTimings) -> f64 {
         + t.targets_ms
 }
 
-fn push_health_performance_total_lines(
-    lines: &mut Vec<String>,
-    t: &crate::health_types::HealthTimings,
-) {
+fn push_health_performance_total_lines(lines: &mut Vec<String>, t: &plow_output::HealthTimings) {
     push_dimmed(
         lines,
         &format!(
@@ -467,8 +461,8 @@ mod tests {
         );
     }
 
-    fn health_timings(shared_parse: bool) -> crate::health_types::HealthTimings {
-        crate::health_types::HealthTimings {
+    fn health_timings(shared_parse: bool) -> plow_output::HealthTimings {
+        plow_output::HealthTimings {
             config_ms: 4.0,
             discover_ms: if shared_parse { 0.0 } else { 30.0 },
             parse_ms: if shared_parse { 0.0 } else { 340.0 },

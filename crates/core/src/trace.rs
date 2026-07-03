@@ -1,12 +1,15 @@
 use std::path::{Path, PathBuf};
 
-use plow_types::serde_path;
+pub use plow_types::trace::{
+    CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ImpactClosureGap,
+    ImpactClosureTrace, PipelineTimings, ReExportChain, TracedCloneGroup, TracedExport,
+    TracedReExport,
+};
 use rustc_hash::FxHashSet;
-use serde::Serialize;
 
 use crate::duplicates::{
-    CloneFingerprintSet, CloneGroup, CloneInstance, DuplicationReport, RefactoringSuggestion,
-    dominant_identifier, group_refactoring_suggestion,
+    CloneFingerprintSet, CloneGroup, CloneInstance, DuplicationReport, dominant_identifier,
+    group_refactoring_suggestion,
 };
 use crate::graph::{ModuleGraph, ReferenceKind};
 
@@ -32,186 +35,41 @@ fn path_matches(module_path: &Path, root: &Path, user_path: &str) -> bool {
     module_str.ends_with(&format!("/{user_path_norm}"))
 }
 
-/// Result of tracing an export: why is it considered used or unused?
-#[derive(Debug, Serialize)]
-pub struct ExportTrace {
-    /// The file containing the export.
-    #[serde(serialize_with = "serde_path::serialize")]
-    pub file: PathBuf,
-    /// The export name being traced.
-    pub export_name: String,
-    /// Whether the file is reachable from an entry point.
-    pub file_reachable: bool,
-    /// Whether the file is an entry point.
-    pub is_entry_point: bool,
-    /// Whether the export is considered used.
-    pub is_used: bool,
-    /// Files that reference this export directly.
-    pub direct_references: Vec<ExportReference>,
-    /// Re-export chains that pass through this export.
-    pub re_export_chains: Vec<ReExportChain>,
-    /// Reason summary.
-    pub reason: String,
-}
-
-/// A direct reference to an export.
-#[derive(Debug, Serialize)]
-pub struct ExportReference {
-    #[serde(serialize_with = "serde_path::serialize")]
-    pub from_file: PathBuf,
-    pub kind: String,
-}
-
-/// A re-export chain showing how an export is propagated.
-#[derive(Debug, Serialize)]
-pub struct ReExportChain {
-    /// The barrel file that re-exports this symbol.
-    #[serde(serialize_with = "serde_path::serialize")]
-    pub barrel_file: PathBuf,
-    /// The name it's re-exported as.
-    pub exported_as: String,
-    /// Number of references on the barrel's re-exported symbol.
-    pub reference_count: usize,
-}
-
-/// Result of tracing all edges for a file.
-#[derive(Debug, Serialize)]
-pub struct FileTrace {
-    /// The traced file.
-    #[serde(serialize_with = "serde_path::serialize")]
-    pub file: PathBuf,
-    /// Whether this file is reachable from entry points.
-    pub is_reachable: bool,
-    /// Whether this file is an entry point.
-    pub is_entry_point: bool,
-    /// Exports declared by this file.
-    pub exports: Vec<TracedExport>,
-    /// Files that this file imports from.
-    #[serde(serialize_with = "serde_path::serialize_vec")]
-    pub imports_from: Vec<PathBuf>,
-    /// Files that import from this file.
-    #[serde(serialize_with = "serde_path::serialize_vec")]
-    pub imported_by: Vec<PathBuf>,
-    /// Re-exports declared by this file.
-    pub re_exports: Vec<TracedReExport>,
-}
-
-/// An export with its usage info.
-#[derive(Debug, Serialize)]
-pub struct TracedExport {
-    pub name: String,
-    pub is_type_only: bool,
-    pub reference_count: usize,
-    pub referenced_by: Vec<ExportReference>,
-}
-
-/// A re-export with source info.
-#[derive(Debug, Serialize)]
-pub struct TracedReExport {
-    #[serde(serialize_with = "serde_path::serialize")]
-    pub source_file: PathBuf,
-    pub imported_name: String,
-    pub exported_name: String,
-}
-
-/// Result of tracing a dependency: where is it used?
-#[derive(Debug, Serialize)]
-pub struct DependencyTrace {
-    /// The dependency name being traced.
-    pub package_name: String,
-    /// Files that import this dependency.
-    #[serde(serialize_with = "serde_path::serialize_vec")]
-    pub imported_by: Vec<PathBuf>,
-    /// Files that import this dependency with type-only imports.
-    #[serde(serialize_with = "serde_path::serialize_vec")]
-    pub type_only_imported_by: Vec<PathBuf>,
-    /// Whether the dependency is invoked from package.json scripts or CI configs
-    /// (e.g., `microbundle build`, `vitest run` in `scripts`, or binary names in
-    /// `.github/workflows/*.yml` / `.gitlab-ci.yml`). Mirrors how the unused-deps
-    /// detector classifies tooling usage so trace output stays consistent with it.
-    pub used_in_scripts: bool,
-    /// Whether the dependency is used at all (imports OR script/CI invocations).
-    pub is_used: bool,
-    /// Total import count.
-    pub import_count: usize,
-}
-
-/// Pipeline performance timings.
-#[derive(Debug, Clone, Serialize)]
-pub struct PipelineTimings {
-    pub discover_files_ms: f64,
-    pub file_count: usize,
-    pub workspaces_ms: f64,
-    pub workspace_count: usize,
-    pub plugins_ms: f64,
-    pub script_analysis_ms: f64,
-    pub parse_extract_ms: f64,
-    /// Summed wall-clock time of the actual AST parses across all rayon
-    /// workers (the parse stage's CPU cost). `parse_extract_ms` is the
-    /// stage's wall-clock time; this is the work done in parallel within it.
-    /// Observational and non-deterministic (varies run to run); do not assert
-    /// against it.
-    pub parse_cpu_ms: f64,
-    pub module_count: usize,
-    /// Number of files whose parse results were loaded from cache (skipped parsing).
-    pub cache_hits: usize,
-    /// Number of files that required a full parse (new or changed content).
-    pub cache_misses: usize,
-    pub cache_update_ms: f64,
-    pub entry_points_ms: f64,
-    pub entry_point_count: usize,
-    pub resolve_imports_ms: f64,
-    pub build_graph_ms: f64,
-    pub analyze_ms: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub duplication_ms: Option<f64>,
-    pub total_ms: f64,
-}
-
-/// Trace why an export is considered used or unused.
-#[must_use]
-pub fn trace_export(
+/// Map a reference's `from_file` id to a root-relative [`ExportReference`].
+fn reference_to_export_reference(
     graph: &ModuleGraph,
     root: &Path,
-    file_path: &str,
+    r: &crate::graph::SymbolReference,
+) -> ExportReference {
+    let from_path = graph.modules.get(r.from_file.0 as usize).map_or_else(
+        || PathBuf::from(format!("<unknown:{}>", r.from_file.0)),
+        |m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf(),
+    );
+    ExportReference {
+        from_file: from_path,
+        kind: format_reference_kind(r.kind),
+    }
+}
+
+/// Collect every re-export chain across the graph that re-exports `export_name`
+/// from the module identified by `target_file_id`.
+fn collect_re_export_chains(
+    graph: &ModuleGraph,
+    root: &Path,
+    target_file_id: crate::discover::FileId,
     export_name: &str,
-) -> Option<ExportTrace> {
-    let module = graph
-        .modules
-        .iter()
-        .find(|m| path_matches(&m.path, root, file_path))?;
-
-    let export = module.exports.iter().find(|e| {
-        let name_str = e.name.to_string();
-        name_str == export_name || (export_name == "default" && name_str == "default")
-    })?;
-
-    let direct_references: Vec<ExportReference> = export
-        .references
-        .iter()
-        .map(|r| {
-            let from_path = graph.modules.get(r.from_file.0 as usize).map_or_else(
-                || PathBuf::from(format!("<unknown:{}>", r.from_file.0)),
-                |m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf(),
-            );
-            ExportReference {
-                from_file: from_path,
-                kind: format_reference_kind(r.kind),
-            }
-        })
-        .collect();
-
-    let re_export_chains: Vec<ReExportChain> = graph
+) -> Vec<ReExportChain> {
+    graph
         .modules
         .iter()
         .flat_map(|m| {
             m.re_exports
                 .iter()
-                .filter(|re| {
-                    re.source_file == module.file_id
+                .filter(move |re| {
+                    re.source_file == target_file_id
                         && (re.imported_name == export_name || re.imported_name == "*")
                 })
-                .map(|re| {
+                .map(move |re| {
                     let barrel_export = m.exports.iter().find(|e| {
                         if re.exported_name == "*" {
                             e.name.to_string() == export_name
@@ -226,15 +84,22 @@ pub fn trace_export(
                     }
                 })
         })
-        .collect();
+        .collect()
+}
 
-    let is_used = !export.references.is_empty();
-    let reason = if !module.is_reachable() {
+/// Build the human-readable reason string explaining an export's used/unused state.
+fn export_trace_reason(
+    module: &crate::graph::ModuleNode,
+    reference_count: usize,
+    is_used: bool,
+    re_export_chains: &[ReExportChain],
+) -> String {
+    if !module.is_reachable() {
         "File is unreachable from any entry point".to_string()
     } else if is_used {
         format!(
             "Used by {} file(s){}",
-            export.references.len(),
+            reference_count,
             if re_export_chains.is_empty() {
                 String::new()
             } else {
@@ -251,7 +116,38 @@ pub fn trace_export(
         )
     } else {
         "No references found, export is unused".to_string()
-    };
+    }
+}
+
+/// Trace why an export is considered used or unused.
+#[must_use]
+pub fn trace_export(
+    graph: &ModuleGraph,
+    root: &Path,
+    file_path: &str,
+    export_name: &str,
+) -> Option<ExportTrace> {
+    let module = graph
+        .modules
+        .iter()
+        .find(|m| path_matches(&m.path, root, file_path))?;
+
+    let export = module
+        .exports
+        .iter()
+        .filter(|e| export_name_matches(e, export_name))
+        .max_by_key(|e| (!e.references.is_empty(), !e.is_type_only))?;
+
+    let direct_references: Vec<ExportReference> = export
+        .references
+        .iter()
+        .map(|r| reference_to_export_reference(graph, root, r))
+        .collect();
+
+    let re_export_chains = collect_re_export_chains(graph, root, module.file_id, export_name);
+
+    let is_used = !export.references.is_empty();
+    let reason = export_trace_reason(module, export.references.len(), is_used, &re_export_chains);
 
     Some(ExportTrace {
         file: module
@@ -269,15 +165,18 @@ pub fn trace_export(
     })
 }
 
-/// Trace all edges for a file.
-#[must_use]
-pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<FileTrace> {
-    let module = graph
-        .modules
-        .iter()
-        .find(|m| path_matches(&m.path, root, file_path))?;
+fn export_name_matches(export: &crate::graph::ExportSymbol, export_name: &str) -> bool {
+    let name_str = export.name.to_string();
+    name_str == export_name || (export_name == "default" && name_str == "default")
+}
 
-    let exports: Vec<TracedExport> = module
+/// Map a module's exports to [`TracedExport`] entries with relativized references.
+fn traced_exports(
+    graph: &ModuleGraph,
+    root: &Path,
+    module: &crate::graph::ModuleNode,
+) -> Vec<TracedExport> {
+    module
         .exports
         .iter()
         .map(|e| TracedExport {
@@ -287,21 +186,19 @@ pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<F
             referenced_by: e
                 .references
                 .iter()
-                .map(|r| {
-                    let from_path = graph.modules.get(r.from_file.0 as usize).map_or_else(
-                        || PathBuf::from(format!("<unknown:{}>", r.from_file.0)),
-                        |m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf(),
-                    );
-                    ExportReference {
-                        from_file: from_path,
-                        kind: format_reference_kind(r.kind),
-                    }
-                })
+                .map(|r| reference_to_export_reference(graph, root, r))
                 .collect(),
         })
-        .collect();
+        .collect()
+}
 
-    let imports_from: Vec<PathBuf> = graph
+/// Collect the root-relative paths a file imports from (forward graph edges).
+fn traced_imports_from(
+    graph: &ModuleGraph,
+    root: &Path,
+    module: &crate::graph::ModuleNode,
+) -> Vec<PathBuf> {
+    graph
         .edges_for(module.file_id)
         .iter()
         .filter_map(|target_id| {
@@ -310,9 +207,16 @@ pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<F
                 .get(target_id.0 as usize)
                 .map(|m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf())
         })
-        .collect();
+        .collect()
+}
 
-    let imported_by: Vec<PathBuf> = graph
+/// Collect the root-relative paths that import a file (reverse graph edges).
+fn traced_imported_by(
+    graph: &ModuleGraph,
+    root: &Path,
+    module: &crate::graph::ModuleNode,
+) -> Vec<PathBuf> {
+    graph
         .reverse_deps
         .get(module.file_id.0 as usize)
         .map(|deps| {
@@ -325,9 +229,16 @@ pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<F
                 })
                 .collect()
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
 
-    let re_exports: Vec<TracedReExport> = module
+/// Map a module's re-exports to [`TracedReExport`] entries with relativized source paths.
+fn traced_re_exports(
+    graph: &ModuleGraph,
+    root: &Path,
+    module: &crate::graph::ModuleNode,
+) -> Vec<TracedReExport> {
+    module
         .re_exports
         .iter()
         .map(|re| {
@@ -341,7 +252,16 @@ pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<F
                 exported_name: re.exported_name.clone(),
             }
         })
-        .collect();
+        .collect()
+}
+
+/// Trace all edges for a file.
+#[must_use]
+pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<FileTrace> {
+    let module = graph
+        .modules
+        .iter()
+        .find(|m| path_matches(&m.path, root, file_path))?;
 
     Some(FileTrace {
         file: module
@@ -351,10 +271,10 @@ pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<F
             .to_path_buf(),
         is_reachable: module.is_reachable(),
         is_entry_point: module.is_entry_point(),
-        exports,
-        imports_from,
-        imported_by,
-        re_exports,
+        exports: traced_exports(graph, root, module),
+        imports_from: traced_imports_from(graph, root, module),
+        imported_by: traced_imported_by(graph, root, module),
+        re_exports: traced_re_exports(graph, root, module),
     })
 }
 
@@ -430,32 +350,47 @@ fn format_reference_kind(kind: ReferenceKind) -> String {
     }
 }
 
-/// Result of tracing a clone: all groups containing the code at a given location.
-#[derive(Debug, Serialize)]
-pub struct CloneTrace {
-    #[serde(serialize_with = "serde_path::serialize")]
-    pub file: PathBuf,
-    pub line: usize,
-    pub matched_instance: Option<CloneInstance>,
-    pub clone_groups: Vec<TracedCloneGroup>,
-}
+/// Compute the impact closure for a single file as the seed.
+///
+/// Resolves `file_path` to a graph `FileId`, walks `reverse_deps` + re-export
+/// chains to the transitive affected set, and reports the coordination gap (the
+/// seed's exported contracts consumed by modules outside the seed). Returns
+/// `None` when the file is not in the module graph.
+#[must_use]
+pub fn trace_impact_closure(
+    graph: &ModuleGraph,
+    root: &Path,
+    file_path: &str,
+) -> Option<ImpactClosureTrace> {
+    let module = graph
+        .modules
+        .iter()
+        .find(|m| path_matches(&m.path, root, file_path))?;
 
-#[derive(Debug, Serialize)]
-pub struct TracedCloneGroup {
-    /// Stable content fingerprint, usually `dup:<8hex>` and widened on rare
-    /// report collisions; addressable via `plow dupes --trace dup:<fp>` and
-    /// shown in the `dupes` listing.
-    pub fingerprint: String,
-    pub token_count: usize,
-    pub line_count: usize,
-    pub instances: Vec<CloneInstance>,
-    /// Group-level extract-function suggestion with estimated line savings.
-    pub suggestion: RefactoringSuggestion,
-    /// Best-effort name for the extracted function, derived from the dominant
-    /// non-generic identifier. `null` when no confident name exists; advisory
-    /// only (verify before applying).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub suggested_name: Option<String>,
+    let closure = graph.impact_closure(&[module.file_id]);
+    let paths = graph.closure_with_paths(&closure, root);
+
+    let seed = paths
+        .in_diff
+        .first()
+        .cloned()
+        .unwrap_or_else(|| file_path.replace('\\', "/"));
+
+    let coordination_gap = paths
+        .coordination_gap
+        .into_iter()
+        .map(|gap| ImpactClosureGap {
+            consumer_file: gap.consumer_file,
+            consumed_symbols: gap.consumed_symbols,
+            note: "syntactic attention pointer, not a correctness proof".to_string(),
+        })
+        .collect();
+
+    Some(ImpactClosureTrace {
+        seed,
+        affected_not_shown: paths.affected_not_shown,
+        coordination_gap,
+    })
 }
 
 /// Build a [`TracedCloneGroup`] from a raw clone group, computing the
@@ -632,6 +567,7 @@ mod tests {
                         local_name: Some("foo".to_string()),
                         is_type_only: false,
                         visibility: VisibilityTag::None,
+                        expected_unused_reason: None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
                         is_side_effect_used: false,
@@ -642,6 +578,7 @@ mod tests {
                         local_name: Some("bar".to_string()),
                         is_type_only: false,
                         visibility: VisibilityTag::None,
+                        expected_unused_reason: None,
                         span: oxc_span::Span::new(21, 40),
                         members: vec![],
                         is_side_effect_used: false,
@@ -658,6 +595,7 @@ mod tests {
                     local_name: Some("baz".to_string()),
                     is_type_only: false,
                     visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
                     span: oxc_span::Span::new(0, 15),
                     members: vec![],
                     is_side_effect_used: false,

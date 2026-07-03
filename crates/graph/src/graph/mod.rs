@@ -5,9 +5,14 @@
 
 mod build;
 mod cycles;
+mod fan_io;
+mod impact_closure;
 mod namespace_aliases;
 mod namespace_re_exports;
 mod narrowing;
+mod partition_order;
+mod public_exports;
+mod re_export_reachability;
 mod re_exports;
 mod reachability;
 pub mod types;
@@ -21,6 +26,11 @@ use crate::resolve::ResolvedModule;
 use plow_types::discover::{DiscoveredFile, EntryPoint, FileId};
 use plow_types::extract::ImportedName;
 
+pub use fan_io::{FocusFileFacts, FocusFileFactsPaths};
+pub use impact_closure::{
+    CoordinationGap, CoordinationGapPaths, ImpactClosure, ImpactClosurePaths,
+};
+pub use partition_order::{PartitionOrder, PartitionOrderPaths, ReviewUnit, ReviewUnitPaths};
 pub use re_exports::GraphReExportCycle;
 pub use types::{ExportSymbol, ModuleNode, ReExportEdge, ReferenceKind, SymbolReference};
 
@@ -39,7 +49,13 @@ fn is_declaration_file_path(path: &Path) -> bool {
 }
 
 /// The core module dependency graph.
-#[derive(Debug)]
+///
+/// Derives `serde` so the whole graph can be persisted to `.plow/graph-cache.bin`
+/// (see `crate::cache`) and skipped on a re-run whose inputs are byte-identical.
+/// `namespace_imported` is a derived `FixedBitSet` reconstructed from the edge
+/// set on cache load (`reconstruct_namespace_imported`), so it is
+/// `#[serde(skip, default)]` rather than persisted.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct ModuleGraph {
     /// All modules indexed by `FileId`.
     ///
@@ -68,6 +84,13 @@ pub struct ModuleGraph {
     /// Reverse index: for each `FileId`, which files import it.
     pub reverse_deps: Vec<Vec<FileId>>,
     /// Precomputed: which modules have namespace imports (import * as ns).
+    ///
+    /// Derived entirely from the edge set (a module is namespace-imported iff
+    /// some edge to it carries an `ImportedName::Namespace` symbol), so it is
+    /// not persisted: on cache load it is rebuilt by
+    /// [`ModuleGraph::reconstruct_namespace_imported`], which replicates the
+    /// exact insertion logic from `build.rs`.
+    #[serde(skip, default)]
     namespace_imported: FixedBitSet,
     /// Re-export cycles and self-loops detected during Phase 4 chain
     /// resolution. Each entry names the participating files (sorted
@@ -80,23 +103,36 @@ pub struct ModuleGraph {
 }
 
 /// An edge in the module graph.
-#[derive(Debug)]
-pub(super) struct Edge {
-    pub(super) source: FileId,
-    pub(super) target: FileId,
-    pub(super) symbols: Vec<ImportedSymbol>,
+///
+/// Public surface: `plow trace` walks the raw per-symbol `imported_name`
+/// / `local_name` in BOTH directions (callers via `reverse_deps`, callees via
+/// outgoing edges), which the flattened summary structs cannot express. The
+/// field layout (and the `Edge == 32` size assertion below) is unchanged by the
+/// visibility widen.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct Edge {
+    /// Source module of this import edge.
+    pub source: FileId,
+    /// Target module imported by `source`.
+    pub target: FileId,
+    /// Symbols imported across this edge.
+    pub symbols: Vec<ImportedSymbol>,
 }
 
 /// A symbol imported across an edge.
-#[derive(Debug)]
-pub(super) struct ImportedSymbol {
-    pub(super) imported_name: ImportedName,
-    pub(super) local_name: String,
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct ImportedSymbol {
+    /// The name as imported from the target (`Named`, `Default`, `Namespace`,
+    /// `SideEffect`).
+    pub imported_name: ImportedName,
+    /// Local binding name in the importing file.
+    pub local_name: String,
     /// Byte span of the import statement in the source file.
-    pub(super) import_span: oxc_span::Span,
+    #[serde(with = "crate::cache::span_serde")]
+    pub import_span: oxc_span::Span,
     /// Whether this import is type-only (`import type { ... }`).
     /// Used to skip type-only edges in circular dependency detection.
-    pub(super) is_type_only: bool,
+    pub is_type_only: bool,
 }
 
 /// Importer details for one file that directly imports a target module.
@@ -216,7 +252,7 @@ impl ModuleGraph {
             total_capacity,
         );
 
-        graph.re_export_cycles = graph.resolve_re_export_chains();
+        graph.re_export_cycles = graph.resolve_re_export_chains(&module_by_id);
 
         graph
     }
@@ -233,8 +269,46 @@ impl ModuleGraph {
         self.edges.len()
     }
 
+    /// Rebuild the `namespace_imported` bitset from the edge set.
+    ///
+    /// `namespace_imported` is `#[serde(skip)]`, so a graph loaded from the
+    /// persisted cache (`crate::cache`) arrives with an empty default bitset.
+    /// This restores it by replicating the EXACT insertion rule from
+    /// `build.rs`: a target `FileId` is namespace-imported iff some edge to it
+    /// carries an `ImportedName::Namespace` symbol. Both build-time insertion
+    /// sites (static / dynamic `import * as ns` in `collect_import_edge`, and
+    /// glob dynamic-import patterns in `collect_edges_for_module`) push a
+    /// `Namespace` symbol onto the target's edge, so iterating the persisted
+    /// edges and checking for a `Namespace` symbol reproduces the original
+    /// bitset bit-for-bit. The capacity matches `build.rs`'s
+    /// `max_file_id.max(module_count)`, which equals `modules.len()` under the
+    /// dense path-sorted FileId invariant.
+    pub(crate) fn reconstruct_namespace_imported(&mut self) {
+        let capacity = self
+            .edges
+            .iter()
+            .map(|edge| edge.target.0 as usize + 1)
+            .max()
+            .unwrap_or(0)
+            .max(self.modules.len());
+        let mut bitset = FixedBitSet::with_capacity(capacity);
+        for edge in &self.edges {
+            if edge
+                .symbols
+                .iter()
+                .any(|sym| matches!(sym.imported_name, ImportedName::Namespace))
+            {
+                let idx = edge.target.0 as usize;
+                if idx < capacity {
+                    bitset.insert(idx);
+                }
+            }
+        }
+        self.namespace_imported = bitset;
+    }
+
     /// Check if any importer uses `import * as ns` for this module.
-    /// Uses precomputed bitset — O(1) lookup.
+    /// Uses precomputed bitset, O(1) lookup.
     #[must_use]
     pub fn has_namespace_import(&self, file_id: FileId) -> bool {
         let idx = file_id.0 as usize;
@@ -253,6 +327,36 @@ impl ModuleGraph {
         }
         let range = &self.modules[idx].edge_range;
         self.edges[range.clone()].iter().map(|e| e.target).collect()
+    }
+
+    /// Iterate the outgoing edges of `file_id` with full per-symbol data.
+    ///
+    /// `plow trace` needs the raw `ImportedSymbol` set on each edge in
+    /// both directions, which the flattened summary structs cannot express.
+    /// Returns an empty iterator for out-of-range file ids.
+    pub fn outgoing_symbol_edges(
+        &self,
+        file_id: FileId,
+    ) -> impl Iterator<Item = (FileId, &[ImportedSymbol])> + '_ {
+        let idx = file_id.0 as usize;
+        let range = if idx < self.modules.len() {
+            self.modules[idx].edge_range.clone()
+        } else {
+            0..0
+        };
+        self.edges[range]
+            .iter()
+            .map(|edge| (edge.target, edge.symbols.as_slice()))
+    }
+
+    /// The importer `FileId`s that directly import `target` (reverse-dep view).
+    ///
+    /// Returns an empty slice when `target` is out of range.
+    #[must_use]
+    pub fn importers_of(&self, target: FileId) -> &[FileId] {
+        self.reverse_deps
+            .get(target.0 as usize)
+            .map_or(&[], Vec::as_slice)
     }
 
     /// Summarize files that directly import `target`.
@@ -462,6 +566,7 @@ mod tests {
                         local_name: Some("foo".to_string()),
                         is_type_only: false,
                         visibility: VisibilityTag::None,
+                        expected_unused_reason: None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
                         is_side_effect_used: false,
@@ -472,6 +577,7 @@ mod tests {
                         local_name: Some("bar".to_string()),
                         is_type_only: false,
                         visibility: VisibilityTag::None,
+                        expected_unused_reason: None,
                         span: oxc_span::Span::new(25, 45),
                         members: vec![],
                         is_side_effect_used: false,
@@ -597,6 +703,7 @@ mod tests {
                     local_name: Some("runtimeOnly".to_string()),
                     is_type_only: false,
                     visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                     is_side_effect_used: false,
@@ -646,6 +753,7 @@ mod tests {
                     local_name: Some("covered".to_string()),
                     is_type_only: false,
                     visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                     is_side_effect_used: false,
@@ -761,6 +869,7 @@ mod tests {
                     local_name: Some("foo".to_string()),
                     is_type_only: false,
                     visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                     is_side_effect_used: false,
@@ -781,6 +890,108 @@ mod tests {
     fn graph_has_namespace_import_out_of_bounds() {
         let graph = build_simple_graph();
         assert!(!graph.has_namespace_import(FileId(999)));
+    }
+
+    /// The persisted graph cache skips `namespace_imported` and rebuilds it from
+    /// the edge set on load. This asserts the reconstruction reproduces the
+    /// fresh-built bitset BIT-FOR-BIT on a graph that exercises `import * as ns`,
+    /// matching what `build.rs` records at build time.
+    #[test]
+    fn reconstruct_namespace_imported_matches_fresh_build() {
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/entry.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/utils.ts"),
+                size_bytes: 50,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: PathBuf::from("/project/named-only.ts"),
+                size_bytes: 50,
+            },
+        ];
+        let entry_points = vec![EntryPoint {
+            path: PathBuf::from("/project/entry.ts"),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/project/entry.ts"),
+                resolved_imports: vec![
+                    ResolvedImport {
+                        info: ImportInfo {
+                            source: "./utils".to_string(),
+                            imported_name: ImportedName::Namespace,
+                            local_name: "utils".to_string(),
+                            is_type_only: false,
+                            from_style: false,
+                            span: oxc_span::Span::new(0, 10),
+                            source_span: oxc_span::Span::default(),
+                        },
+                        target: ResolveResult::InternalModule(FileId(1)),
+                    },
+                    ResolvedImport {
+                        info: ImportInfo {
+                            source: "./named-only".to_string(),
+                            imported_name: ImportedName::Named("foo".to_string()),
+                            local_name: "foo".to_string(),
+                            is_type_only: false,
+                            from_style: false,
+                            span: oxc_span::Span::new(11, 20),
+                            source_span: oxc_span::Span::default(),
+                        },
+                        target: ResolveResult::InternalModule(FileId(2)),
+                    },
+                ],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/project/utils.ts"),
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: PathBuf::from("/project/named-only.ts"),
+                exports: vec![plow_types::extract::ExportInfo {
+                    name: ExportName::Named("foo".to_string()),
+                    local_name: Some("foo".to_string()),
+                    is_type_only: false,
+                    visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
+                    span: oxc_span::Span::new(0, 20),
+                    members: vec![],
+                    is_side_effect_used: false,
+                    super_class: None,
+                }],
+                ..Default::default()
+            },
+        ];
+
+        let mut graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+        let fresh = graph.namespace_imported.clone();
+
+        // Sanity: the namespace target is set, the named-only target is not.
+        assert!(graph.has_namespace_import(FileId(1)));
+        assert!(!graph.has_namespace_import(FileId(2)));
+
+        // Simulate the cache load: the bitset arrives empty (serde-skipped), then
+        // the loader reconstructs it from the persisted edges.
+        graph.namespace_imported = FixedBitSet::default();
+        graph.reconstruct_namespace_imported();
+
+        assert_eq!(
+            graph.namespace_imported, fresh,
+            "reconstructed namespace_imported must equal the fresh-built bitset"
+        );
+        assert!(graph.has_namespace_import(FileId(1)));
+        assert!(!graph.has_namespace_import(FileId(2)));
     }
 
     #[test]
@@ -834,6 +1045,7 @@ mod tests {
                     local_name: Some("foo".to_string()),
                     is_type_only: false,
                     visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                     is_side_effect_used: false,
@@ -849,6 +1061,7 @@ mod tests {
                     local_name: Some("orphan".to_string()),
                     is_type_only: false,
                     visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                     is_side_effect_used: false,
@@ -926,6 +1139,46 @@ mod tests {
         let graph = ModuleGraph::build(&[], &[], &[]);
         assert_eq!(graph.module_count(), 0);
         assert_eq!(graph.edge_count(), 0);
+    }
+
+    /// The persisted graph cache postcard-encodes the whole `ModuleGraph` and
+    /// decodes it on a warm run. This proves the serde round-trip is lossless
+    /// for the structural surface analysis reads: module / edge / export /
+    /// reference counts and the `namespace_imported` bitset (reconstructed on
+    /// load) all survive.
+    #[test]
+    fn graph_postcard_round_trip_is_lossless() {
+        let graph = build_simple_graph();
+
+        let encoded = postcard::to_allocvec(&graph).expect("encode graph");
+        let mut decoded: ModuleGraph = postcard::from_bytes(&encoded).expect("decode graph");
+        // The store does this on load; do it here so the bitset is restored.
+        decoded.reconstruct_namespace_imported();
+
+        assert_eq!(decoded.module_count(), graph.module_count());
+        assert_eq!(decoded.edge_count(), graph.edge_count());
+        assert_eq!(decoded.namespace_imported, graph.namespace_imported);
+
+        // Export + reference + member surface survives byte-for-byte.
+        let utils = &decoded.modules[1];
+        let foo = utils
+            .exports
+            .iter()
+            .find(|e| e.name.to_string() == "foo")
+            .expect("foo export survives round-trip");
+        assert!(!foo.references.is_empty());
+        let bar = utils
+            .exports
+            .iter()
+            .find(|e| e.name.to_string() == "bar")
+            .expect("bar export survives round-trip");
+        assert!(bar.references.is_empty());
+
+        // Reachability flags and entry-point sets survive.
+        assert!(decoded.modules[0].is_entry_point());
+        assert!(decoded.modules[0].is_reachable());
+        assert!(decoded.modules[1].is_reachable());
+        assert_eq!(decoded.entry_points, graph.entry_points);
     }
 
     #[test]
@@ -1181,6 +1434,7 @@ mod tests {
                     local_name: None,
                     is_type_only: false,
                     visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                     is_side_effect_used: false,
@@ -1248,6 +1502,7 @@ mod tests {
                     local_name: Some("primaryColor".to_string()),
                     is_type_only: false,
                     visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                     is_side_effect_used: false,
@@ -1327,6 +1582,7 @@ mod tests {
                     local_name: Some("helper".to_string()),
                     is_type_only: false,
                     visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                     is_side_effect_used: false,

@@ -1,35 +1,40 @@
 pub use plow_types::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
-    CircularDependencyFinding, DuplicateExportFinding, DynamicSegmentNameConflictFinding,
-    EmptyCatalogGroupFinding, InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
-    MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PolicyViolationFinding,
-    PrivateTypeLeakFinding, ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
+    CircularDependencyFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
+    DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding, InvalidClientExportFinding,
+    MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
+    MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
+    ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
     TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
     UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
     UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
-    UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
-    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
     UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
-    UnusedTypeFinding,
+    UnusedSvelteEventFinding, UnusedTypeFinding,
 };
 pub use plow_types::results::{
     ActiveSuppression, AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation,
     BoundaryViolation, CircularDependency, CircularDependencyEdge, DependencyLocation,
     DependencyOverrideMisconfigReason, DependencyOverrideSource, DuplicateExport,
-    DuplicateLocation, DynamicSegmentNameConflict, EmptyCatalogGroup, EntryPointSummary,
-    ExportUsage, FeatureFlag, FlagConfidence, FlagKind, ImportSite, InvalidClientExport,
-    MisconfiguredDependencyOverride, MisplacedDirective, MixedClientServerBarrel, PolicyRuleKind,
-    PolicyViolation, PolicyViolationSeverity, PrivateTypeLeak, ReExportCycle, ReExportCycleKind,
-    ReferenceLocation, RouteCollision, SecurityAttackSurfaceEntry, SecurityCandidate,
-    SecurityCandidateBoundary, SecurityCandidateSink, SecurityDeadCodeContext,
+    DuplicateLocation, DuplicatePropShape, DuplicatePropShapeMember, DynamicSegmentNameConflict,
+    EmptyCatalogGroup, EntryPointSummary, ExportUsage, FeatureFlag, FlagConfidence, FlagKind,
+    ImportSite, InvalidClientExport, MisconfiguredDependencyOverride, MisplacedDirective,
+    MixedClientServerBarrel, PolicyRuleKind, PolicyViolation, PolicyViolationSeverity,
+    PrivateTypeLeak, PropDrillHop, PropDrillingChain, ReExportCycle, ReExportCycleKind,
+    ReactComponentIntel, ReactHookSummary, ReactPropDrill, ReactPropIntel, ReferenceLocation,
+    RenderFanInComponent, RenderFanInMetric, RouteCollision, SecurityAttackSurfaceEntry,
+    SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink, SecurityDeadCodeContext,
     SecurityDeadCodeKind, SecurityDefensiveBoundary, SecurityDefensiveControl, SecurityFinding,
     SecurityFindingKind, SecurityNetworkContext, SecurityReachability, SecuritySeverity,
     SecurityTaintFlow, SecurityUnresolvedCalleeDiagnostic, SecurityZoneCrossing, StaleSuppression,
-    SuppressionOrigin, TaintConfidence, TaintEndpoint, TaintPath, TestOnlyDependency, TraceHop,
-    TraceHopRole, TypeOnlyDependency, UnlistedDependency, UnprovidedInject, UnrenderedComponent,
-    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedComponentEmit,
-    UnusedComponentProp, UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile,
-    UnusedMember, UnusedServerAction,
+    SuppressionOrigin, TaintConfidence, TaintEndpoint, TaintPath, TestOnlyDependency, ThinWrapper,
+    TraceHop, TraceHopRole, TypeOnlyDependency, UnlistedDependency, UnprovidedInject,
+    UnrenderedComponent, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
+    UnusedComponentEmit, UnusedComponentInput, UnusedComponentOutput, UnusedComponentProp,
+    UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedLoadDataKey,
+    UnusedMember, UnusedServerAction, UnusedSvelteEvent,
 };
 
 #[cfg(test)]
@@ -78,6 +83,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+    )]
     fn results_total_counts_all_types() {
         let mut results = AnalysisResults::default();
         results

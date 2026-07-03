@@ -41,63 +41,107 @@ pub fn extract_mdx_statements(source: &str) -> String {
     extract_mdx_source(source).body
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "brace counts per line are bounded by line length"
-)]
 fn extract_mdx_source(source: &str) -> ExtractionResult {
-    let mut result = ExtractionResult::default();
-    let mut statements = Vec::new();
-    let mut in_multiline = false;
-    let mut brace_depth: i32 = 0;
-    let mut code_fence: Option<CodeFence> = None;
-
+    let mut scanner = MdxStatementScanner::default();
     for (line_start, line) in lines_with_offsets(source) {
+        scanner.scan_line(line_start, line);
+    }
+    scanner.into_extraction()
+}
+
+#[derive(Default)]
+struct MdxStatementScanner<'a> {
+    statements: Vec<(usize, &'a str)>,
+    in_multiline: bool,
+    brace_depth: i32,
+    code_fence: Option<CodeFence>,
+}
+
+impl<'a> MdxStatementScanner<'a> {
+    fn scan_line(&mut self, line_start: usize, line: &'a str) {
         let trimmed = line.trim();
 
-        if let Some(fence) = code_fence {
+        if self.consume_code_fence(trimmed) {
+            return;
+        }
+
+        if self.in_multiline {
+            self.push_multiline_line(line_start, line, trimmed);
+            return;
+        }
+
+        if is_statement_start(trimmed) {
+            self.push_statement_start(line_start, line, trimmed);
+        }
+    }
+
+    fn consume_code_fence(&mut self, trimmed: &str) -> bool {
+        if let Some(fence) = self.code_fence {
             if fence.is_closing_line(trimmed) {
-                code_fence = None;
+                self.code_fence = None;
             }
-            continue;
+            return true;
         }
 
-        if !in_multiline && let Some(fence) = CodeFence::opening(trimmed) {
-            code_fence = Some(fence);
-            continue;
+        if self.in_multiline {
+            return false;
         }
 
-        if in_multiline {
-            statements.push((line_start, line));
-            brace_depth += trimmed.chars().filter(|&c| c == '{').count() as i32;
-            brace_depth -= trimmed.chars().filter(|&c| c == '}').count() as i32;
-            if brace_depth <= 0
-                || trimmed.ends_with(';')
-                || trimmed.contains(" from ")
-                || trimmed.contains(" from'")
-                || trimmed.contains(" from\"")
-            {
-                in_multiline = false;
-                brace_depth = 0;
-            }
-        } else if trimmed.starts_with("import ")
-            || trimmed.starts_with("import{")
-            || trimmed.starts_with("export ")
-            || trimmed.starts_with("export{")
-        {
-            statements.push((line_start, line));
-            brace_depth = trimmed.chars().filter(|&c| c == '{').count() as i32
-                - trimmed.chars().filter(|&c| c == '}').count() as i32;
-            if brace_depth > 0 && !trimmed.contains(" from ") {
-                in_multiline = true;
-            }
+        if let Some(fence) = CodeFence::opening(trimmed) {
+            self.code_fence = Some(fence);
+            return true;
+        }
+
+        false
+    }
+
+    fn push_statement_start(&mut self, line_start: usize, line: &'a str, trimmed: &str) {
+        self.statements.push((line_start, line));
+        self.brace_depth = brace_delta(trimmed);
+        if self.brace_depth > 0 && !has_spaced_source_clause(trimmed) {
+            self.in_multiline = true;
         }
     }
 
-    for (line_start, line) in statements {
-        result.push_mapped(line, line_start);
+    fn push_multiline_line(&mut self, line_start: usize, line: &'a str, trimmed: &str) {
+        self.statements.push((line_start, line));
+        self.brace_depth += brace_delta(trimmed);
+        if self.brace_depth <= 0 || trimmed.ends_with(';') || has_any_source_clause(trimmed) {
+            self.in_multiline = false;
+            self.brace_depth = 0;
+        }
     }
-    result
+
+    fn into_extraction(self) -> ExtractionResult {
+        let mut result = ExtractionResult::default();
+        for (line_start, line) in self.statements {
+            result.push_mapped(line, line_start);
+        }
+        result
+    }
+}
+
+fn is_statement_start(trimmed: &str) -> bool {
+    trimmed.starts_with("import ")
+        || trimmed.starts_with("import{")
+        || trimmed.starts_with("export ")
+        || trimmed.starts_with("export{")
+}
+
+fn brace_delta(line: &str) -> i32 {
+    let opens = line.chars().filter(|&ch| ch == '{').count();
+    let closes = line.chars().filter(|&ch| ch == '}').count();
+    let opens = i32::try_from(opens).unwrap_or(i32::MAX);
+    let closes = i32::try_from(closes).unwrap_or(i32::MAX);
+    opens.saturating_sub(closes)
+}
+
+fn has_spaced_source_clause(line: &str) -> bool {
+    line.contains(" from ")
+}
+
+fn has_any_source_clause(line: &str) -> bool {
+    has_spaced_source_clause(line) || line.contains(" from'") || line.contains(" from\"")
 }
 
 fn lines_with_offsets(source: &str) -> impl Iterator<Item = (usize, &str)> {
@@ -220,6 +264,25 @@ mod tests {
     fn extracts_export_const() {
         let result = extract_mdx_statements("export const meta = { title: 'Hello' }\n\n# Title\n");
         assert!(result.contains("export const meta"));
+    }
+
+    #[test]
+    fn multiline_export_const_with_object_literal() {
+        let result = extract_mdx_statements(
+            "export const meta = {\n  title: 'Hello',\n  draft: false\n};\n\n# Title\n",
+        );
+        assert!(result.contains("export const meta"));
+        assert!(result.contains("title: 'Hello'"));
+        assert!(!result.contains("# Title"));
+    }
+
+    #[test]
+    fn multiline_export_const_closed_by_bare_brace() {
+        let result =
+            extract_mdx_statements("export const meta = {\n  title: 'Hello'\n}\n\n# Title\n");
+        assert!(result.contains("export const meta"));
+        assert!(result.contains("title: 'Hello'"));
+        assert!(!result.contains("# Title"));
     }
 
     #[test]

@@ -16,6 +16,49 @@ pub(in crate::analyze) fn is_html_file(path: &std::path::Path) -> bool {
         .is_some_and(|ext| ext == "html")
 }
 
+/// Compiled glob set over the test / spec / story / fixture subset of
+/// [`PRODUCTION_EXCLUDE_PATTERNS`](crate::discover::PRODUCTION_EXCLUDE_PATTERNS),
+/// built once. `literal_separator(true)` so `*` cannot cross a path separator,
+/// matching production-mode exclusion semantics. The tooling-config patterns
+/// (`*.config.*`, dot-prefixed) are intentionally excluded here: this predicate
+/// answers "is this a TEST / SPEC file", not "is this any low-value anchor"
+/// (the security layer's `is_low_value_anchor` adds the config-file arm on top).
+fn test_or_spec_globset() -> &'static globset::GlobSet {
+    use std::sync::OnceLock;
+    static SET: OnceLock<globset::GlobSet> = OnceLock::new();
+    SET.get_or_init(|| {
+        let mut builder = globset::GlobSetBuilder::new();
+        for pattern in crate::discover::PRODUCTION_EXCLUDE_PATTERNS {
+            // Skip the tooling-config arms (`*.config.*` and the `**/.*.{js,ts,..}`
+            // dotfile rows); they are not test/spec files.
+            if pattern.starts_with("*.config.") || pattern.starts_with("**/.*") {
+                continue;
+            }
+            if let Ok(glob) = globset::GlobBuilder::new(pattern)
+                .literal_separator(true)
+                .build()
+            {
+                builder.add(glob);
+            }
+        }
+        builder
+            .build()
+            .unwrap_or_else(|_| globset::GlobSet::empty())
+    })
+}
+
+/// Check if a path is a test / spec / story / fixture file (a `*.test.*`,
+/// `*.spec.*`, `*.stories.*`, `__tests__/`, `test/`, `tests/`, etc. location).
+///
+/// Reuses the canonical [`PRODUCTION_EXCLUDE_PATTERNS`](crate::discover::PRODUCTION_EXCLUDE_PATTERNS)
+/// test/spec subset so the definition never drifts from production-mode
+/// exclusion. The match runs on the path with separators forward-slash
+/// normalized so the `**/` globs anchor consistently across platforms.
+pub(in crate::analyze) fn is_test_or_spec_file(path: &std::path::Path) -> bool {
+    let normalized = path.to_string_lossy().replace('\\', "/");
+    test_or_spec_globset().is_match(&normalized)
+}
+
 /// Check if a file is a configuration file consumed by tooling, not via imports.
 ///
 /// These files should never be reported as unused because they are loaded by
@@ -93,7 +136,7 @@ pub(in crate::analyze) fn is_config_file(path: &std::path::Path) -> bool {
 ///
 /// A barrel file like `index.ts` that only contains `export { Foo } from './source'`
 /// lines serves an organizational purpose. If the source modules are reachable,
-/// the barrel file should not be reported as unused — consumers may have bypassed
+/// the barrel file should not be reported as unused , consumers may have bypassed
 /// it with direct imports, but the barrel still provides valid re-exports.
 pub(in crate::analyze) fn is_barrel_with_reachable_sources(
     module: &crate::graph::ModuleNode,
@@ -145,6 +188,47 @@ mod tests {
         assert!(!is_declaration_file(std::path::Path::new("component.tsx")));
         assert!(!is_declaration_file(std::path::Path::new("utils.js")));
         assert!(!is_declaration_file(std::path::Path::new("styles.d.css")));
+    }
+
+    #[test]
+    fn test_or_spec_file_matches_test_and_spec() {
+        assert!(is_test_or_spec_file(std::path::Path::new(
+            "src/components/Button.test.tsx"
+        )));
+        assert!(is_test_or_spec_file(std::path::Path::new(
+            "src/utils/format.spec.ts"
+        )));
+        assert!(is_test_or_spec_file(std::path::Path::new(
+            "src/__tests__/Button.tsx"
+        )));
+        assert!(is_test_or_spec_file(std::path::Path::new("test/setup.ts")));
+        assert!(is_test_or_spec_file(std::path::Path::new(
+            "tests/e2e/flow.ts"
+        )));
+        assert!(is_test_or_spec_file(std::path::Path::new(
+            "src/Page.stories.tsx"
+        )));
+        assert!(is_test_or_spec_file(std::path::Path::new(
+            "src/__fixtures__/data.ts"
+        )));
+    }
+
+    /// Tooling config files and ordinary source are NOT test/spec files: this
+    /// predicate is narrower than the security `is_low_value_anchor` (which adds
+    /// the config-file arm on top).
+    #[test]
+    fn test_or_spec_file_excludes_config_and_source() {
+        assert!(!is_test_or_spec_file(std::path::Path::new(
+            "src/components/Button.tsx"
+        )));
+        assert!(!is_test_or_spec_file(std::path::Path::new(
+            "vite.config.ts"
+        )));
+        assert!(!is_test_or_spec_file(std::path::Path::new("index.ts")));
+        // A `testimonials` directory is not a `test/` directory (segment-anchored).
+        assert!(!is_test_or_spec_file(std::path::Path::new(
+            "src/testimonials/Card.tsx"
+        )));
     }
 
     #[test]
@@ -272,7 +356,7 @@ mod tests {
     }
 
     /// Dotenv files (`.env`, `.env.local`, `.env.production`) are NOT config files
-    /// in this context — they are environment variable files, not JS/TS tool configs.
+    /// in this context , they are environment variable files, not JS/TS tool configs.
     #[test]
     fn not_config_file_dotenv_files() {
         assert!(!is_config_file(std::path::Path::new(".env")));
@@ -397,13 +481,15 @@ mod tests {
                 resolved_dynamic_imports: vec![],
                 resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
-                whole_object_uses: vec![],
+                semantic_facts: Box::default(),
+                whole_object_uses: Box::default(),
                 has_cjs_exports: false,
                 has_angular_component_template_url: false,
                 unused_import_bindings: rustc_hash::FxHashSet::default(),
                 type_referenced_import_bindings: vec![],
                 value_referenced_import_bindings: vec![],
                 namespace_object_aliases: vec![],
+                exported_factory_returns: Box::default(),
             })
             .collect();
 
@@ -439,6 +525,7 @@ mod tests {
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span: oxc_span::Span::new(10, 50),
             references: vec![],
             members: vec![],
@@ -487,6 +574,7 @@ mod tests {
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
+            expected_unused_reason: None,
             span: oxc_span::Span::new(0, 0),
             references: vec![],
             members: vec![],

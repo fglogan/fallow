@@ -16,6 +16,7 @@
 <p align="center">
   <a href="https://github.com/fglogan/genesis-plow/actions/workflows/ci.yml"><img src="https://github.com/fglogan/genesis-plow/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/fglogan/genesis-plow/actions/workflows/coverage.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/fglogan/genesis-plow/badges/coverage.json" alt="Coverage"></a>
+  <a href="https://app.codspeed.io/fglogan/genesis-plow?utm_source=badge"><img src="https://img.shields.io/endpoint?url=https://codspeed.io/badge.json" alt="CodSpeed"></a>
   <a href="https://github.com/fglogan/genesis-plow/stargazers"><img src="https://img.shields.io/github/stars/fglogan/genesis-plow?style=flat&label=stars&color=blue" alt="GitHub stars"></a>
   <a href="https://www.npmjs.com/package/plow"><img src="https://img.shields.io/npm/v/plow.svg" alt="npm"></a>
   <a href="https://www.npmjs.com/package/plow"><img src="https://img.shields.io/npm/dm/plow.svg" alt="npm downloads"></a>
@@ -84,7 +85,7 @@ For cleanup-specific findings:
 npx plow dead-code
 ```
 
-122 framework plugins. No Node.js runtime required for static analysis. No config needed for the first run.
+123 framework plugins. No Node.js runtime required for static analysis. No config needed for the first run.
 
 ## What is Plow?
 
@@ -177,7 +178,7 @@ Functions, files, and packages that combine complexity, churn, size, coupling, a
 
 ### Duplication
 
-Clone families and duplicated implementation patterns that increase maintenance cost. Four detection modes from exact token match to semantic clones with renamed variables.
+Clone families and duplicated implementation patterns that increase maintenance cost. Four detection modes from exact token match to semantic clones with renamed variables. Covers JS, TS, CSS-family stylesheets, Vue and Svelte template and style regions, and Astro template and style regions.
 
 ### Architecture
 
@@ -189,7 +190,7 @@ Unused dependencies, unresolved imports, duplicate exports, unlisted imports, ty
 
 ### Cleanup opportunities
 
-Unused files, unused exports, unused types, unused enum members, unused class members, unused Pinia store members, unprovided Vue/Svelte injects, stale suppression comments, and code paths that appear safe to review for removal. Opt-in API hygiene checks such as private type leaks live here too.
+Unused files, unused exports, unused types, unused enum members, unused class members, unused Pinia store members, unprovided Vue/Svelte/Angular injects, unused Angular component inputs and outputs, Svelte component events dispatched but listened to nowhere, stale suppression comments, and code paths that appear safe to review for removal. Opt-in API hygiene checks such as private type leaks live here too.
 
 ### Runtime intelligence (optional)
 
@@ -230,6 +231,7 @@ Common agent workflow:
 ```bash
 npx plow audit --format json
 npx plow --format json
+npx plow inspect --file src/api.ts --format json
 npx plow --coverage coverage/coverage-final.json --format json
 npx plow fix --dry-run --format json
 ```
@@ -238,7 +240,7 @@ For full adoption instead of one-off review, see the [Plow compliance happy path
 
 See [Agent integration](https://docs.genesis-plow.dev/integrations/mcp) for MCP setup and the full list of structured tools.
 
-The MCP server includes `inspect_target` for agents that need one evidence bundle for a file or exported symbol, combining trace, dead-code, duplication, complexity, and security signals without inventing a new analysis pass.
+Use `plow inspect --file <path>` or `plow inspect --symbol <file>:<export>` when an agent needs one evidence bundle before editing. The MCP server exposes the same flow as `inspect_target`, combining trace, dead-code, duplication, complexity, and security signals without inventing a new analysis pass.
 
 The MCP server also exposes `code_execute`, a bounded read-only Code Mode tool for composing multiple plow analysis calls in one JavaScript snippet. It can call analysis helpers such as `plow.projectInfo`, `plow.audit`, and `plow.checkHealth`, but it does not expose mutating fix tools.
 
@@ -268,10 +270,16 @@ Plow answers those questions with deterministic, graph-based analysis and struct
 ```bash
 plow                       # Full codebase analysis: cleanup + duplication + health
 plow audit                 # Audit changed files (verdict: pass/warn/fail)
+plow review                # Advisory review brief over changed files (always exits 0)
+plow decision-surface      # Ranked structural decisions a change embeds
+plow trace src/utils.ts:formatDate  # Symbol-level call chains (callers up, callees down)
 plow health                # Complexity + refactor targets
+plow health --css          # + structural CSS analytics (specificity, !important, nesting)
 plow dupes                 # Repeated logic
 plow dead-code             # Cleanup candidates
 plow security              # Security candidates, hardcoded-secret needs explicit category include
+plow security survivors    # Render verifier-filtered survivor candidates
+plow security blind-spots  # Group unresolved security callees
 plow explain unused-export # Explain a rule without analyzing
 plow watch                 # Re-analyze on file changes
 plow fix --dry-run         # Preview automatic cleanup
@@ -291,7 +299,7 @@ Combined mode (`plow`) and `plow audit` support per-analysis production mode. Pr
 
 Use `--production-health`, `--production-dead-code`, or `--production-dupes` for one invocation, or `PLOW_PRODUCTION_HEALTH=true` and related env vars in CI. The global `--production` flag still enables production mode for every analysis.
 
-`plow security` remains opt-in and ranks reachable active-code candidates first. It includes source-backed ReDoS regex candidates for risky literal patterns applied to untrusted input, while safe literal patterns and source-free uses stay quiet. When a sink is also reported as dead code, JSON includes `dead_code` context and the command points agents toward deleting the unused file or removing the unused export before hardening that sink. Use `plow security --gate new --changed-since <ref>` for changed-line candidate gating, or `plow security --gate newly-reachable --changed-since <ref>` when an existing sink becoming entry-reachable should block the change for review. Use the [Security agent verification recipe](docs/security-agent-verification.md) to turn raw candidates into verifier-filtered survivors outside plow core.
+`plow security` remains opt-in and ranks reachable active-code candidates first. It includes source-backed ReDoS regex candidates for risky literal patterns applied to untrusted input, while safe literal patterns and source-free uses stay quiet. When a sink is also reported as dead code, JSON includes `dead_code` context and the command points agents toward deleting the unused file or removing the unused export before hardening that sink. Use `plow security --gate new --changed-since <ref>` for changed-line candidate gating, or `plow security --gate newly-reachable --changed-since <ref>` when an existing sink becoming entry-reachable should block the change for review. Use `plow security survivors --candidates plow-security.json --verdicts verdicts.json` to render verifier-filtered survivors, and `plow security blind-spots` to group unresolved callee blind spots. See the [Security agent verification recipe](docs/security-agent-verification.md) for the full workflow.
 
 Precedence (highest to lowest): CLI flags, per-analysis env var, global `PLOW_PRODUCTION`, config. CLI flags only enable; env vars and config can also disable. Worked examples:
 
@@ -312,7 +320,7 @@ plow --production
 
 ## Cleanup opportunities
 
-Cleanup opportunities are code that no longer appears to carry product value: unused files, exports, dependencies, types, enum members, class members, Pinia store members, unprovided Vue/Svelte injects, unresolved imports, unlisted dependencies, duplicate exports, circular dependencies (including cross-package cycles in monorepos), boundary violations, type-only dependencies, test-only production dependencies, and stale suppression comments. Workspace package dependencies are checked like external packages, so unused or undeclared internal package edges are visible in monorepos. Entry points are auto-detected from package.json fields, package scripts, framework conventions, and plugin patterns. Public class members on classes exposed from non-private package entry points or exportless source subpath indexes are treated as library API surface, while reachable internal classes still get member-level checks. Arrow-wrapped dynamic imports (`React.lazy`, `loadable`, `defineAsyncComponent`) and proven local `child_process.fork()` runner targets are tracked as references. Script multiplexers (`concurrently`, `npm-run-all`) are analyzed to discover transitive script dependencies. JSDoc tags (`@public`, `@internal`, `@beta`, `@alpha`, `@expected-unused`) control export visibility. Private type leaks are currently opt-in API hygiene findings via `--private-type-leaks` or the `private-type-leaks` rule.
+Cleanup opportunities are code that no longer appears to carry product value: unused files, exports, dependencies, types, enum members, class members, Pinia store members, unprovided Vue/Svelte/Angular injects, unused Angular component inputs and outputs, Svelte component events listened to nowhere, unresolved imports, unlisted dependencies, duplicate exports, circular dependencies (including cross-package cycles in monorepos), boundary violations, type-only dependencies, test-only production dependencies, and stale suppression comments. Workspace package dependencies are checked like external packages, so unused or undeclared internal package edges are visible in monorepos. Entry points are auto-detected from package.json fields, package scripts, framework conventions, and plugin patterns. Public class members on classes exposed from non-private package entry points or exportless source subpath indexes are treated as library API surface, while reachable internal classes still get member-level checks. Arrow-wrapped dynamic imports (`React.lazy`, `loadable`, `defineAsyncComponent`) and proven local `child_process.fork()` runner targets are tracked as references. Script multiplexers (`concurrently`, `npm-run-all`) are analyzed to discover transitive script dependencies. JSDoc tags (`@public`, `@internal`, `@beta`, `@alpha`, `@expected-unused`) control export visibility. Private type leaks are currently opt-in API hygiene findings via `--private-type-leaks` or the `private-type-leaks` rule.
 
 ```bash
 plow dead-code                          # All dead code issues
@@ -333,7 +341,7 @@ plow dead-code --group-by section       # Group by GitLab CODEOWNERS section
 
 ## Duplication
 
-Finds copy-pasted code blocks across your codebase. Suffix-array algorithm -- no quadratic pairwise comparison. Repeated atomic function calls are filtered by default, so long calls to an existing shared abstraction do not show up as refactoring work.
+Finds copy-pasted code blocks across your codebase, including CSS-family stylesheets and authored template/style regions in Vue, Svelte, and Astro files. Suffix-array algorithm -- no quadratic pairwise comparison. Repeated atomic function calls are filtered by default, so long calls to an existing shared abstraction do not show up as refactoring work.
 
 ```bash
 plow dupes                              # Default (mild mode)
@@ -341,6 +349,7 @@ plow dupes --mode semantic              # Catch clones with renamed variables
 plow dupes --skip-local                 # Only cross-directory duplicates
 plow dupes --group-by owner             # Partition clone groups by CODEOWNERS team
 plow dupes --group-by directory         # Partition clone groups by directory
+plow dupes --format compact             # One parseable line per clone instance
 plow dupes --trace src/utils.ts:42      # Show all clones of code at this location
 plow dupes --trace dup:7f3a2c1e         # Deep-dive a clone group by its dup:<id> fingerprint
 ```
@@ -352,7 +361,7 @@ Four detection modes: **strict** (exact tokens), **mild** (default, AST-based), 
 
 ## Complexity
 
-Surfaces the most complex functions in your codebase and identifies where to spend refactoring effort. Angular templates are included as synthetic `<template>` entries when they use control flow or complex bindings, both for external `templateUrl` files and inline `@Component({ template: \`...\` })` decorators.
+Surfaces the most complex functions in your codebase and identifies where to spend refactoring effort. Angular, Vue, and Svelte templates are included as synthetic `<template>` entries when they use control flow or complex bindings, covering Angular external `templateUrl` files and inline `@Component({ template: \`...\` })` decorators as well as the `<template>` block of `.vue` and `.svelte` single-file components.
 
 ```bash
 plow health                             # Functions/templates exceeding thresholds
@@ -691,6 +700,7 @@ The GitLab CI template can post rich comments directly on merge requests -- summ
 | `PLOW_GITLAB_BASE_SHA` / `PLOW_GITLAB_START_SHA` / `PLOW_GITLAB_HEAD_SHA` | `""` | Optional overrides for the GitLab MR `diff_refs` used to build inline discussion positions |
 | `PLOW_SCRIPTS_REF` | `""` | Pinned tag or commit for remote MR-integration scripts; leave empty to prefer vendored local `ci/` + `action/` scripts |
 | `PLOW_VERSION` | `""` | Plow version to install. Empty reads the project's `package.json` `plow` dependency, then falls back to `latest`; set explicitly to override the local pin |
+| `PLOW_SKIP_INSTALL` | `""` | Set to `"true"` to skip `npm install -g plow` and use the `plow` already resolvable on `PATH` (for example a pnpm-catalog pin you expose by adding its `node_modules/.bin` to `PATH`, or a global install). The job fails fast if no `plow` is found. Lets you run the template's MR feedback against your own pinned binary and base `image:` |
 
 In MR pipelines, `--changed-since` is set automatically to scope analysis to changed files, and the comment / review scripts derive a unified diff so inline discussions stay on touched lines by default. Plow edits sticky comments in place and fingerprints inline review comments so repeated runs can skip duplicates. `PLOW_SUMMARY_SCOPE=diff` keeps the sticky summary focused too: a pre-existing unused dependency in an unrelated package is hidden, while a newly added unused dependency in a changed `package.json` remains visible. If the diff cannot be fetched or read, plow keeps the existing fail-open behavior and reports all findings.
 
@@ -706,6 +716,19 @@ GitLab setup gotchas:
 - The template sets `GIT_DEPTH: "0"` so `--changed-since` can diff against the MR base SHA without shallow-clone ambiguity.
 - For private GitLab npm registries, create `.npmrc` during the job with `${CI_PROJECT_ID}` and `${CI_JOB_TOKEN}` rather than committing tokens.
 - For pnpm projects with `minimumReleaseAge`, add `plow` and `@plow-cli/*` to `minimumReleaseAgeExclude` when you need to consume a just-published plow release immediately.
+- To run the template against a plow you install yourself (e.g. a pnpm-catalog pin), set `PLOW_SKIP_INSTALL: "true"`, override `image:` to your base image, and make sure your install step leaves `plow` resolvable on the job shell's `PATH`. A bare `pnpm install`/`npm install` only writes `node_modules/.bin/plow`, which GitLab does **not** add to `PATH` automatically, so prepend it yourself. A job that `extends: .plow` and defines its own `before_script` **replaces** the template's `before_script` (GitLab does not merge them), so compose with `!reference` to keep the template's install + script-prep block:
+
+  ```yaml
+  plow:
+    extends: .plow
+    before_script:
+      - export PATH="$CI_PROJECT_DIR/node_modules/.bin:$PATH"
+      - !reference [.plow, before_script]
+    variables:
+      PLOW_SKIP_INSTALL: "true"
+  ```
+
+  The job then skips `npm install -g plow` and runs your exact binary, so CI matches your local lint gate. If you also enable `PLOW_COMMENT`/`PLOW_REVIEW` and your binary is a dev build whose `--version` is not an exact release (e.g. `2.3.0-dev`), pin `PLOW_SCRIPTS_REF` to a real tag or vendor `ci/scripts/` so the MR-integration scripts can still be fetched.
 
 ```yaml
 # .gitlab-ci.yml -- full example with rich MR comments
@@ -767,6 +790,8 @@ Works out of the box. When you need to customize, create `.plowrc.json` or run `
   }
 }
 ```
+
+See [Environment variables](docs/environment-variables.md) for the full list.
 
 Plow recognizes four config file names. Precedence is first-match-wins per
 directory, walking up to the workspace root:
@@ -859,7 +884,7 @@ Each matching call reports as a `boundary_call_violations` finding naming the wr
 
 Forbidden-call findings inherit the `boundary-violation` rule, which defaults to `error` and fails CI on the first matching call. For a staged rollout, start with `"rules": { "boundary-violation": "warn" }` while you triage existing violations, then switch back to `error` to enforce.
 
-To encode project policy that is not tied to architecture zones, list declarative rule packs. A rule pack is a standalone JSON or JSONC file of `banned-call` and `banned-import` rules, loaded as pure data (no project code ever executes):
+To encode project policy that is not tied to architecture zones, list declarative rule packs. A rule pack is a standalone JSON or JSONC file of `banned-call`, `banned-import`, and `banned-effect` rules, loaded as pure data (no project code ever executes):
 
 ```jsonc
 // .plowrc.json
@@ -884,12 +909,18 @@ To encode project policy that is not tied to architecture zones, list declarativ
       "kind": "banned-import",
       "specifiers": ["moment"],
       "message": "Use date-fns."
+    },
+    {
+      "id": "no-network",
+      "kind": "banned-effect",
+      "effects": ["network"],
+      "message": "Keep this package side-effect free."
     }
   ]
 }
 ```
 
-Matches report as `policy-violation` findings identified by `<pack>/<rule-id>` across every output format. `banned-call` matching is segment-aware and import-resolved like `boundaries.calls.forbidden`, so `child_process.*` covers named, namespace, and default imports from `child_process` and `node:child_process`; bare patterns like `fetch` match globals by their written path. `banned-import` matches the RAW specifier segment-aware: `moment` covers `moment` and `moment/locale/nl` but never `moment-timezone`, and aliased or rewritten specifiers (for example Deno-style `npm:moment`) are not matched, so list the form your code actually writes. Rules scope with optional `files` / `exclude` globs, skip type-only imports with `"ignoreTypeOnly": true`, and carry an optional per-rule `severity`. The `rules."policy-violation"` master defaults to `warn` so a new pack never hard-fails CI on its first run; opt individual rules up with `"severity": "error"` once triaged (`off` on the master is a kill switch for the whole evaluator). The exit-code gate reads the effective per-finding severity, so one error-severity rule fails the run even under a warn master. Suppress one rule with `// plow-ignore-next-line policy-violation:<pack>/<rule-id>` or `// plow-ignore-file policy-violation:<pack>/<rule-id>`. Use bare `policy-violation` only when you intend to suppress every rule-pack finding at that line or file scope. Pack names and rule ids must use ASCII letters, digits, `.`, `_`, or `-` so scoped tokens are unambiguous. When several rules in scope could match the same usage, `banned-call` reports one finding per unique callee path (the first applicable rule in config order wins, mirroring `boundaries.calls.forbidden`), while `banned-import` reports one finding per matching rule, since each rule carries its own message and severity. Keep pack files in a committed directory such as `rule-packs/`; `.plow/` is the gitignored cache directory, so packs stored there silently vanish from teammates' checkouts. Run `plow rule-pack-schema` to print the pack JSON Schema for editor autocomplete; invalid packs (unknown rule kind, missing file, inert pattern, ambiguous names, duplicate ids) fail config load instead of silently enforcing nothing. Rule packs are and will stay pure data: if a future version ever adds executable checks, they will sit behind an explicit trust opt-in, never default-on.
+Matches report as `policy-violation` findings identified by `<pack>/<rule-id>` across every output format. `banned-call` matching is segment-aware and import-resolved like `boundaries.calls.forbidden`, so `child_process.*` covers named, namespace, and default imports from `child_process` and `node:child_process`; bare patterns like `fetch` match globals by their written path. `banned-import` matches the RAW specifier segment-aware: `moment` covers `moment` and `moment/locale/nl` but never `moment-timezone`, and aliased or rewritten specifiers (for example Deno-style `npm:moment`) are not matched, so list the form your code actually writes. `banned-effect` matches call sites whose callee is known by the internal security catalogue and whose catalogue row carries one of the listed effects: `pure`, `read`, `write`, `network`, `storage`, `process`, `shell`, `crypto`, `randomness`, `dom`, `database`, `framework-callback`, or `unknown`. Effect matching uses the same written plus import-resolved canonical callee path as `banned-call`; framework-gated catalogue rows only apply when the project declares the enabling dependency. Rules scope with optional `files` / `exclude` globs, skip type-only imports with `"ignoreTypeOnly": true`, and carry an optional per-rule `severity`. The `rules."policy-violation"` master defaults to `warn` so a new pack never hard-fails CI on its first run; opt individual rules up with `"severity": "error"` once triaged (`off` on the master is a kill switch for the whole evaluator). The exit-code gate reads the effective per-finding severity, so one error-severity rule fails the run even under a warn master. Suppress one rule with `// plow-ignore-next-line policy-violation:<pack>/<rule-id>` or `// plow-ignore-file policy-violation:<pack>/<rule-id>`. Use bare `policy-violation` only when you intend to suppress every rule-pack finding at that line or file scope. Pack names and rule ids must use ASCII letters, digits, `.`, `_`, or `-` so scoped tokens are unambiguous. When several rules in scope could match the same usage, `banned-call` and `banned-effect` report one finding per unique callee path (the first applicable rule in config order wins, mirroring `boundaries.calls.forbidden`), while `banned-import` reports one finding per matching rule, since each rule carries its own message and severity. Keep pack files in a committed directory such as `rule-packs/`; `.plow/` is the gitignored cache directory, so packs stored there silently vanish from teammates' checkouts. Run `plow rule-pack-schema` to print the pack JSON Schema for editor autocomplete; invalid packs (unknown rule kind, missing file, inert pattern, ambiguous names, duplicate ids) fail config load instead of silently enforcing nothing. Rule packs are and will stay pure data: if a future version ever adds executable checks, they will sit behind an explicit trust opt-in, never default-on.
 
 Run `plow list --boundaries` to inspect the expanded rules. TOML also supported (`plow init --toml`). The init command auto-detects your project structure (monorepo layout, frameworks, existing config) and generates a tailored config. It also adds `.plow/` to your `.gitignore` (cache and local data). Use `plow init --agents` to scaffold a starter `AGENTS.md` with project-specific guidance for coding agents. Scaffold a pre-commit `plow audit` hook with `plow hooks install --target git`; the hook uses the current branch upstream as its base and falls back to `--branch` (or the detected default branch) when no upstream is set. For agent gates, use `plow hooks install --target agent`. Migrating from knip or jscpd? Run `plow migrate`.
 
@@ -899,7 +930,7 @@ See the [full configuration reference](https://docs.genesis-plow.dev/configurati
 
 ## Framework plugins
 
-122 built-in plugins detect entry points, convention exports, config-defined aliases, and template-visible usage for your framework automatically.
+123 built-in plugins detect entry points, convention exports, config-defined aliases, and template-visible usage for your framework automatically.
 
 | Category | Plugins |
 |---|---|
@@ -922,7 +953,7 @@ Plow is not an AI assistant. It is the deterministic codebase intelligence layer
 
 - **Editor integrations** -- VS Code extension, Zed extension, and Neovim LSP setup ([editors](https://github.com/fglogan/genesis-plow/tree/main/editors))
 - **LSP server** -- real-time diagnostics, hover info, code actions, Code Lens with reference counts
-- **Agent Skill + MCP server** -- version-matched AI agent guidance ships in the npm package, with MCP integration for Claude Code, Codex, Cursor, Windsurf, and other agents ([plow-skills](https://github.com/fglogan/genesis-plow-skills))
+- **Agent Skill + MCP server** -- version-matched AI agent guidance ships in the npm package, with MCP integration for Claude Code, Codex, Cursor, Windsurf, and other agents ([plow-skills](https://github.com/plow-rs/plow-skills))
 - **MCP Code Mode** -- `code_execute` composes read-only analysis calls in a bounded JavaScript sandbox, without filesystem, network, shell, or fix-apply access
 - **JSON `actions` array** -- every issue in `--format json` output includes fix suggestions with `auto_fixable` flag, so agents can self-correct
 - **Typed output contract** -- `import type { CheckOutput } from "plow/types"` version-pinned to your installed CLI
@@ -930,56 +961,64 @@ Plow is not an AI assistant. It is the deterministic codebase intelligence layer
 
 ## Performance
 
-Benchmarked on real open-source projects, cold runs (no cache) so both tools work from scratch, median of 5 runs with 2 warmups. plow 2.91.0, knip 5.87.0 and 6.6.1, Apple M5, Node 22. Fastest tool per row in bold.
+Benchmarked on real open-source projects, cold runs (no cache) so each tool works from scratch. The benchmark scripts print exact tool and environment versions for reproducible local runs. Fastest tool per row in bold.
 
 ### Dead code: plow vs knip
 
-| Project | Files | plow | knip v5 | knip v6 |
-|:--------|------:|-------:|--------:|--------:|
-| [zod](https://github.com/colinhacks/zod) | 174 | **35ms** | 655ms | 328ms |
-| [preact](https://github.com/preactjs/preact) | 244 | **49ms** | 822ms | 2.05s |
-| [fastify](https://github.com/fastify/fastify) | 286 | **50ms** | 890ms | 225ms |
-| [vue/core](https://github.com/vuejs/core) | 522 | **142ms** | incomplete¹ | incomplete¹ |
-| [TanStack/query](https://github.com/TanStack/query) | 901 | **447ms** | 2.87s | 1.19s |
-| [vite](https://github.com/vitejs/vite) | 1,420 | **897ms** | incomplete¹ | incomplete¹ |
-| [astro](https://github.com/withastro/astro) | 2,859 | 2.19s | 3.74s | **1.29s** |
-| [svelte](https://github.com/sveltejs/svelte) | 3,337 | **779ms** | 2.80s | 978ms |
-| [TypeScript](https://github.com/microsoft/TypeScript) | 38,146 | 2.19s | 3.03s | **804ms** |
-| [next.js](https://github.com/vercel/next.js) | 20,552 | **3.35s** | incomplete¹ | incomplete¹ |
+| Project | Files | plow | knip | Faster |
+|:--------|------:|-------:|-----:|-------:|
+| [astro](https://github.com/withastro/astro) | 2,859 | 3.76s | **1.21s** | knip 3.1x |
+| [fastify](https://github.com/fastify/fastify) | 286 | **64ms** | 205ms | plow 3.2x |
+| [next.js](https://github.com/vercel/next.js) | 20,558 | 2.95s | errors* | plow only |
+| [preact](https://github.com/preactjs/preact) | 244 | **74ms** | 2.01s | plow 27.1x |
+| [TanStack/query](https://github.com/TanStack/query) | 901 | **560ms** | 1.04s | plow 1.9x |
+| [svelte](https://github.com/sveltejs/svelte) | 3,337 | **611ms** | 632ms | plow 1.0x |
+| [TypeScript](https://github.com/microsoft/TypeScript) | 38,146 | 2.22s | **736ms** | knip 3.0x |
+| [vite](https://github.com/vitejs/vite) | 1,420 | 595ms | errors* | plow only |
+| [vue/core](https://github.com/vuejs/core) | 522 | 138ms | errors* | plow only |
+| [zod](https://github.com/colinhacks/zod) | 174 | **47ms** | 279ms | plow 5.9x |
 
-plow is fastest on small-to-medium projects (roughly 5-18x faster than knip v5 and 2.7-9x than knip v6; preact is an outlier where knip v6 happens to be slow). On large projects, knip v6's Oxc-based parser is competitive or faster (astro, TypeScript), there, plow's edge is doing more in one tool, not raw dead-code speed. plow's persistent cache makes repeat (warm) runs faster again; the table uses the conservative cold numbers.
+\* knip exits without valid output on next.js, vite, and vue/core (it fails loading those projects' own config files); plow analyzes them.
 
-¹ knip loads and executes a project's config and JSON files to read plugin settings, which is its design and works well on apps. A few framework monorepos trip that up where plow (purely syntactic, no config execution) completes with no setup: **vite**, a workspace `package.json` carries a UTF-8 BOM that knip's `JSON.parse` rejects (a robustness gap, reportable upstream); **vue/core**, a private `sfc-playground/vite.config.ts` fails to load; **next.js**, the framework's own monorepo needs a build for its jest config and per-workspace entry config for its `dist`-published packages (this is the framework source, not a Next.js app, which is what knip's Next.js plugin targets). All are fixable with knip config; the point is plow needs none.
+plow is faster on the small-to-mid projects in this set (fastify, preact, query, svelte, zod), while current knip is faster on astro and TypeScript. plow's edge is doing more in one tool, not always raw dead-code speed, and it analyzes the three projects knip cannot load here. plow's persistent cache makes repeat (warm) runs faster again; the table uses the conservative cold numbers.
 
 ### Duplication: plow vs jscpd
 
-| Project | Files | plow | jscpd | Speedup |
-|:--------|------:|-------:|------:|--------:|
-| [preact](https://github.com/preactjs/preact) | 244 | **90ms** | 1.83s | 20x |
-| [fastify](https://github.com/fastify/fastify) | 286 | **100ms** | 1.57s | 16x |
-| [vue/core](https://github.com/vuejs/core) | 522 | **204ms** | 3.22s | 16x |
-| [TanStack/query](https://github.com/TanStack/query) | 901 | **173ms** | 1.28s | 7x |
-| [svelte](https://github.com/sveltejs/svelte) | 3,337 | **366ms** | 3.52s | 10x |
-| [next.js](https://github.com/vercel/next.js) | 20,552 | **3.87s** | 25.50s | 7x |
+Cold median of 3 measured runs. `Clone groups` and `Dup %` come from each tool's own report, so they are useful for scale but not a byte-for-byte equivalence check.
+
+| Project | Files | plow | jscpd | Faster | plow clone groups | plow dup % | jscpd clone groups | jscpd dup % |
+|:--------|------:|-------:|------:|-------:|--------------------:|-------------:|-------------------:|------------:|
+| [astro](https://github.com/withastro/astro) | 2,859 | 549ms | **189ms** | jscpd 2.9x | 1,242 | 16.3% | 1,494 | 9.7% |
+| [fastify](https://github.com/fastify/fastify) | 286 | 90ms | **64ms** | jscpd 1.4x | 1,128 | 39.0% | 1,131 | 23.5% |
+| [next.js](https://github.com/vercel/next.js) | 20,552 | 12.66s | **861ms** | jscpd 14.7x | 4,485 | 26.3% | 7,287 | 16.4% |
+| [preact](https://github.com/preactjs/preact) | 244 | 58ms | **49ms** | jscpd 1.2x | 368 | 20.2% | 421 | 12.3% |
+| [TanStack/query](https://github.com/TanStack/query) | 901 | 133ms | **96ms** | jscpd 1.4x | 1,084 | 32.7% | 1,237 | 19.4% |
+| [svelte](https://github.com/sveltejs/svelte) | 3,337 | 317ms | **172ms** | jscpd 1.8x | 528 | 13.6% | 658 | 9.1% |
+| [TypeScript](https://github.com/microsoft/TypeScript) | 38,146 | 13.45s | **4.58s** | jscpd 2.9x | 2,749 | 26.9% | 51,158 | 45.8% |
+| [vite](https://github.com/vitejs/vite) | 1,420 | 174ms | **74ms** | jscpd 2.3x | 219 | 13.6% | 260 | 5.1% |
+| [vue/core](https://github.com/vuejs/core) | 522 | 109ms | **78ms** | jscpd 1.4x | 864 | 15.7% | 696 | 6.9% |
+| [zod](https://github.com/colinhacks/zod) | 174 | 54ms | **53ms** | jscpd 1.0x | 78 | 94.1% | 140 | 49.6% |
+
+jscpd remains faster for raw duplication scanning on these projects. plow's duplication checker runs inside the broader audit flow, alongside dead code, dependency, complexity, CSS, framework, and security checks.
 
 No TypeScript compiler, no Node.js runtime needed to analyze your code. [Plow vs linters](https://docs.genesis-plow.dev/explanations/plow-vs-linters) | [Reproduce benchmarks](https://github.com/fglogan/genesis-plow/tree/main/benchmarks)
 
 ## Suppressing findings
 
 ```ts
-// plow-ignore-next-line unused-export
+// plow-ignore-next-line unused-export -- kept for plugin consumers
 export const keepThis = 1;
 
-// plow-ignore-next-line unused-export, complexity
+// plow-ignore-next-line unused-export, complexity -- public API shim
 export const publicComplexHelper = (value: number) => value;
 
-// plow-ignore-file
+// plow-ignore-file -- generated route map
 // Suppress all issues in this file
 ```
 
-Use a comma-separated issue-kind list when one line has multiple findings.
+Use a comma-separated issue-kind list when one line has multiple findings. The `-- <reason>` suffix is optional by default and is recorded in suppression hygiene output. Set `rules.require-suppression-reason` to `"warn"` or `"error"` to require a reason on every `plow-ignore-*` comment and `@expected-unused` tag.
 
-Also supports JSDoc visibility tags (`/** @public */`, `/** @internal */`, `/** @beta */`, `/** @alpha */`) to suppress unused export reports for library APIs consumed externally.
+Also supports JSDoc visibility tags (`/** @public */`, `/** @internal */`, `/** @beta */`, `/** @alpha */`) to suppress unused export reports for library APIs consumed externally. Use `/** @expected-unused -- <reason> */` when an export is intentionally unused today but should be reported once it becomes used.
 
 Set `ignoreExportsUsedInFile: true` when exported helpers should stay quiet while another symbol in the same file still references them, but should be reported once they become completely unreferenced. The `{ "type": true, "interface": true }` object form is accepted for knip parity; plow groups type aliases and interfaces under one issue, so both type-kind fields behave identically. References inside the export specifier itself (`export { foo }`, `export default foo`) do not count as same-file uses.
 

@@ -40,6 +40,86 @@ fn make_file_tokens(source: &str, count: usize) -> FileTokens {
     }
 }
 
+fn make_boundary_test_file(path: &str, has_boundary: bool) -> FileData {
+    let kind = if has_boundary {
+        TokenKind::Boundary("markup".to_string())
+    } else {
+        TokenKind::Identifier("value".to_string())
+    };
+    FileData {
+        path: PathBuf::from(path),
+        hashed_tokens: vec![HashedToken {
+            hash: 1,
+            original_index: 0,
+        }],
+        file_tokens: FileTokens {
+            tokens: vec![SourceToken {
+                kind,
+                span: Span::new(0, 1),
+            }],
+            atomic_invocation_spans: Vec::new(),
+            source: "x".to_string(),
+            line_count: 1,
+        },
+        atomic_invocation_spans: Vec::new(),
+    }
+}
+
+#[test]
+fn component_heavy_corpus_detects_boundary_ratio_at_threshold() {
+    let files = vec![
+        make_boundary_test_file("a.astro", true),
+        make_boundary_test_file("b.ts", false),
+        make_boundary_test_file("c.ts", false),
+        make_boundary_test_file("d.ts", false),
+        make_boundary_test_file("e.ts", false),
+    ];
+
+    let summary = summarize_boundaries(&files);
+    assert!(summary.is_component_heavy);
+    assert!(summary.has_any_boundary);
+}
+
+#[test]
+fn component_heavy_corpus_ignores_sparse_boundary_files() {
+    let mut files = vec![make_boundary_test_file("a.mdx", true)];
+    for index in 0..10 {
+        files.push(make_boundary_test_file(&format!("file{index}.ts"), false));
+    }
+
+    let summary = summarize_boundaries(&files);
+    assert!(!summary.is_component_heavy);
+    assert!(summary.has_any_boundary);
+}
+
+#[test]
+fn boundary_precheck_skips_plain_js_ts_corpus() {
+    let files = vec![
+        make_boundary_test_file("a.ts", false),
+        make_boundary_test_file("b.tsx", false),
+        make_boundary_test_file("c.js", false),
+        make_boundary_test_file("d.jsx", false),
+    ];
+
+    assert!(!files_may_have_boundaries(&files));
+}
+
+#[test]
+fn boundary_precheck_keeps_component_and_style_corpus() {
+    for path in [
+        "App.vue",
+        "Counter.svelte",
+        "page.astro",
+        "style.css",
+        "style.scss",
+        "style.sass",
+        "style.less",
+    ] {
+        let files = vec![make_boundary_test_file(path, false)];
+        assert!(files_may_have_boundaries(&files), "{path}");
+    }
+}
+
 #[test]
 fn empty_input_produces_empty_report() {
     let detector = CloneDetector::new(5, 1, false);
@@ -666,15 +746,40 @@ fn make_file_data(path: &str, source: &str, num_tokens: usize) -> FileData {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "test helper; thin wrapper bundling fixture inputs for clone-group extraction"
+)]
+fn extract_clone_groups_for_test(
+    sa: &[usize],
+    lcp: &[usize],
+    file_of: &[usize],
+    file_offsets: &[usize],
+    min_tokens: usize,
+    files: &[FileData],
+    focus_file_ids: Option<&[bool]>,
+) -> Vec<extraction::RawGroup> {
+    extraction::extract_clone_groups(&extraction::CloneGroupExtractionInput {
+        sa,
+        lcp,
+        file_of,
+        file_offsets,
+        min_tokens,
+        files,
+        focus_file_ids,
+        may_have_boundaries: files_may_have_boundaries(files),
+    })
+}
+
 #[test]
 fn extraction_empty_sa() {
-    let groups = extraction::extract_clone_groups(&[], &[], &[], &[], 3, &[], None);
+    let groups = extract_clone_groups_for_test(&[], &[], &[], &[], 3, &[], None);
     assert!(groups.is_empty());
 }
 
 #[test]
 fn extraction_single_suffix_no_groups() {
-    let groups = extraction::extract_clone_groups(&[0], &[0], &[0], &[0], 1, &[], None);
+    let groups = extract_clone_groups_for_test(&[0], &[0], &[0], &[0], 1, &[], None);
     assert!(groups.is_empty());
 }
 
@@ -689,7 +794,7 @@ fn extraction_below_min_tokens_no_groups() {
     let sa = suffix_array::build_suffix_array(&text);
     let lcp_arr = lcp::build_lcp(&text, &sa);
 
-    let groups = extraction::extract_clone_groups(
+    let groups = extract_clone_groups_for_test(
         &sa,
         &lcp_arr,
         &file_of,
@@ -713,7 +818,7 @@ fn extraction_skips_sentinel_positions() {
     let lcp_arr = lcp::build_lcp(&text, &sa);
 
     let groups =
-        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
+        extract_clone_groups_for_test(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
 
     for group in &groups {
         for &(fid, _offset) in &group.instances {
@@ -738,7 +843,7 @@ fn extraction_produces_valid_offsets() {
     let lcp_arr = lcp::build_lcp(&text, &sa);
 
     let groups =
-        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
+        extract_clone_groups_for_test(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
 
     for group in &groups {
         for &(fid, offset) in &group.instances {
@@ -768,7 +873,7 @@ fn extraction_removes_overlapping_same_file() {
     let lcp_arr = lcp::build_lcp(&text, &sa);
 
     let groups =
-        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
+        extract_clone_groups_for_test(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
 
     for group in &groups {
         let mut same_file: Vec<(usize, usize)> = group
@@ -803,7 +908,7 @@ fn extraction_at_least_two_instances() {
     let lcp_arr = lcp::build_lcp(&text, &sa);
 
     let groups =
-        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
+        extract_clone_groups_for_test(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
 
     for group in &groups {
         assert!(
@@ -1161,7 +1266,7 @@ fn pipeline_rank_concat_sa_lcp_roundtrip() {
     assert_eq!(lcp_arr[0], 0);
 
     let groups =
-        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 3, &files, None);
+        extract_clone_groups_for_test(&sa, &lcp_arr, &file_of, &file_offsets, 3, &files, None);
     assert!(
         !groups.is_empty(),
         "Should find clone group for shared [10,20,30]"
@@ -1194,7 +1299,7 @@ fn pipeline_no_false_positives_with_different_files() {
     let lcp_arr = lcp::build_lcp(&text, &sa);
 
     let groups =
-        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
+        extract_clone_groups_for_test(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
     assert!(
         groups.is_empty(),
         "Completely different files should produce no clone groups"

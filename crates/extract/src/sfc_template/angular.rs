@@ -9,12 +9,13 @@
 //! - `@let name = expr;` template-local variables (Angular 18+)
 //! - `| pipeName` pipe references
 //!
-//! Referenced identifiers are stored as `MemberAccess` entries with a sentinel object name
-//! so the analysis phase can bridge them to the importing component's class members.
+//! Referenced bare identifiers are persisted as typed semantic facts, while
+//! member-access chains keep their real object/member shape for typed-instance
+//! propagation.
 
 use std::sync::LazyLock;
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use plow_types::extract::SinkSite;
 
@@ -22,12 +23,6 @@ use crate::MemberAccess;
 use crate::template_usage::{TemplateSnippetKind, collect_unresolved_refs_and_accesses};
 
 use super::scanners::{scan_curly_section, scan_html_tag};
-
-/// Sentinel value used as the `object` field in `MemberAccess` entries
-/// produced by the Angular template scanner. The analysis phase checks imports
-/// for entries with this sentinel and merges them into the component's
-/// `self_accessed_members` set.
-pub const ANGULAR_TPL_SENTINEL: &str = "__angular_tpl__";
 
 /// Result of scanning an Angular template for member references.
 #[derive(Debug, Default)]
@@ -76,6 +71,48 @@ impl AngularTemplateRefs {
 static HTML_COMMENT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?s)<!--.*?-->"));
 
+/// Regex matching an opening HTML/Angular element tag name. Captures group 1 =
+/// the tag name. Closing tags (`</foo>`) are excluded by the negative lookahead
+/// is unavailable in `regex`, so the leading `[a-zA-Z]` after `<` (not `/`)
+/// rejects them; only an opening tag's first byte after `<` is an ASCII letter.
+static ELEMENT_TAG_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"<([a-zA-Z][a-zA-Z0-9\-]*)"));
+
+/// Collect custom element selector tag names referenced in an Angular template.
+///
+/// Returns the deduplicated set of opening-tag names that contain a hyphen
+/// (`<app-foo>` -> `app-foo`). The hyphen requirement is the precise,
+/// FP-resistant discriminator between an Angular component element selector
+/// (which conventionally and, for custom elements, definitionally contains a
+/// hyphen) and a native HTML element (no native tag name contains a hyphen). Tag
+/// names are lowercased for case-insensitive matching against the declared
+/// selector set. HTML comments are masked first so a `<app-foo>` inside a comment
+/// is not credited.
+///
+/// First-cut scope is ELEMENT selectors only; attribute selectors
+/// (`<div appFoo>`) are intentionally NOT harvested here, and the detector
+/// abstains on any component with a non-element selector.
+#[must_use]
+pub fn collect_angular_used_selectors(source: &str) -> Vec<String> {
+    let masked = strip_html_comments_preserve_offsets(source);
+    let mut seen = FxHashSet::default();
+    let mut out = Vec::new();
+    for caps in ELEMENT_TAG_RE.captures_iter(&masked) {
+        let Some(name) = caps.get(1) else {
+            continue;
+        };
+        let tag = name.as_str();
+        if !tag.contains('-') {
+            continue;
+        }
+        let lowered = tag.to_ascii_lowercase();
+        if seen.insert(lowered.clone()) {
+            out.push(lowered);
+        }
+    }
+    out
+}
+
 /// Regex to extract attribute name-value pairs from an HTML tag.
 /// Captures: group 1 = attribute name (including prefix like `[`, `(`, `*`),
 ///           group 2 = value (inside quotes).
@@ -97,51 +134,189 @@ static CONTROL_FOR_RE: LazyLock<regex::Regex> =
 /// `obj.member` chains where `obj` is an unresolved identifier. Together these
 /// represent potential component class member references.
 pub fn collect_angular_template_refs(source: &str) -> AngularTemplateRefs {
+    collect_angular_template_refs_with_field_types(source, &FxHashMap::default())
+}
+
+/// As [`collect_angular_template_refs`], additionally typing each `@for` /
+/// `*ngFor` loop variable whose source iterable is a component field in
+/// `component_field_array_types` (`utils: Util[]`) to that element class, so
+/// member accesses on the loop item (`{{ util.getName() }}`) are re-emitted as
+/// `Util.getName` member-access chains instead of dropped. Over-credit only.
+/// See issue #1712.
+pub fn collect_angular_template_refs_with_field_types(
+    source: &str,
+    component_field_array_types: &FxHashMap<String, String>,
+) -> AngularTemplateRefs {
     let source = strip_html_comments_preserve_offsets(source);
-    let bytes = source.as_bytes();
-    let mut refs = AngularTemplateRefs::default();
-    let mut scopes: Vec<Vec<String>> = vec![Vec::new()];
-    let mut index = 0;
+    AngularTemplateScanner::new(&source, component_field_array_types).scan()
+}
 
-    while index < bytes.len() {
-        if index + 1 < bytes.len() && bytes[index] == b'{' && bytes[index + 1] == b'{' {
-            let Some((expr, next_index)) = scan_curly_section(&source, index, 2, 2) else {
-                break;
-            };
-            collect_expression_refs(expr.trim(), &current_locals(&scopes), &mut refs);
-            index = next_index;
-            continue;
+struct AngularTemplateScanner<'a> {
+    source: &'a str,
+    refs: AngularTemplateRefs,
+    scopes: Vec<Vec<String>>,
+    /// Component field name -> array element class, so a `@for` / `*ngFor` over a
+    /// bare-identifier component field types the loop variable to the element
+    /// class (issue #1712).
+    component_field_array_types: &'a FxHashMap<String, String>,
+    /// Loop variable name -> element class, populated as `@for` / `*ngFor`
+    /// blocks are entered. A member access on such a loop variable is remapped
+    /// onto the element class in the finalize pass.
+    iteration_element_types: FxHashMap<String, String>,
+}
+
+impl<'a> AngularTemplateScanner<'a> {
+    fn new(source: &'a str, component_field_array_types: &'a FxHashMap<String, String>) -> Self {
+        Self {
+            source,
+            refs: AngularTemplateRefs::default(),
+            scopes: vec![Vec::new()],
+            component_field_array_types,
+            iteration_element_types: FxHashMap::default(),
         }
-
-        if bytes[index] == b'@'
-            && let Some(next_index) = handle_control_flow(&source, index, &mut scopes, &mut refs)
-        {
-            index = next_index;
-            continue;
-        }
-
-        if bytes[index] == b'}' {
-            if scopes.len() > 1 {
-                scopes.pop();
-            }
-            index += 1;
-            continue;
-        }
-
-        if bytes[index] == b'<' {
-            if let Some((tag, next_index)) = scan_html_tag(&source, index) {
-                process_tag(tag, index, &mut scopes, &mut refs);
-                index = next_index;
-                continue;
-            }
-            index += 1;
-            continue;
-        }
-
-        index += 1;
     }
 
-    refs
+    fn scan(mut self) -> AngularTemplateRefs {
+        let mut index = 0;
+        while index < self.source.len() {
+            index = self.scan_next(index);
+        }
+        remap_iteration_member_accesses(&mut self.refs, &self.iteration_element_types);
+        self.refs
+    }
+
+    fn scan_next(&mut self, index: usize) -> usize {
+        let bytes = self.source.as_bytes();
+        if starts_interpolation(bytes, index) {
+            return self.scan_interpolation(index);
+        }
+
+        match bytes[index] {
+            b'@' => self.scan_control_flow(index),
+            b'}' => self.close_scope(index),
+            b'<' => self.scan_tag(index),
+            _ => index + 1,
+        }
+    }
+
+    fn scan_interpolation(&mut self, index: usize) -> usize {
+        let Some((expr, next_index)) = scan_curly_section(self.source, index, 2, 2) else {
+            return self.source.len();
+        };
+        collect_expression_refs(expr.trim(), &current_locals(&self.scopes), &mut self.refs);
+        next_index
+    }
+
+    fn scan_control_flow(&mut self, index: usize) -> usize {
+        let mut iter_ctx = IterationTypingCtx {
+            component_field_array_types: self.component_field_array_types,
+            iteration_element_types: &mut self.iteration_element_types,
+        };
+        handle_control_flow(
+            self.source,
+            index,
+            &mut self.scopes,
+            &mut self.refs,
+            &mut iter_ctx,
+        )
+        .unwrap_or(index + 1)
+    }
+
+    fn close_scope(&mut self, index: usize) -> usize {
+        if self.scopes.len() > 1 {
+            self.scopes.pop();
+        }
+        index + 1
+    }
+
+    fn scan_tag(&mut self, index: usize) -> usize {
+        let Some((tag, next_index)) = scan_html_tag(self.source, index) else {
+            return index + 1;
+        };
+        let mut iter_ctx = IterationTypingCtx {
+            component_field_array_types: self.component_field_array_types,
+            iteration_element_types: &mut self.iteration_element_types,
+        };
+        process_tag(tag, index, &mut self.scopes, &mut self.refs, &mut iter_ctx);
+        next_index
+    }
+}
+
+/// Carries the component-field element-type table (`utils` -> `Util`) plus the
+/// mutable loop-variable typing accumulator (`util` -> `Util`) through the
+/// `@for` / `*ngFor` code paths so a bare-identifier loop over a typed array
+/// field types its item to the element class (issue #1712).
+struct IterationTypingCtx<'a> {
+    component_field_array_types: &'a FxHashMap<String, String>,
+    iteration_element_types: &'a mut FxHashMap<String, String>,
+}
+
+impl IterationTypingCtx<'_> {
+    /// If `iterable` is a bare-identifier component field with a known element
+    /// class, record `binding -> class` and return `true` so the caller can keep
+    /// the loop variable OUT of the block locals (its member accesses then
+    /// survive the scan and remap onto the element class). A destructured or
+    /// non-identifier binding, or an unknown / member-expression iterable, is
+    /// left untyped (`false`). First-write-wins on a repeated loop-variable name.
+    fn try_type_loop_variable(&mut self, binding: &str, iterable: &str) -> bool {
+        let binding = binding.trim();
+        let iterable = iterable.trim();
+        if binding.is_empty() || !is_bare_identifier(binding) {
+            return false;
+        }
+        let Some(class) = self.component_field_array_types.get(iterable) else {
+            return false;
+        };
+        self.iteration_element_types
+            .entry(binding.to_string())
+            .or_insert_with(|| class.clone());
+        true
+    }
+}
+
+/// Whether `name` is a single bare JS identifier (no member access, no
+/// destructure). The `@for` / `*ngFor` binding must be a plain name to type it
+/// to the element class.
+fn is_bare_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    matches!(first, 'A'..='Z' | 'a'..='z' | '_' | '$')
+        && chars.all(|ch| matches!(ch, 'A'..='Z' | 'a'..='z' | '0'..='9' | '_' | '$'))
+}
+
+/// Remap each collected member access whose object is a typed iteration variable
+/// onto its element class, and drop that variable from the bare-identifier refs
+/// (it is an iteration item, not a component member). A `util.getName` access
+/// becomes `Util.getName`; the bare `util` identifier is removed. Deduplicates
+/// so a remapped access already present as `Util.getName` is not doubled.
+fn remap_iteration_member_accesses(
+    refs: &mut AngularTemplateRefs,
+    iteration_element_types: &FxHashMap<String, String>,
+) {
+    if iteration_element_types.is_empty() {
+        return;
+    }
+    for access in &mut refs.member_accesses {
+        if let Some(class) = iteration_element_types.get(&access.object) {
+            access.object = class.clone();
+        }
+    }
+    dedup_member_accesses(&mut refs.member_accesses);
+    for name in iteration_element_types.keys() {
+        refs.identifiers.remove(name);
+    }
+}
+
+/// In-place dedup of `(object, member)` member-access pairs, preserving order.
+fn dedup_member_accesses(accesses: &mut Vec<MemberAccess>) {
+    let mut seen: FxHashSet<(String, String)> = FxHashSet::default();
+    accesses.retain(|access| seen.insert((access.object.clone(), access.member.clone())));
+}
+
+fn starts_interpolation(bytes: &[u8], index: usize) -> bool {
+    index + 1 < bytes.len() && bytes[index] == b'{' && bytes[index + 1] == b'{'
 }
 
 fn strip_html_comments_preserve_offsets(source: &str) -> String {
@@ -164,6 +339,7 @@ fn handle_control_flow(
     start: usize,
     scopes: &mut Vec<Vec<String>>,
     refs: &mut AngularTemplateRefs,
+    iter_ctx: &mut IterationTypingCtx<'_>,
 ) -> Option<usize> {
     let rest = &source[start + 1..]; // skip '@'
 
@@ -175,7 +351,7 @@ fn handle_control_flow(
         "switch" | "case" => {
             handle_parenthesized_block_control_flow(source, start, keyword_end, scopes, refs)
         }
-        "for" => handle_for_control_flow(source, start, keyword_end, scopes, refs),
+        "for" => handle_for_control_flow(source, start, keyword_end, scopes, refs, iter_ctx),
         "defer" => handle_defer_control_flow(source, start, keyword_end, scopes, refs),
         "let" => handle_let_control_flow(source, start, keyword_end, scopes, refs),
         "else" => handle_else_control_flow(source, start, keyword_end, scopes, refs),
@@ -360,6 +536,7 @@ fn handle_for_control_flow(
     keyword_end: usize,
     scopes: &mut Vec<Vec<String>>,
     refs: &mut AngularTemplateRefs,
+    iter_ctx: &mut IterationTypingCtx<'_>,
 ) -> Option<usize> {
     let after_keyword = &source[start + 1 + keyword_end..];
     let paren_start = after_keyword.find('(')?;
@@ -373,11 +550,17 @@ fn handle_for_control_flow(
         && let Some(caps) = CONTROL_FOR_RE.captures(first_part.trim())
     {
         let binding = caps.get(1).map_or("", |m| m.as_str());
-        locals_for_scope.push(binding.to_string());
+        let iterable = caps.get(2).map_or("", |m| m.as_str()).trim();
+        // When the loop variable types to a component-field element class (issue
+        // #1712), keep it OUT of the block locals so `util.getName` survives as a
+        // member access and remaps onto `Util` in the finalize pass; otherwise it
+        // is a normal local shadowing any same-named component member.
+        if !iter_ctx.try_type_loop_variable(binding, iterable) {
+            locals_for_scope.push(binding.to_string());
+        }
         for implicit in &["$index", "$first", "$last", "$even", "$odd", "$count"] {
             locals_for_scope.push((*implicit).to_string());
         }
-        let iterable = caps.get(2).map_or("", |m| m.as_str()).trim();
         let current = current_locals(scopes);
         collect_expression_refs(iterable, &current, refs);
     }
@@ -492,67 +675,102 @@ fn process_tag(
     tag_start: usize,
     scopes: &mut [Vec<String>],
     refs: &mut AngularTemplateRefs,
+    iter_ctx: &mut IterationTypingCtx<'_>,
 ) {
     let locals = current_locals(scopes);
 
     for caps in ATTR_RE.captures_iter(tag) {
-        let attr_name = caps.get(1).map_or("", |m| m.as_str());
-        let attr_value = caps.get(2).map_or("", |m| m.as_str()).trim();
-
-        if attr_value.is_empty() {
-            continue;
+        if let Some(attr) = parse_template_attr(&caps, tag_start) {
+            process_tag_attr(&attr, &locals, scopes, refs, iter_ctx);
         }
+    }
+}
 
-        if attr_name == "[innerHTML]"
-            && let Some(attr) = caps.get(0)
-            && let Some(sink) = crate::template_usage::template_html_sink(
-                attr_value,
-                tag_start + attr.start(),
-                tag_start + attr.end(),
-            )
-        {
-            refs.security_sinks.push(sink);
-        }
+struct AngularTemplateAttr<'a> {
+    name: &'a str,
+    value: &'a str,
+    span: Option<(usize, usize)>,
+}
 
-        if attr_name.starts_with('[') && !attr_name.starts_with("[(") {
-            collect_expression_refs(attr_value, &locals, refs);
-            continue;
-        }
+fn parse_template_attr<'a>(
+    caps: &'a regex::Captures<'_>,
+    tag_start: usize,
+) -> Option<AngularTemplateAttr<'a>> {
+    let value = caps.get(2)?.as_str().trim();
+    if value.is_empty() {
+        return None;
+    }
 
-        if attr_name.starts_with('(') {
-            collect_statement_refs(attr_value, &locals, refs);
-            continue;
-        }
+    let span = caps
+        .get(0)
+        .map(|attr| (tag_start + attr.start(), tag_start + attr.end()));
 
-        if attr_name.starts_with("[(") {
-            collect_expression_refs(attr_value, &locals, refs);
-            continue;
-        }
+    Some(AngularTemplateAttr {
+        name: caps.get(1).map_or("", |m| m.as_str()),
+        value,
+        span,
+    })
+}
 
-        if attr_name == "*ngIf" || attr_name == "*ngShow" || attr_name == "*ngSwitch" {
-            let expr = attr_value.split(';').next().unwrap_or(attr_value).trim();
-            collect_expression_refs(expr, &locals, refs);
-            continue;
-        }
+fn process_tag_attr(
+    attr: &AngularTemplateAttr<'_>,
+    locals: &[String],
+    scopes: &mut [Vec<String>],
+    refs: &mut AngularTemplateRefs,
+    iter_ctx: &mut IterationTypingCtx<'_>,
+) {
+    collect_inner_html_sink(attr, refs);
 
-        if attr_name == "*ngFor" {
-            handle_ng_for(attr_value, &locals, scopes, refs);
-            continue;
-        }
+    if attr.name.starts_with('[') && !attr.name.starts_with("[(") {
+        collect_expression_refs(attr.value, locals, refs);
+        return;
+    }
 
-        if attr_name.starts_with('*') {
-            collect_expression_refs(attr_value, &locals, refs);
-            continue;
-        }
+    if attr.name.starts_with('(') {
+        collect_statement_refs(attr.value, locals, refs);
+        return;
+    }
 
-        if attr_name.starts_with("bind-") {
-            collect_expression_refs(attr_value, &locals, refs);
-            continue;
-        }
+    if attr.name.starts_with("[(") {
+        collect_expression_refs(attr.value, locals, refs);
+        return;
+    }
 
-        if attr_name.starts_with("on-") {
-            collect_statement_refs(attr_value, &locals, refs);
-        }
+    if matches!(attr.name, "*ngIf" | "*ngShow" | "*ngSwitch") {
+        let expr = attr.value.split(';').next().unwrap_or(attr.value).trim();
+        collect_expression_refs(expr, locals, refs);
+        return;
+    }
+
+    if attr.name == "*ngFor" {
+        handle_ng_for(attr.value, locals, scopes, refs, iter_ctx);
+        return;
+    }
+
+    if attr.name.starts_with('*') {
+        collect_expression_refs(attr.value, locals, refs);
+        return;
+    }
+
+    if attr.name.starts_with("bind-") {
+        collect_expression_refs(attr.value, locals, refs);
+        return;
+    }
+
+    if attr.name.starts_with("on-") {
+        collect_statement_refs(attr.value, locals, refs);
+    }
+}
+
+fn collect_inner_html_sink(attr: &AngularTemplateAttr<'_>, refs: &mut AngularTemplateRefs) {
+    if attr.name != "[innerHTML]" {
+        return;
+    }
+
+    if let Some((start, end)) = attr.span
+        && let Some(sink) = crate::template_usage::template_html_sink(attr.value, start, end)
+    {
+        refs.security_sinks.push(sink);
     }
 }
 
@@ -563,6 +781,7 @@ fn handle_ng_for(
     locals: &[String],
     scopes: &mut [Vec<String>],
     refs: &mut AngularTemplateRefs,
+    iter_ctx: &mut IterationTypingCtx<'_>,
 ) {
     let clauses: Vec<&str> = value.split(';').collect();
 
@@ -574,9 +793,17 @@ fn handle_ng_for(
 
         if let Some(caps) = NG_FOR_OF_RE.captures(clause) {
             let binding = caps.get(1).map_or("", |m| m.as_str());
-            ng_for_locals.push(binding.to_string());
-            new_scope_locals.push(binding.to_string());
             let iterable = caps.get(2).map_or("", |m| m.as_str()).trim();
+            // Type the `let item of items` loop variable to `items`'s element
+            // class when it is a component field (issue #1712); a typed item is
+            // kept OUT of the child scope so `{{ item.getName() }}` remaps onto
+            // the element class. The iterable scan still runs with the item in
+            // `ng_for_locals` so `items` (not `item`) is the credited reference.
+            let typed = iter_ctx.try_type_loop_variable(binding, iterable);
+            ng_for_locals.push(binding.to_string());
+            if !typed {
+                new_scope_locals.push(binding.to_string());
+            }
             collect_expression_refs(iterable, &ng_for_locals, refs);
             continue;
         }
@@ -719,6 +946,16 @@ mod tests {
         let refs =
             collect_angular_template_refs(r#"<button (click)="onButtonClick()">Click</button>"#);
         assert!(refs.contains("onButtonClick"));
+    }
+
+    #[test]
+    fn legacy_bind_and_on_attrs_extract_refs() {
+        let refs = collect_angular_template_refs(
+            r#"<button bind-title="title" on-click="submit(value)">"#,
+        );
+        assert!(refs.contains("title"));
+        assert!(refs.contains("submit"));
+        assert!(refs.contains("value"));
     }
 
     #[test]
@@ -1161,5 +1398,99 @@ mod tests {
         assert!(refs.identifiers.contains("build"));
         assert!(refs.identifiers.contains("value"));
         assert!(!refs.identifiers.contains("built"));
+    }
+
+    // --- @for / *ngFor loop-variable element-type remap (issue #1712) ---
+
+    fn field_types(pairs: &[(&str, &str)]) -> FxHashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect()
+    }
+
+    fn has_access(refs: &AngularTemplateRefs, object: &str, member: &str) -> bool {
+        refs.member_accesses
+            .iter()
+            .any(|a| a.object == object && a.member == member)
+    }
+
+    #[test]
+    fn control_for_item_typed_to_element_class_credits_member_access() {
+        // `@for (util of utils; track util)` where `utils` is `Util[]`: member
+        // accesses on the item remap onto the `Util` class (issue #1712).
+        let refs = collect_angular_template_refs_with_field_types(
+            r"@for (util of utils; track util) { <li>{{ util.getName() }} {{ util.getter }}</li> }",
+            &field_types(&[("utils", "Util")]),
+        );
+        assert!(
+            has_access(&refs, "Util", "getName"),
+            "util.getName should map to Util.getName, found: {:?}",
+            refs.member_accesses
+        );
+        assert!(
+            has_access(&refs, "Util", "getter"),
+            "util.getter should map to Util.getter, found: {:?}",
+            refs.member_accesses
+        );
+        assert!(
+            !refs.identifiers.contains("util"),
+            "typed loop item must not leak as a component member ref, found: {:?}",
+            refs.identifiers
+        );
+    }
+
+    #[test]
+    fn ng_for_item_typed_to_element_class_credits_member_access() {
+        // Legacy `*ngFor="let util of utils"` where `utils` is `Util[]`.
+        let refs = collect_angular_template_refs_with_field_types(
+            r#"<li *ngFor="let util of utils">{{ util.getName() }}</li>"#,
+            &field_types(&[("utils", "Util")]),
+        );
+        assert!(
+            has_access(&refs, "Util", "getName"),
+            "*ngFor util.getName should map to Util.getName, found: {:?}",
+            refs.member_accesses
+        );
+        assert!(
+            !refs.identifiers.contains("util"),
+            "typed *ngFor item must not leak as a component member ref, found: {:?}",
+            refs.identifiers
+        );
+    }
+
+    #[test]
+    fn for_untyped_source_leaves_item_unmapped() {
+        // Neuter check: with no known element type for the source, the item stays
+        // a local and its member accesses credit nothing (pre-fix behavior).
+        let refs = collect_angular_template_refs_with_field_types(
+            r"@for (util of utils; track util) { <li>{{ util.getName() }}</li> }",
+            &FxHashMap::default(),
+        );
+        assert!(
+            !refs.member_accesses.iter().any(|a| a.object == "Util"),
+            "untyped @for item must not credit any class, found: {:?}",
+            refs.member_accesses
+        );
+        assert!(
+            !refs.member_accesses.iter().any(|a| a.object == "util"),
+            "untyped @for item member access must stay suppressed as a local, found: {:?}",
+            refs.member_accesses
+        );
+    }
+
+    #[test]
+    fn for_iterable_field_still_credited_as_component_ref() {
+        // The source iterable (`utils`) is still a bare-identifier reference the
+        // component must expose; typing the item does not drop the iterable ref.
+        let refs = collect_angular_template_refs_with_field_types(
+            r"@for (util of utils; track util) { <li>{{ util.getName() }}</li> }",
+            &field_types(&[("utils", "Util")]),
+        );
+        assert!(
+            refs.identifiers.contains("utils"),
+            "the iterable `utils` must still be a component member ref, found: {:?}",
+            refs.identifiers
+        );
     }
 }

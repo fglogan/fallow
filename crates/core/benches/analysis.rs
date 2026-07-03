@@ -10,16 +10,29 @@
 
 use std::path::PathBuf;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use rustc_hash::FxHashSet;
+use tempfile::TempDir;
 
 mod helpers;
 
-fn bench_parse_file(c: &mut Criterion) {
-    let temp_dir = std::env::temp_dir().join("plow-bench");
-    std::fs::create_dir_all(&temp_dir).unwrap();
+struct ParseFileInput {
+    _temp_dir: TempDir,
+    file: plow_core::discover::DiscoveredFile,
+}
 
-    let test_file = temp_dir.join("bench.ts");
+struct ConfigInput {
+    _temp_dir: TempDir,
+    config: plow_config::ResolvedConfig,
+}
+
+fn create_parse_file_input() -> ParseFileInput {
+    let temp_dir = tempfile::Builder::new()
+        .prefix("plow-bench-parse-")
+        .tempdir()
+        .unwrap();
+
+    let test_file = temp_dir.path().join("bench.ts");
     std::fs::write(
         &test_file,
         r"
@@ -103,22 +116,32 @@ export default function App({ name, age }: Props) {
         size_bytes: std::fs::metadata(&test_file).unwrap().len(),
     };
 
-    c.bench_function("parse_single_file", |b| {
-        b.iter(|| {
-            let _ = plow_core::extract::parse_single_file(&file);
-        });
-    });
-
-    let _ = std::fs::remove_dir_all(&temp_dir);
+    ParseFileInput {
+        _temp_dir: temp_dir,
+        file,
+    }
 }
 
-fn bench_full_pipeline(c: &mut Criterion) {
-    let temp_dir = std::env::temp_dir().join("plow-bench-project");
-    let _ = std::fs::remove_dir_all(&temp_dir);
-    std::fs::create_dir_all(temp_dir.join("src")).unwrap();
+fn parse_single_file(c: &mut Criterion) {
+    c.bench_function("parse_single_file", |bencher| {
+        bencher.iter_batched_ref(
+            create_parse_file_input,
+            |input| plow_core::extract::parse_single_file(&input.file),
+            BatchSize::LargeInput,
+        );
+    });
+}
+
+fn create_full_pipeline_input() -> ConfigInput {
+    let temp_dir = tempfile::Builder::new()
+        .prefix("plow-bench-project-")
+        .tempdir()
+        .unwrap();
+    let root = temp_dir.path().to_path_buf();
+    std::fs::create_dir_all(root.join("src")).unwrap();
 
     std::fs::write(
-        temp_dir.join("package.json"),
+        root.join("package.json"),
         r#"{"name": "bench-project", "main": "src/index.ts", "dependencies": {"react": "^18"}}"#,
     )
     .unwrap();
@@ -131,7 +154,7 @@ export function fn{i}() {{ return {i}; }}
 export type Type{i} = {{ value: number }};
 "
         );
-        std::fs::write(temp_dir.join(format!("src/module{i}.ts")), content).unwrap();
+        std::fs::write(root.join(format!("src/module{i}.ts")), content).unwrap();
     }
 
     let imports: Vec<String> = (0..5)
@@ -139,44 +162,61 @@ export type Type{i} = {{ value: number }};
         .collect();
     let uses: Vec<String> = (0..5).map(|i| format!("console.log(value{i});")).collect();
     std::fs::write(
-        temp_dir.join("src/index.ts"),
+        root.join("src/index.ts"),
         format!("{}\n{}\n", imports.join("\n"), uses.join("\n")),
     )
     .unwrap();
 
-    let config = helpers::create_test_config(temp_dir.clone());
+    let config = helpers::create_test_config(root);
 
-    c.bench_function("full_pipeline_10_files", |b| {
-        b.iter(|| {
-            let _ = plow_core::analyze(&config);
-        });
-    });
-
-    let _ = std::fs::remove_dir_all(&temp_dir);
+    ConfigInput {
+        _temp_dir: temp_dir,
+        config,
+    }
 }
 
-fn bench_full_pipeline_100(c: &mut Criterion) {
-    let (temp_dir, config) = helpers::create_synthetic_project("100", 100);
-
-    c.bench_function("full_pipeline_100_files", |b| {
-        b.iter(|| {
-            let _ = plow_core::analyze(&config);
-        });
+fn full_pipeline_10_files(c: &mut Criterion) {
+    c.bench_function("full_pipeline_10_files", |bencher| {
+        bencher.iter_batched_ref(
+            create_full_pipeline_input,
+            |input| plow_core::analyze(&input.config),
+            BatchSize::LargeInput,
+        );
     });
-
-    let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
-fn bench_full_pipeline_1000(c: &mut Criterion) {
-    let (temp_dir, config) = helpers::create_synthetic_project("1000", 1000);
+fn create_synthetic_config_input(name: &str, file_count: usize) -> ConfigInput {
+    let (temp_dir, config) = helpers::create_synthetic_project(name, file_count);
+    ConfigInput {
+        _temp_dir: temp_dir,
+        config,
+    }
+}
 
-    c.bench_function("full_pipeline_1000_files", |b| {
-        b.iter(|| {
-            let _ = plow_core::analyze(&config);
-        });
+fn full_pipeline_100_files(c: &mut Criterion) {
+    c.bench_function("full_pipeline_100_files", |bencher| {
+        bencher.iter_batched_ref(
+            || create_synthetic_config_input("100", 100),
+            |input| plow_core::analyze(&input.config),
+            BatchSize::LargeInput,
+        );
     });
+}
 
-    let _ = std::fs::remove_dir_all(&temp_dir);
+fn full_pipeline_1000_files(c: &mut Criterion) {
+    c.bench_function("full_pipeline_1000_files", |bencher| {
+        bencher.iter_batched_ref(
+            || create_synthetic_config_input("1000", 1000),
+            |input| plow_core::analyze(&input.config),
+            BatchSize::LargeInput,
+        );
+    });
+}
+
+struct ReExportInput {
+    files: Vec<plow_core::discover::DiscoveredFile>,
+    resolved_modules: Vec<plow_core::resolve::ResolvedModule>,
+    entry_points: Vec<plow_core::discover::EntryPoint>,
 }
 
 #[expect(
@@ -187,7 +227,7 @@ fn bench_full_pipeline_1000(c: &mut Criterion) {
     clippy::too_many_lines,
     reason = "benchmark with extensive fixture setup"
 )]
-fn bench_resolve_re_export_chains(c: &mut Criterion) {
+fn create_re_export_input() -> ReExportInput {
     use plow_core::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
     use plow_core::extract::{
         ExportInfo, ExportName, ImportInfo, ImportedName, ReExportInfo, VisibilityTag,
@@ -238,13 +278,15 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     });
 
     for b in 0..barrel_count {
@@ -311,13 +353,15 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
             resolved_dynamic_imports: vec![],
             resolved_dynamic_patterns: vec![],
             member_accesses: vec![],
-            whole_object_uses: vec![],
+            semantic_facts: Box::default(),
+            whole_object_uses: Box::default(),
             has_cjs_exports: false,
             has_angular_component_template_url: false,
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
+            exported_factory_returns: Box::default(),
         });
     }
 
@@ -337,6 +381,7 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
                         local_name: Some(format!("value{e}")),
                         is_type_only: false,
                         visibility: VisibilityTag::None,
+                        expected_unused_reason: None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
                         is_side_effect_used: false,
@@ -347,6 +392,7 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
                         local_name: Some(format!("fn{e}")),
                         is_type_only: false,
                         visibility: VisibilityTag::None,
+                        expected_unused_reason: None,
                         span: oxc_span::Span::new(25, 45),
                         members: vec![],
                         is_side_effect_used: false,
@@ -365,13 +411,15 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
             resolved_dynamic_imports: vec![],
             resolved_dynamic_patterns: vec![],
             member_accesses: vec![],
-            whole_object_uses: vec![],
+            semantic_facts: Box::default(),
+            whole_object_uses: Box::default(),
             has_cjs_exports: false,
             has_angular_component_template_url: false,
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
+            exported_factory_returns: Box::default(),
         });
     }
 
@@ -380,10 +428,26 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
         source: EntryPointSource::PackageJsonMain,
     }];
 
-    c.bench_function("resolve_re_export_chains", |b| {
-        b.iter(|| {
-            plow_core::graph::ModuleGraph::build(&resolved_modules, &entry_points, &files);
-        });
+    ReExportInput {
+        files,
+        resolved_modules,
+        entry_points,
+    }
+}
+
+fn resolve_re_export_chains(c: &mut Criterion) {
+    c.bench_function("resolve_re_export_chains", |bencher| {
+        bencher.iter_batched_ref(
+            create_re_export_input,
+            |input| {
+                plow_core::graph::ModuleGraph::build(
+                    &input.resolved_modules,
+                    &input.entry_points,
+                    &input.files,
+                );
+            },
+            BatchSize::LargeInput,
+        );
     });
 }
 
@@ -391,15 +455,14 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
     clippy::too_many_lines,
     reason = "benchmark with extensive fixture setup"
 )]
-fn bench_cache_round_trip(c: &mut Criterion) {
-    use plow_core::cache::{cached_to_module, module_to_cached};
+fn create_cache_round_trip_input() -> plow_core::extract::ModuleInfo {
     use plow_core::discover::FileId;
     use plow_core::extract::{
         DynamicImportInfo, ExportInfo, ExportName, ImportInfo, ImportedName, MemberAccess,
         MemberInfo, MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
     };
 
-    let module = ModuleInfo {
+    ModuleInfo {
         file_id: FileId(0),
         exports: vec![
             ExportInfo {
@@ -407,6 +470,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                 local_name: Some("UserService".to_string()),
                 is_type_only: false,
                 visibility: VisibilityTag::None,
+                expected_unused_reason: None,
                 span: oxc_span::Span::new(100, 500),
                 members: vec![
                     MemberInfo {
@@ -445,6 +509,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                 local_name: Some("Status".to_string()),
                 is_type_only: false,
                 visibility: VisibilityTag::None,
+                expected_unused_reason: None,
                 span: oxc_span::Span::new(550, 700),
                 members: vec![
                     MemberInfo {
@@ -483,6 +548,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                 local_name: None,
                 is_type_only: false,
                 visibility: VisibilityTag::None,
+                expected_unused_reason: None,
                 span: oxc_span::Span::new(800, 1200),
                 members: vec![],
                 is_side_effect_used: false,
@@ -493,6 +559,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                 local_name: Some("Props".to_string()),
                 is_type_only: true,
                 visibility: VisibilityTag::None,
+                expected_unused_reason: None,
                 span: oxc_span::Span::new(10, 80),
                 members: vec![],
                 is_side_effect_used: false,
@@ -503,6 +570,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                 local_name: Some("formatName".to_string()),
                 is_type_only: false,
                 visibility: VisibilityTag::None,
+                expected_unused_reason: None,
                 span: oxc_span::Span::new(720, 780),
                 members: vec![],
                 is_side_effect_used: false,
@@ -595,7 +663,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
             local_name: None,
             source_span: oxc_span::Span::default(),
         }],
-        package_path_references: vec![],
+        package_path_references: Box::default(),
         member_accesses: vec![
             MemberAccess {
                 object: "Status".to_string(),
@@ -610,7 +678,8 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                 member: "log".to_string(),
             },
         ],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
         has_angular_component_template_url: false,
@@ -624,6 +693,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
         complexity: Vec::new(),
         flag_uses: vec![],
         class_heritage: vec![],
+        exported_factory_returns: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
@@ -641,6 +711,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
         security_control_sites: Vec::new(),
         callee_uses: Vec::new(),
         misplaced_directives: Vec::new(),
+        inline_server_action_exports: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
         referenced_import_bindings: Vec::new(),
@@ -650,16 +721,45 @@ fn bench_cache_round_trip(c: &mut Criterion) {
         has_define_model: false,
         has_unharvestable_props: false,
         component_emits: Vec::new(),
+        angular_inputs: Vec::new(),
+        angular_outputs: Vec::new(),
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
-    };
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
+        has_page_data_store_whole_use: false,
+        component_functions: Vec::new(),
+        react_props: Vec::new(),
+        hook_uses: Vec::new(),
+        render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        angular_component_selectors: Vec::new(),
+        registered_custom_elements: Vec::new(),
+        used_custom_element_tags: Vec::new(),
+        angular_used_selectors: Vec::new(),
+        angular_entry_component_refs: Vec::new(),
+        has_dynamic_component_render: false,
+        has_dynamic_dispatch: false,
+    }
+}
 
-    c.bench_function("cache_round_trip", |b| {
-        b.iter(|| {
-            let cached = module_to_cached(&module, 0, 0);
-            let _restored = cached_to_module(&cached, FileId(0));
-        });
+fn cache_round_trip(c: &mut Criterion) {
+    use plow_core::cache::{cached_to_module, module_to_cached};
+    use plow_core::discover::FileId;
+    use plow_types::source_fingerprint::SourceFingerprint;
+
+    c.bench_function("cache_round_trip", |bencher| {
+        bencher.iter_batched_ref(
+            create_cache_round_trip_input,
+            |module| {
+                let cached = module_to_cached(module, SourceFingerprint::new(0, 0));
+                let _ = cached_to_module(&cached, FileId(0));
+            },
+            BatchSize::LargeInput,
+        );
     });
 }
 
@@ -740,55 +840,74 @@ fn make_diverse_files(n: usize, tokens_per_file: usize) -> DupeInput {
         .collect()
 }
 
-fn bench_dupe_detect_2x500(c: &mut Criterion) {
+/// Build files that repeat several shared blocks with per-file separators.
+/// This creates many high-LCP intervals without requiring a huge fixture.
+fn make_interval_pressure_files(n: usize, blocks: usize, block_tokens: usize) -> DupeInput {
+    (0..n)
+        .map(|i| {
+            let mut hashes = Vec::with_capacity(blocks * (block_tokens + 1));
+            for block in 0..blocks {
+                hashes.extend((1..=block_tokens as u64).map(|token| token + block as u64 * 10_000));
+                hashes.push(1_000_000 + (i * blocks + block) as u64);
+            }
+            (
+                PathBuf::from(format!("dir{i}/pressure{i}.ts")),
+                make_hashed_tokens(&hashes),
+                make_file_tokens_for(hashes.len()),
+            )
+        })
+        .collect()
+}
+
+fn dupe_detect_2x500_identical(c: &mut Criterion) {
     use plow_core::duplicates::detect::CloneDetector;
     let data = make_identical_files(2, 500);
-    c.bench_function("dupe_detect_2x500_identical", |b| {
-        b.iter_batched(
+    c.bench_function("dupe_detect_2x500_identical", |bencher| {
+        bencher.iter_batched(
             || data.clone(),
             |d| CloneDetector::new(30, 5, false).detect(d),
-            criterion::BatchSize::SmallInput,
+            BatchSize::LargeInput,
         );
     });
 }
 
-fn bench_dupe_detect_2x2000(c: &mut Criterion) {
+fn dupe_detect_2x2000_identical(c: &mut Criterion) {
     use plow_core::duplicates::detect::CloneDetector;
     let data = make_identical_files(2, 2000);
-    c.bench_function("dupe_detect_2x2000_identical", |b| {
-        b.iter_batched(
+    c.bench_function("dupe_detect_2x2000_identical", |bencher| {
+        bencher.iter_batched(
             || data.clone(),
             |d| CloneDetector::new(30, 5, false).detect(d),
-            criterion::BatchSize::SmallInput,
+            BatchSize::LargeInput,
         );
     });
 }
 
-fn bench_dupe_detect_10x500(c: &mut Criterion) {
+fn dupe_detect_10x500_identical(c: &mut Criterion) {
     use plow_core::duplicates::detect::CloneDetector;
     let data = make_identical_files(10, 500);
-    c.bench_function("dupe_detect_10x500_identical", |b| {
-        b.iter_batched(
+    c.bench_function("dupe_detect_10x500_identical", |bencher| {
+        bencher.iter_batched(
             || data.clone(),
             |d| CloneDetector::new(30, 5, false).detect(d),
-            criterion::BatchSize::SmallInput,
+            BatchSize::LargeInput,
         );
     });
 }
 
-fn bench_dupe_detect_50x200_diverse(c: &mut Criterion) {
+fn dupe_detect_50x200_diverse(c: &mut Criterion) {
     use plow_core::duplicates::detect::CloneDetector;
     let data = make_diverse_files(50, 200);
-    c.bench_function("dupe_detect_50x200_diverse", |b| {
-        b.iter_batched(
+    c.bench_function("dupe_detect_50x200_diverse", |bencher| {
+        bencher.iter_batched(
             || data.clone(),
             |d| CloneDetector::new(30, 5, false).detect(d),
-            criterion::BatchSize::SmallInput,
+            BatchSize::LargeInput,
         );
     });
 }
 
-fn bench_dupe_detect_100x200_mixed(c: &mut Criterion) {
+fn dupe_detect_100x200_mixed(c: &mut Criterion) {
     use plow_core::duplicates::detect::CloneDetector;
     let hashes: Vec<u64> = (1..=200).collect();
     let data: DupeInput = (0..100)
@@ -808,16 +927,16 @@ fn bench_dupe_detect_100x200_mixed(c: &mut Criterion) {
         })
         .collect();
 
-    c.bench_function("dupe_detect_100x200_mixed", |b| {
-        b.iter_batched(
+    c.bench_function("dupe_detect_100x200_mixed", |bencher| {
+        bencher.iter_batched(
             || data.clone(),
             |d| CloneDetector::new(30, 5, false).detect(d),
-            criterion::BatchSize::SmallInput,
+            BatchSize::LargeInput,
         );
     });
 }
 
-fn bench_dupe_detect_100x200_mixed_focused(c: &mut Criterion) {
+fn dupe_detect_100x200_mixed_focused(c: &mut Criterion) {
     use plow_core::duplicates::detect::CloneDetector;
     use rustc_hash::FxHashSet;
 
@@ -840,46 +959,54 @@ fn bench_dupe_detect_100x200_mixed_focused(c: &mut Criterion) {
         .collect();
     let focus: FxHashSet<PathBuf> = std::iter::once(PathBuf::from("dir0/file0.ts")).collect();
 
-    c.bench_function("dupe_detect_100x200_mixed_focused", |b| {
-        b.iter_batched(
+    c.bench_function("dupe_detect_100x200_mixed_focused", |bencher| {
+        bencher.iter_batched(
             || data.clone(),
             |d| CloneDetector::new(30, 5, false).detect_touching_files(d, &focus),
-            criterion::BatchSize::SmallInput,
+            BatchSize::LargeInput,
         );
     });
 }
 
-fn bench_dupe_suffix_array_only(c: &mut Criterion) {
+fn dupe_detect_80x20x80_interval_pressure(c: &mut Criterion) {
     use plow_core::duplicates::detect::CloneDetector;
-    let data = make_identical_files(2, 5000);
-    c.bench_function("dupe_detect_2x5000_identical", |b| {
-        b.iter_batched(
+    let data = make_interval_pressure_files(80, 20, 80);
+    c.bench_function("dupe_detect_80x20x80_interval_pressure", |bencher| {
+        bencher.iter_batched(
             || data.clone(),
             |d| CloneDetector::new(30, 5, false).detect(d),
-            criterion::BatchSize::SmallInput,
+            BatchSize::LargeInput,
+        );
+    });
+}
+
+fn dupe_detect_2x5000_identical(c: &mut Criterion) {
+    use plow_core::duplicates::detect::CloneDetector;
+    let data = make_identical_files(2, 5000);
+    c.bench_function("dupe_detect_2x5000_identical", |bencher| {
+        bencher.iter_batched(
+            || data.clone(),
+            |d| CloneDetector::new(30, 5, false).detect(d),
+            BatchSize::LargeInput,
         );
     });
 }
 
 criterion_group!(
     benches,
-    bench_parse_file,
-    bench_full_pipeline,
-    bench_full_pipeline_100,
-    bench_full_pipeline_1000,
-    bench_resolve_re_export_chains,
-    bench_cache_round_trip,
+    parse_single_file,
+    full_pipeline_10_files,
+    full_pipeline_100_files,
+    full_pipeline_1000_files,
+    resolve_re_export_chains,
+    cache_round_trip,
+    dupe_detect_2x500_identical,
+    dupe_detect_2x2000_identical,
+    dupe_detect_10x500_identical,
+    dupe_detect_50x200_diverse,
+    dupe_detect_100x200_mixed,
+    dupe_detect_100x200_mixed_focused,
+    dupe_detect_80x20x80_interval_pressure,
+    dupe_detect_2x5000_identical
 );
-
-criterion_group!(
-    dupe_benches,
-    bench_dupe_detect_2x500,
-    bench_dupe_detect_2x2000,
-    bench_dupe_detect_10x500,
-    bench_dupe_detect_50x200_diverse,
-    bench_dupe_detect_100x200_mixed,
-    bench_dupe_detect_100x200_mixed_focused,
-    bench_dupe_suffix_array_only,
-);
-
-criterion_main!(benches, dupe_benches);
+criterion_main!(benches);

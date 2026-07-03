@@ -1,8 +1,8 @@
 {
   "name": "@plow-cli/linux-x64-gnu",
-  "version": "2.96.0",
+  "version": "2.104.0",
   "description": "Plow CLI binary for Linux x64 (GNU)",
-  "license": "LicenseRef-Tempext-Commercial",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/fglogan/genesis-plow.git"

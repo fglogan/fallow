@@ -6,11 +6,11 @@ use super::{plural, relative_path, split_dir_filename};
 
 const DOCS_HEALTH: &str = "https://docs.genesis-plow.dev/explanations/health";
 
-fn render_ownership_summary(report: &crate::health_types::HealthReport) -> Option<String> {
+fn render_ownership_summary(report: &plow_output::HealthReport) -> Option<String> {
     if report.hotspots.len() < 2 {
         return None;
     }
-    let with_ownership: Vec<&crate::health_types::OwnershipMetrics> = report
+    let with_ownership: Vec<&plow_output::OwnershipMetrics> = report
         .hotspots
         .iter()
         .filter_map(|h| h.ownership.as_ref())
@@ -71,13 +71,13 @@ fn handle_matches_owner(identifier: &str, declared_owner: &str) -> bool {
 }
 
 fn render_ownership_line(
-    ownership: &crate::health_types::OwnershipMetrics,
-    trend: plow_core::churn::ChurnTrend,
+    ownership: &plow_output::OwnershipMetrics,
+    trend: plow_engine::ChurnTrend,
 ) -> String {
     let mut parts: Vec<String> = Vec::new();
 
     let top_share = ownership.top_contributor.share;
-    let is_accelerating = matches!(trend, plow_core::churn::ChurnTrend::Accelerating);
+    let is_accelerating = matches!(trend, plow_engine::ChurnTrend::Accelerating);
     let is_extreme = top_share >= 0.9 || (ownership.bus_factor == 1 && is_accelerating);
     let bus_str = if top_share >= 0.9999 {
         format!("bus={} (sole author)", ownership.bus_factor)
@@ -126,7 +126,7 @@ fn render_ownership_line(
         parts.push("unowned".red().to_string());
     }
 
-    if ownership.ownership_state == crate::health_types::OwnershipState::DeclaredInactive {
+    if ownership.ownership_state == plow_output::OwnershipState::DeclaredInactive {
         parts.push("declared owner inactive".yellow().to_string());
     }
 
@@ -139,7 +139,7 @@ fn render_ownership_line(
 
 pub(super) fn render_hotspots(
     lines: &mut Vec<String>,
-    report: &crate::health_types::HealthReport,
+    report: &plow_output::HealthReport,
     root: &Path,
 ) {
     if report.hotspots.is_empty() {
@@ -160,7 +160,7 @@ pub(super) fn render_hotspots(
     push_hotspots_footer(lines, report);
 }
 
-fn push_hotspots_header(lines: &mut Vec<String>, report: &crate::health_types::HealthReport) {
+fn push_hotspots_header(lines: &mut Vec<String>, report: &plow_output::HealthReport) {
     let header = report.hotspot_summary.as_ref().map_or_else(
         || format!("Hotspots ({} files)", report.hotspots.len()),
         |summary| {
@@ -175,11 +175,7 @@ fn push_hotspots_header(lines: &mut Vec<String>, report: &crate::health_types::H
     lines.push(String::new());
 }
 
-fn push_hotspot_row(
-    lines: &mut Vec<String>,
-    entry: &crate::health_types::HotspotEntry,
-    root: &Path,
-) {
+fn push_hotspot_row(lines: &mut Vec<String>, entry: &plow_output::HotspotEntry, root: &Path) {
     let file_str = relative_path(&entry.path, root).display().to_string();
     let (dir, filename) = split_dir_filename(&file_str);
     lines.push(format!(
@@ -218,19 +214,19 @@ fn hotspot_score_colored(score: f64) -> String {
     }
 }
 
-fn hotspot_trend_symbol(trend: plow_core::churn::ChurnTrend) -> String {
+fn hotspot_trend_symbol(trend: plow_engine::ChurnTrend) -> String {
     match trend {
-        plow_core::churn::ChurnTrend::Accelerating => "\u{25b2}".red().to_string(),
-        plow_core::churn::ChurnTrend::Cooling => "\u{25bc}".green().to_string(),
-        plow_core::churn::ChurnTrend::Stable => "\u{2500}".dimmed().to_string(),
+        plow_engine::ChurnTrend::Accelerating => "\u{25b2}".red().to_string(),
+        plow_engine::ChurnTrend::Cooling => "\u{25bc}".green().to_string(),
+        plow_engine::ChurnTrend::Stable => "\u{2500}".dimmed().to_string(),
     }
 }
 
-fn hotspot_trend_label(trend: plow_core::churn::ChurnTrend) -> String {
+fn hotspot_trend_label(trend: plow_engine::ChurnTrend) -> String {
     match trend {
-        plow_core::churn::ChurnTrend::Accelerating => "\u{25b2} accelerating".red().to_string(),
-        plow_core::churn::ChurnTrend::Cooling => "\u{25bc} cooling".green().to_string(),
-        plow_core::churn::ChurnTrend::Stable => "\u{2500} stable".dimmed().to_string(),
+        plow_engine::ChurnTrend::Accelerating => "\u{25b2} accelerating".red().to_string(),
+        plow_engine::ChurnTrend::Cooling => "\u{25bc} cooling".green().to_string(),
+        plow_engine::ChurnTrend::Stable => "\u{2500} stable".dimmed().to_string(),
     }
 }
 
@@ -242,7 +238,7 @@ fn hotspot_test_tag(is_test_path: bool) -> String {
     }
 }
 
-fn push_hotspots_footer(lines: &mut Vec<String>, report: &crate::health_types::HealthReport) {
+fn push_hotspots_footer(lines: &mut Vec<String>, report: &plow_output::HealthReport) {
     push_hotspots_excluded_line(lines, report);
     if hotspots_have_history_only_ownership(report) {
         lines.push(format!(
@@ -258,10 +254,7 @@ fn push_hotspots_footer(lines: &mut Vec<String>, report: &crate::health_types::H
     lines.push(String::new());
 }
 
-fn push_hotspots_excluded_line(
-    lines: &mut Vec<String>,
-    report: &crate::health_types::HealthReport,
-) {
+fn push_hotspots_excluded_line(lines: &mut Vec<String>, report: &plow_output::HealthReport) {
     let Some(summary) = report.hotspot_summary.as_ref() else {
         return;
     };
@@ -281,7 +274,7 @@ fn push_hotspots_excluded_line(
     lines.push(String::new());
 }
 
-fn hotspots_have_history_only_ownership(report: &crate::health_types::HealthReport) -> bool {
+fn hotspots_have_history_only_ownership(report: &plow_output::HealthReport) -> bool {
     let any_ownership = report.hotspots.iter().any(|h| h.ownership.is_some());
     let no_codeowners_anywhere = report
         .hotspots
@@ -295,11 +288,11 @@ fn hotspots_have_history_only_ownership(report: &crate::health_types::HealthRepo
 mod tests {
     use std::path::PathBuf;
 
-    use plow_core::churn::ChurnTrend;
+    use plow_engine::ChurnTrend;
 
     use super::super::plain;
     use super::*;
-    use crate::health_types::{
+    use plow_output::{
         ContributorEntry, ContributorIdentifierFormat, HealthReport, HotspotEntry, HotspotFinding,
         HotspotSummary, OwnershipMetrics, OwnershipState,
     };

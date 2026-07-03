@@ -12,6 +12,10 @@ ue = "ue"
 ba = "ba"
 caf = "caf"
 fpr = "fpr"
+# `xdescribe`/`xit` are the Jasmine/Jest skipped-suite APIs matched as
+# string literals by the E3 weakening-signal detector, not misspellings.
+xdescribe = "xdescribe"
+xit = "xit"
 
 [default.extend-words]
 ba = "ba"
@@ -36,3 +40,6 @@ unparseable = "unparseable"
 # `vulnerabilit` is a deliberate truncated substring matched via `.includes()`
 # in the VS Code package-manifest test, not a misspelling of "vulnerability".
 vulnerabilit = "vulnerabilit"
+# `sais` is the SA-IS algorithm (Suffix Array by Induced Sorting) used for
+# clone-detection suffix array construction, not a misspelling of "says".
+sais = "sais"

@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::OnceLock;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+
+pub use plow_types::churn::ChurnTrend;
 
 /// Function pointer signature used by `set_spawn_hook` to intercept the
 /// `git log --numstat` subprocess. Lets the CLI route long-running git
@@ -69,29 +71,6 @@ pub struct SinceDuration {
     pub git_after: String,
     /// Human-readable display string (e.g., `"6 months"`).
     pub display: String,
-}
-
-/// Churn trend indicator based on comparing recent vs older halves of the analysis period.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, bitcode::Encode, bitcode::Decode)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum ChurnTrend {
-    /// Recent half has >1.5× the commits of the older half.
-    Accelerating,
-    /// Churn is roughly stable between halves.
-    Stable,
-    /// Recent half has <0.67× the commits of the older half.
-    Cooling,
-}
-
-impl std::fmt::Display for ChurnTrend {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Accelerating => write!(f, "accelerating"),
-            Self::Stable => write!(f, "stable"),
-            Self::Cooling => write!(f, "cooling"),
-        }
-    }
 }
 
 /// Per-author commit aggregation for a single file.
@@ -277,41 +256,64 @@ pub fn analyze_churn_from_file(path: &Path, root: &Path) -> Result<ChurnResult, 
         ));
     }
 
+    let state = churn_event_state_from_doc(&doc, path, root)?;
+    Ok(build_churn_result(state, false))
+}
+
+/// Validate and fold a parsed `plow-churn/v1` document into event state.
+///
+/// Rejects empty paths and far-future (likely millisecond) timestamps; interns
+/// authors into the pool exactly as the git-log path does.
+fn churn_event_state_from_doc(
+    doc: &ChurnFileDoc,
+    path: &Path,
+    root: &Path,
+) -> Result<ChurnEventState, String> {
+    let mut builder = ChurnFileImportBuilder::new(path, root, churn_file_future_limit());
+
+    for event in &doc.events {
+        builder.push_event(event)?;
+    }
+
+    Ok(builder.finish())
+}
+
+fn churn_file_future_limit() -> u64 {
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let future_limit = now_secs.saturating_add(MAX_FUTURE_TIMESTAMP_SECS);
+    now_secs.saturating_add(MAX_FUTURE_TIMESTAMP_SECS)
+}
 
-    let mut files: FxHashMap<PathBuf, FileEvents> = FxHashMap::default();
-    let mut author_pool: Vec<String> = Vec::new();
-    let mut author_index: FxHashMap<String, u32> = FxHashMap::default();
+struct ChurnFileImportBuilder<'a> {
+    path: &'a Path,
+    root: &'a Path,
+    future_limit: u64,
+    files: FxHashMap<PathBuf, FileEvents>,
+    author_pool: Vec<String>,
+    author_index: FxHashMap<String, u32>,
+}
 
-    for event in doc.events {
-        let normalized = event.path.replace('\\', "/");
-        let rel = normalized.trim();
-        if rel.is_empty() {
-            return Err(format!(
-                "churn file {} has an event with an empty path",
-                path.display()
-            ));
+impl<'a> ChurnFileImportBuilder<'a> {
+    fn new(path: &'a Path, root: &'a Path, future_limit: u64) -> Self {
+        Self {
+            path,
+            root,
+            future_limit,
+            files: FxHashMap::default(),
+            author_pool: Vec::new(),
+            author_index: FxHashMap::default(),
         }
-        if event.timestamp > future_limit {
-            return Err(format!(
-                "churn file {} has event timestamp {} for \"{rel}\" more than a year in the \
-                 future; timestamps must be unix SECONDS (not milliseconds), UTC",
-                path.display(),
-                event.timestamp
-            ));
-        }
-        let abs_path = root.join(rel);
-        let author_idx = event
-            .author
-            .as_deref()
-            .map(str::trim)
-            .filter(|email| !email.is_empty())
-            .map(|email| intern_author(email, &mut author_pool, &mut author_index));
-        files
+    }
+
+    fn push_event(&mut self, event: &ChurnFileEvent) -> Result<(), String> {
+        let rel = normalize_churn_event_path(self.path, &event.path)?;
+        validate_churn_event_timestamp(self.path, event.timestamp, self.future_limit, &rel)?;
+
+        let abs_path = self.root.join(&rel);
+        let author_idx = self.intern_author(event.author.as_deref());
+        self.files
             .entry(abs_path)
             .or_insert_with(|| FileEvents { events: Vec::new() })
             .events
@@ -321,11 +323,51 @@ pub fn analyze_churn_from_file(path: &Path, root: &Path) -> Result<ChurnResult, 
                 lines_deleted: event.deleted,
                 author_idx,
             });
+        Ok(())
     }
 
-    Ok(build_churn_result(
-        ChurnEventState { files, author_pool },
-        false,
+    fn intern_author(&mut self, author: Option<&str>) -> Option<u32> {
+        author
+            .map(str::trim)
+            .filter(|email| !email.is_empty())
+            .map(|email| intern_author(email, &mut self.author_pool, &mut self.author_index))
+    }
+
+    fn finish(self) -> ChurnEventState {
+        ChurnEventState {
+            files: self.files,
+            author_pool: self.author_pool,
+        }
+    }
+}
+
+fn normalize_churn_event_path(path: &Path, event_path: &str) -> Result<String, String> {
+    let normalized = event_path.replace('\\', "/");
+    let rel = normalized.trim();
+    if rel.is_empty() {
+        return Err(format!(
+            "churn file {} has an event with an empty path",
+            path.display()
+        ));
+    }
+    Ok(rel.to_string())
+}
+
+fn validate_churn_event_timestamp(
+    path: &Path,
+    timestamp: u64,
+    future_limit: u64,
+    rel: &str,
+) -> Result<(), String> {
+    if timestamp <= future_limit {
+        return Ok(());
+    }
+
+    Err(format!(
+        "churn file {} has event timestamp {} for \"{rel}\" more than a year in the \
+         future; timestamps must be unix SECONDS (not milliseconds), UTC",
+        path.display(),
+        timestamp
     ))
 }
 
@@ -487,45 +529,62 @@ pub fn analyze_churn_cached(
 ) -> Option<(ChurnResult, bool)> {
     let head_sha = get_head_sha(root)?;
 
-    if !no_cache && let Some(cache) = load_churn_cache(cache_dir, &since.git_after) {
-        if cache.last_indexed_sha == head_sha {
-            let shallow_clone = cache.shallow_clone;
-            let state = cache.into_event_state();
-            return Some((build_churn_result(state, shallow_clone), true));
-        }
-
-        if is_ancestor(root, &cache.last_indexed_sha, &head_sha) {
-            let shallow_clone = is_shallow_clone(root);
-            let range = format!("{}..HEAD", cache.last_indexed_sha);
-            if let Some(delta) = analyze_churn_events(root, since, Some(&range)) {
-                let mut state = cache.into_event_state();
-                merge_churn_states(&mut state, delta);
-                save_churn_cache(
-                    cache_dir,
-                    &head_sha,
-                    &since.git_after,
-                    &state,
-                    shallow_clone,
-                );
-                return Some((build_churn_result(state, shallow_clone), true));
-            }
-        }
+    if !no_cache && let Some(result) = try_reuse_churn_cache(root, since, cache_dir, &head_sha) {
+        return Some((result, true));
     }
 
+    analyze_fresh_churn(root, since, cache_dir, no_cache, &head_sha).map(|result| (result, false))
+}
+
+fn try_reuse_churn_cache(
+    root: &Path,
+    since: &SinceDuration,
+    cache_dir: &Path,
+    head_sha: &str,
+) -> Option<ChurnResult> {
+    let cache = load_churn_cache(cache_dir, &since.git_after)?;
+    if cache.last_indexed_sha == head_sha {
+        let shallow_clone = cache.shallow_clone;
+        return Some(build_churn_result(cache.into_event_state(), shallow_clone));
+    }
+
+    if !is_ancestor(root, &cache.last_indexed_sha, head_sha) {
+        return None;
+    }
+
+    extend_churn_cache(root, since, cache_dir, head_sha, cache)
+}
+
+fn extend_churn_cache(
+    root: &Path,
+    since: &SinceDuration,
+    cache_dir: &Path,
+    head_sha: &str,
+    cache: ChurnCache,
+) -> Option<ChurnResult> {
+    let shallow_clone = is_shallow_clone(root);
+    let range = format!("{}..HEAD", cache.last_indexed_sha);
+    let delta = analyze_churn_events(root, since, Some(&range))?;
+    let mut state = cache.into_event_state();
+    merge_churn_states(&mut state, delta);
+    save_churn_cache(cache_dir, head_sha, &since.git_after, &state, shallow_clone);
+    Some(build_churn_result(state, shallow_clone))
+}
+
+fn analyze_fresh_churn(
+    root: &Path,
+    since: &SinceDuration,
+    cache_dir: &Path,
+    no_cache: bool,
+    head_sha: &str,
+) -> Option<ChurnResult> {
     let shallow_clone = is_shallow_clone(root);
     let state = analyze_churn_events(root, since, None)?;
     if !no_cache {
-        save_churn_cache(
-            cache_dir,
-            &head_sha,
-            &since.git_after,
-            &state,
-            shallow_clone,
-        );
+        save_churn_cache(cache_dir, head_sha, &since.git_after, &state, shallow_clone);
     }
 
-    let result = build_churn_result(state, shallow_clone);
-    Some((result, false))
+    Some(build_churn_result(state, shallow_clone))
 }
 
 impl ChurnCache {
@@ -627,56 +686,172 @@ fn parse_git_log_events(stdout: &str, root: &Path) -> ChurnEventState {
         .unwrap_or_default()
         .as_secs();
 
-    let mut files: FxHashMap<PathBuf, FileEvents> = FxHashMap::default();
-    let mut author_pool: Vec<String> = Vec::new();
-    let mut author_index: FxHashMap<String, u32> = FxHashMap::default();
-    let mut current_timestamp: Option<u64> = None;
-    let mut current_author_idx: Option<u32> = None;
+    let mut parser = GitLogEventParser::new(root, now_secs);
 
     for line in stdout.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
+        parser.consume_line(line);
+    }
 
-        if let Some((ts_str, email)) = line.split_once('|')
-            && let Ok(ts) = ts_str.parse::<u64>()
-        {
-            current_timestamp = Some(ts);
-            current_author_idx = Some(intern_author(email, &mut author_pool, &mut author_index));
-            continue;
-        }
+    parser.finish()
+}
 
-        if let Ok(ts) = line.parse::<u64>() {
-            current_timestamp = Some(ts);
-            current_author_idx = None;
-            continue;
-        }
+struct GitLogEventParser<'a> {
+    root: &'a Path,
+    now_secs: u64,
+    files: FxHashMap<PathBuf, FileEvents>,
+    author_pool: Vec<String>,
+    author_index: FxHashMap<String, u32>,
+    current_timestamp: Option<u64>,
+    current_author_idx: Option<u32>,
+}
 
-        if let Some((added, deleted, path)) = parse_numstat_line(line) {
-            let abs_path = root.join(path);
-            let ts = current_timestamp.unwrap_or(now_secs);
-            files
-                .entry(abs_path)
-                .or_insert_with(|| FileEvents { events: Vec::new() })
-                .events
-                .push(CachedCommitEvent {
-                    timestamp: ts,
-                    lines_added: added,
-                    lines_deleted: deleted,
-                    author_idx: current_author_idx,
-                });
+impl<'a> GitLogEventParser<'a> {
+    fn new(root: &'a Path, now_secs: u64) -> Self {
+        Self {
+            root,
+            now_secs,
+            files: FxHashMap::default(),
+            author_pool: Vec::new(),
+            author_index: FxHashMap::default(),
+            current_timestamp: None,
+            current_author_idx: None,
         }
     }
 
-    ChurnEventState { files, author_pool }
+    fn consume_line(&mut self, line: &str) {
+        let line = line.trim();
+        if line.is_empty() {
+            return;
+        }
+
+        if self.record_commit_header(line) {
+            return;
+        }
+        if self.record_legacy_timestamp(line) {
+            return;
+        }
+        self.record_numstat(line);
+    }
+
+    fn record_commit_header(&mut self, line: &str) -> bool {
+        let Some((ts_str, email)) = line.split_once('|') else {
+            return false;
+        };
+        let Ok(ts) = ts_str.parse::<u64>() else {
+            return false;
+        };
+
+        self.current_timestamp = Some(ts);
+        self.current_author_idx = Some(intern_author(
+            email,
+            &mut self.author_pool,
+            &mut self.author_index,
+        ));
+        true
+    }
+
+    fn record_legacy_timestamp(&mut self, line: &str) -> bool {
+        let Ok(ts) = line.parse::<u64>() else {
+            return false;
+        };
+
+        self.current_timestamp = Some(ts);
+        self.current_author_idx = None;
+        true
+    }
+
+    fn record_numstat(&mut self, line: &str) {
+        let Some((added, deleted, path)) = parse_numstat_line(line) else {
+            return;
+        };
+
+        let ts = self.current_timestamp.unwrap_or(self.now_secs);
+        self.files
+            .entry(self.root.join(path))
+            .or_insert_with(|| FileEvents { events: Vec::new() })
+            .events
+            .push(CachedCommitEvent {
+                timestamp: ts,
+                lines_added: added,
+                lines_deleted: deleted,
+                author_idx: self.current_author_idx,
+            });
+    }
+
+    fn finish(self) -> ChurnEventState {
+        ChurnEventState {
+            files: self.files,
+            author_pool: self.author_pool,
+        }
+    }
 }
 
-/// Convert event-level churn state into the public aggregate result.
+/// Aggregate one file's raw commit events into a [`FileChurn`], applying
+/// recency weighting, trend detection, and per-author accumulation.
 #[expect(
     clippy::cast_possible_truncation,
     reason = "commit count per file is bounded by git history depth"
 )]
+fn aggregate_file_churn(path: PathBuf, file: FileEvents, now_secs: u64) -> FileChurn {
+    let mut timestamps = Vec::with_capacity(file.events.len());
+    let mut weighted_commits = 0.0;
+    let mut lines_added = 0;
+    let mut lines_deleted = 0;
+    let mut authors: FxHashMap<u32, AuthorContribution> = FxHashMap::default();
+
+    for event in file.events {
+        timestamps.push(event.timestamp);
+        let age_days = (now_secs.saturating_sub(event.timestamp)) as f64 / SECS_PER_DAY;
+        let weight = 0.5_f64.powf(age_days / HALF_LIFE_DAYS);
+        weighted_commits += weight;
+        lines_added += event.lines_added;
+        lines_deleted += event.lines_deleted;
+        accumulate_author(&mut authors, event.author_idx, weight, event.timestamp);
+    }
+
+    let commits = timestamps.len() as u32;
+    let trend = compute_trend(&timestamps);
+    for c in authors.values_mut() {
+        c.weighted_commits = (c.weighted_commits * 100.0).round() / 100.0;
+    }
+    FileChurn {
+        path,
+        commits,
+        weighted_commits: (weighted_commits * 100.0).round() / 100.0,
+        lines_added,
+        lines_deleted,
+        trend,
+        authors,
+    }
+}
+
+/// Fold a single commit's author contribution into the per-author map.
+fn accumulate_author(
+    authors: &mut FxHashMap<u32, AuthorContribution>,
+    author_idx: Option<u32>,
+    weight: f64,
+    timestamp: u64,
+) {
+    let Some(idx) = author_idx else {
+        return;
+    };
+    authors
+        .entry(idx)
+        .and_modify(|c| {
+            c.commits += 1;
+            c.weighted_commits += weight;
+            c.first_commit_ts = c.first_commit_ts.min(timestamp);
+            c.last_commit_ts = c.last_commit_ts.max(timestamp);
+        })
+        .or_insert(AuthorContribution {
+            commits: 1,
+            weighted_commits: weight,
+            first_commit_ts: timestamp,
+            last_commit_ts: timestamp,
+        });
+}
+
+/// Convert event-level churn state into the public aggregate result.
 fn build_churn_result(state: ChurnEventState, shallow_clone: bool) -> ChurnResult {
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -687,52 +862,7 @@ fn build_churn_result(state: ChurnEventState, shallow_clone: bool) -> ChurnResul
         .files
         .into_iter()
         .map(|(path, file)| {
-            let mut timestamps = Vec::with_capacity(file.events.len());
-            let mut weighted_commits = 0.0;
-            let mut lines_added = 0;
-            let mut lines_deleted = 0;
-            let mut authors: FxHashMap<u32, AuthorContribution> = FxHashMap::default();
-
-            for event in file.events {
-                timestamps.push(event.timestamp);
-                let age_days = (now_secs.saturating_sub(event.timestamp)) as f64 / SECS_PER_DAY;
-                let weight = 0.5_f64.powf(age_days / HALF_LIFE_DAYS);
-                weighted_commits += weight;
-                lines_added += event.lines_added;
-                lines_deleted += event.lines_deleted;
-
-                if let Some(idx) = event.author_idx {
-                    authors
-                        .entry(idx)
-                        .and_modify(|c| {
-                            c.commits += 1;
-                            c.weighted_commits += weight;
-                            c.first_commit_ts = c.first_commit_ts.min(event.timestamp);
-                            c.last_commit_ts = c.last_commit_ts.max(event.timestamp);
-                        })
-                        .or_insert(AuthorContribution {
-                            commits: 1,
-                            weighted_commits: weight,
-                            first_commit_ts: event.timestamp,
-                            last_commit_ts: event.timestamp,
-                        });
-                }
-            }
-
-            let commits = timestamps.len() as u32;
-            let trend = compute_trend(&timestamps);
-            for c in authors.values_mut() {
-                c.weighted_commits = (c.weighted_commits * 100.0).round() / 100.0;
-            }
-            let churn = FileChurn {
-                path: path.clone(),
-                commits,
-                weighted_commits: (weighted_commits * 100.0).round() / 100.0,
-                lines_added,
-                lines_deleted,
-                trend,
-                authors,
-            };
+            let churn = aggregate_file_churn(path.clone(), file, now_secs);
             (path, churn)
         })
         .collect();
@@ -771,7 +901,7 @@ fn intern_author(email: &str, pool: &mut Vec<String>, index: &mut FxHashMap<Stri
 }
 
 /// Parse a single numstat line: `"10\t5\tpath/to/file.ts"`.
-/// Binary files show as `"-\t-\tpath"` — skip those.
+/// Binary files show as `"-\t-\tpath"`, skip those.
 fn parse_numstat_line(line: &str) -> Option<(u32, u32, &str)> {
     let mut parts = line.splitn(3, '\t');
     let added_str = parts.next()?;

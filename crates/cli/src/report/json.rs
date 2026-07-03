@@ -1,30 +1,29 @@
 use crate::report::sink::outln;
-use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use plow_core::duplicates::DuplicationReport;
-use plow_core::results::AnalysisResults;
-use plow_types::envelope::{CheckSummary, ElapsedMs, EntryPoints, SchemaVersion, ToolVersion};
-
-use super::{emit_json, normalize_uri};
-use crate::explain;
-use crate::output_dupes::DupesReportPayload;
-use crate::output_envelope::{
-    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, DupesOutput, GroupByMode, HealthOutput,
-    PlowOutput, serialize_root_output,
+use plow_api::{
+    CheckJsonExtraOutputs, CheckJsonOutputInput, CheckJsonPayloadInput, DupesReportPayload,
+    DuplicationGrouping, DuplicationJsonOutputInput, GroupedCheckJsonOutputInput,
+    GroupedDuplicationJsonOutputInput,
 };
-use crate::report::grouping::{OwnershipResolver, ResultGroup};
+use plow_types::duplicates::DuplicationReport;
+#[cfg(test)]
+use plow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
+use plow_types::results::AnalysisResults;
 
-fn apply_config_fixable_to_duplicate_exports(results: &mut AnalysisResults, config_fixable: bool) {
-    if !config_fixable {
-        return;
-    }
-    for finding in &mut results.duplicate_exports {
-        finding.set_config_fixable(true);
-    }
-}
+#[cfg(test)]
+use plow_output::strip_root_prefix;
+use plow_types::envelope::{
+    BaselineCategoryDelta, BaselineDeltas, BaselineMatch, RegressionResult, RegressionStatus,
+    RegressionToleranceKind,
+};
+
+use super::emit_json;
+use crate::report::grouping::{OwnershipResolver, ResultGroup};
+use plow_config::WorkspaceDiagnostic;
+use plow_output::GroupByMode;
 
 pub(super) struct PrintJsonInput<'a> {
     pub(super) results: &'a AnalysisResults,
@@ -44,29 +43,15 @@ pub(super) fn print_json(input: &PrintJsonInput<'_>) -> ExitCode {
     let regression = input.regression;
     let baseline_matched = input.baseline_matched;
     let config_fixable = input.config_fixable;
-    match build_json_with_config_fixable(results, root, elapsed, config_fixable) {
-        Ok(mut output) => {
-            if let Some(outcome) = regression
-                && let serde_json::Value::Object(ref mut map) = output
-            {
-                map.insert("regression".to_string(), outcome.to_json());
-            }
-            if let Some((entries, matched)) = baseline_matched
-                && let serde_json::Value::Object(ref mut map) = output
-            {
-                map.insert(
-                    "baseline".to_string(),
-                    serde_json::json!({
-                        "entries": entries,
-                        "matched": matched,
-                    }),
-                );
-            }
-            if explain {
-                insert_meta(&mut output, explain::check_meta());
-            }
-            emit_json(&output, "JSON")
-        }
+    match api_check_json_document_with_config_fixable_meta_and_extras(
+        results,
+        root,
+        elapsed,
+        config_fixable,
+        explain.then(plow_output::check_meta),
+        check_json_extras(regression, None, baseline_matched),
+    ) {
+        Ok(output) => emit_json(&output, "JSON"),
         Err(e) => {
             eprintln!("Error: failed to serialize results: {e}");
             ExitCode::from(2)
@@ -86,62 +71,29 @@ pub(super) struct PrintGroupedJsonInput<'a> {
 }
 
 pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode {
-    let groups = input.groups;
-    let original = input.original;
-    let root = input.root;
-    let elapsed = input.elapsed;
-    let explain = input.explain;
-    let resolver = input.resolver;
-    let config_fixable = input.config_fixable;
-    let entries: Vec<CheckGroupedEntry> = groups
-        .iter()
-        .map(|group| {
-            let mut results = group.results.clone();
-            apply_config_fixable_to_duplicate_exports(&mut results, config_fixable);
-            CheckGroupedEntry {
-                key: group.key.clone(),
-                owners: group.owners.clone(),
-                total_issues: results.total_issues(),
-                results,
-            }
-        })
-        .collect();
-
-    let envelope = CheckGroupedOutput {
-        schema_version: SchemaVersion(SCHEMA_VERSION),
-        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
-        grouped_by: group_by_mode_from_label(resolver.mode_label()),
-        total_issues: original.total_issues(),
-        groups: entries,
-        meta: None,
+    let output = match plow_api::serialize_grouped_check_json(GroupedCheckJsonOutputInput {
+        groups: input.groups,
+        original: input.original,
+        root: input.root,
+        elapsed: input.elapsed,
+        grouped_by: group_by_mode_from_label(input.resolver.mode_label()),
+        config_fixable: input.config_fixable,
+        meta: input.explain.then(plow_output::check_meta),
         next_steps: crate::report::suggestions::build_dead_code_next_steps(
-            original,
-            root,
-            crate::report::suggestions::setup_pointer_applicable(root),
-            crate::report::suggestions::due_impact_digest(root),
+            input.original,
+            input.root,
+            crate::report::suggestions::setup_pointer_applicable(input.root),
+            crate::report::suggestions::due_impact_digest(input.root),
         ),
-    };
-
-    let mut output = match serialize_root_output(PlowOutput::CheckGrouped(envelope)) {
+        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
+        telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+    }) {
         Ok(value) => value,
         Err(e) => {
             eprintln!("Error: failed to serialize grouped results: {e}");
             return ExitCode::from(2);
         }
     };
-
-    let root_prefix = format!("{}/", root.display());
-    if let Some(arr) = output.get_mut("groups").and_then(|v| v.as_array_mut()) {
-        for entry in arr {
-            strip_root_prefix(entry, &root_prefix);
-            harmonize_multi_kind_suppress_line_actions(entry);
-        }
-    }
-
-    if explain {
-        insert_meta(&mut output, explain::check_meta());
-    }
 
     emit_json(&output, "JSON")
 }
@@ -152,16 +104,13 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
 )]
 pub(crate) const SCHEMA_VERSION: u32 = 7;
 
-#[allow(
-    dead_code,
-    reason = "used by the plow-cli library target for embedders, but dead in the binary target"
-)]
-pub fn build_json(
+#[cfg(test)]
+pub(super) fn api_check_json_document(
     results: &AnalysisResults,
     root: &Path,
     elapsed: Duration,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    build_json_with_config_fixable(
+    api_check_json_document_with_config_fixable(
         results,
         root,
         elapsed,
@@ -169,364 +118,198 @@ pub fn build_json(
     )
 }
 
-pub fn build_json_with_config_fixable(
+#[cfg(test)]
+pub(super) fn api_check_json_document_with_config_fixable(
     results: &AnalysisResults,
     root: &Path,
     elapsed: Duration,
     config_fixable: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut envelope = build_check_output(results, root, elapsed, config_fixable);
-    envelope.next_steps = crate::report::suggestions::build_dead_code_next_steps(
+    api_check_json_document_with_config_fixable_and_meta(
         results,
         root,
-        crate::report::suggestions::setup_pointer_applicable(root),
-        crate::report::suggestions::due_impact_digest(root),
-    );
-    let mut output = serialize_root_output(PlowOutput::Check(envelope))?;
-    postprocess_check_json(&mut output, root);
-    Ok(output)
+        elapsed,
+        config_fixable,
+        None,
+    )
 }
 
-pub fn build_check_json_payload_with_config_fixable(
+#[cfg(test)]
+fn api_check_json_document_with_config_fixable_and_meta(
     results: &AnalysisResults,
     root: &Path,
     elapsed: Duration,
     config_fixable: bool,
+    meta: Option<plow_types::envelope::Meta>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let envelope = build_check_output(results, root, elapsed, config_fixable);
-    let mut output = serde_json::to_value(&envelope)?;
-    postprocess_check_json(&mut output, root);
-    Ok(output)
+    api_check_json_document_with_config_fixable_meta_and_extras(
+        results,
+        root,
+        elapsed,
+        config_fixable,
+        meta,
+        CheckJsonExtraOutputs::default(),
+    )
 }
 
-fn build_check_output(
+pub(super) fn api_check_json_document_with_config_fixable_meta_and_extras(
     results: &AnalysisResults,
     root: &Path,
     elapsed: Duration,
     config_fixable: bool,
-) -> CheckOutput {
-    let mut owned_results = results.clone();
-    apply_config_fixable_to_duplicate_exports(&mut owned_results, config_fixable);
-    CheckOutput {
-        schema_version: SchemaVersion(SCHEMA_VERSION),
-        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
-        total_issues: owned_results.total_issues(),
-        entry_points: owned_results
-            .entry_point_summary
-            .as_ref()
-            .map(|ep| EntryPoints {
-                total: ep.total,
-                sources: ep
-                    .by_source
-                    .iter()
-                    .map(|(k, v)| (k.replace(' ', "_"), *v))
-                    .collect(),
-            }),
-        summary: build_check_summary(&owned_results),
-        results: owned_results,
-        baseline_deltas: None,
-        baseline: None,
-        regression: None,
-        meta: None,
-        workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
-        // Populated only at the standalone-command entry points; the combined
-        // and audit envelopes reuse this struct as a sub-block and aggregate
-        // their own `next_steps` at the top level, so it stays empty here.
-        next_steps: Vec::new(),
-    }
-}
-
-fn postprocess_check_json(output: &mut serde_json::Value, root: &Path) {
-    let root_prefix = format!("{}/", root.display());
-    strip_root_prefix(output, &root_prefix);
-    harmonize_multi_kind_suppress_line_actions(output);
-}
-
-/// Compute the per-category `CheckSummary` from analysis results.
-fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
-    CheckSummary {
-        total_issues: results.total_issues(),
-        unused_files: results.unused_files.len(),
-        unused_exports: results.unused_exports.len(),
-        unused_types: results.unused_types.len(),
-        private_type_leaks: results.private_type_leaks.len(),
-        unused_dependencies: results.unused_dependencies.len()
-            + results.unused_dev_dependencies.len()
-            + results.unused_optional_dependencies.len(),
-        unused_enum_members: results.unused_enum_members.len(),
-        unused_class_members: results.unused_class_members.len(),
-        unused_store_members: results.unused_store_members.len(),
-        unresolved_imports: results.unresolved_imports.len(),
-        unlisted_dependencies: results.unlisted_dependencies.len(),
-        duplicate_exports: results.duplicate_exports.len(),
-        type_only_dependencies: results.type_only_dependencies.len(),
-        test_only_dependencies: results.test_only_dependencies.len(),
-        circular_dependencies: results.circular_dependencies.len(),
-        re_export_cycles: results.re_export_cycles.len(),
-        boundary_violations: results.boundary_violations.len(),
-        boundary_coverage_violations: results.boundary_coverage_violations.len(),
-        boundary_call_violations: results.boundary_call_violations.len(),
-        policy_violations: results.policy_violations.len(),
-        stale_suppressions: results.stale_suppressions.len(),
-        unused_catalog_entries: results.unused_catalog_entries.len(),
-        empty_catalog_groups: results.empty_catalog_groups.len(),
-        unresolved_catalog_references: results.unresolved_catalog_references.len(),
-        unused_dependency_overrides: results.unused_dependency_overrides.len(),
-        misconfigured_dependency_overrides: results.misconfigured_dependency_overrides.len(),
-        invalid_client_exports: results.invalid_client_exports.len(),
-        mixed_client_server_barrels: results.mixed_client_server_barrels.len(),
-        misplaced_directives: results.misplaced_directives.len(),
-        unprovided_injects: results.unprovided_injects.len(),
-        unrendered_components: results.unrendered_components.len(),
-        unused_component_props: results.unused_component_props.len(),
-        unused_component_emits: results.unused_component_emits.len(),
-        unused_server_actions: results.unused_server_actions.len(),
-        route_collisions: results.route_collisions.len(),
-        dynamic_segment_name_conflicts: results.dynamic_segment_name_conflicts.len(),
-    }
-}
-
-/// Recursively strip the root prefix from all string values in the JSON tree.
-///
-/// This converts absolute paths (e.g., `/home/runner/work/repo/repo/src/utils.ts`)
-/// to relative paths (`src/utils.ts`) for all output fields.
-pub fn strip_root_prefix(value: &mut serde_json::Value, prefix: &str) {
-    match value {
-        serde_json::Value::String(s) => {
-            if let Some(rest) = s.strip_prefix(prefix) {
-                *s = rest.to_string();
-            } else {
-                let normalized = normalize_uri(s);
-                let normalized_prefix = normalize_uri(prefix);
-                if let Some(rest) = normalized.strip_prefix(&normalized_prefix) {
-                    *s = rest.to_string();
-                } else if let Some(stripped) =
-                    strip_embedded_root_prefixes(&normalized, &normalized_prefix)
-                {
-                    *s = stripped;
-                }
-            }
-        }
-        serde_json::Value::Array(arr) => {
-            for item in arr {
-                strip_root_prefix(item, prefix);
-            }
-        }
-        serde_json::Value::Object(map) => {
-            for (_, v) in map.iter_mut() {
-                strip_root_prefix(v, prefix);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn strip_embedded_root_prefixes(value: &str, prefix: &str) -> Option<String> {
-    let mut output = String::with_capacity(value.len());
-    let mut changed = false;
-    let mut last = 0;
-    let mut search_from = 0;
-
-    while let Some(offset) = value[search_from..].find(prefix) {
-        let index = search_from + offset;
-        let can_strip = index > 0
-            && value[..index]
-                .chars()
-                .next_back()
-                .is_some_and(is_embedded_path_boundary);
-
-        if can_strip {
-            output.push_str(&value[last..index]);
-            last = index + prefix.len();
-            changed = true;
-        }
-
-        search_from = index + prefix.len();
-    }
-
-    if changed {
-        output.push_str(&value[last..]);
-        Some(output)
-    } else {
-        None
-    }
-}
-
-fn is_embedded_path_boundary(c: char) -> bool {
-    c.is_whitespace() || matches!(c, '"' | '\'' | '`' | '(' | '[' | '{' | ':' | '=')
-}
-
-type SuppressAnchor = (String, u64);
-
-#[allow(
-    clippy::redundant_pub_crate,
-    reason = "used through report module re-export by audit.rs"
-)]
-pub(crate) fn harmonize_multi_kind_suppress_line_actions(output: &mut serde_json::Value) {
-    let mut anchors: BTreeMap<SuppressAnchor, Vec<String>> = BTreeMap::new();
-    collect_suppress_line_anchors(output, &mut anchors);
-
-    anchors.retain(|_, kinds| {
-        sort_suppression_kinds(kinds);
-        kinds.dedup();
-        kinds.len() > 1
-    });
-    if anchors.is_empty() {
-        return;
-    }
-
-    rewrite_suppress_line_actions(output, &anchors);
-}
-
-fn collect_suppress_line_anchors(
-    value: &serde_json::Value,
-    anchors: &mut BTreeMap<SuppressAnchor, Vec<String>>,
-) {
-    match value {
-        serde_json::Value::Object(map) => {
-            if let Some(anchor) = suppression_anchor(map)
-                && let Some(actions) = map.get("actions").and_then(serde_json::Value::as_array)
-            {
-                for action in actions {
-                    if let Some(comment) = suppress_line_comment(action) {
-                        for kind in parse_suppress_line_comment(comment) {
-                            let kinds = anchors.entry(anchor.clone()).or_default();
-                            if !kinds.iter().any(|existing| existing == &kind) {
-                                kinds.push(kind);
-                            }
-                        }
-                    }
-                }
-            }
-
-            for child in map.values() {
-                collect_suppress_line_anchors(child, anchors);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                collect_suppress_line_anchors(item, anchors);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn rewrite_suppress_line_actions(
-    value: &mut serde_json::Value,
-    anchors: &BTreeMap<SuppressAnchor, Vec<String>>,
-) {
-    match value {
-        serde_json::Value::Object(map) => {
-            if let Some(anchor) = suppression_anchor(map)
-                && let Some(kinds) = anchors.get(&anchor)
-            {
-                let comment = format!("// plow-ignore-next-line {}", kinds.join(", "));
-                if let Some(actions) = map
-                    .get_mut("actions")
-                    .and_then(serde_json::Value::as_array_mut)
-                {
-                    for action in actions {
-                        if suppress_line_comment(action).is_some()
-                            && let serde_json::Value::Object(action_map) = action
-                        {
-                            action_map.insert("comment".to_string(), serde_json::json!(comment));
-                        }
-                    }
-                }
-            }
-
-            for child in map.values_mut() {
-                rewrite_suppress_line_actions(child, anchors);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                rewrite_suppress_line_actions(item, anchors);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn suppression_anchor(map: &serde_json::Map<String, serde_json::Value>) -> Option<SuppressAnchor> {
-    let path = map
-        .get("path")
-        .or_else(|| map.get("from_path"))
-        .and_then(serde_json::Value::as_str)?;
-    let line = map.get("line").and_then(serde_json::Value::as_u64)?;
-    Some((path.to_string(), line))
-}
-
-fn suppress_line_comment(action: &serde_json::Value) -> Option<&str> {
-    (action.get("type").and_then(serde_json::Value::as_str) == Some("suppress-line"))
-        .then_some(())
-        .and_then(|()| action.get("comment").and_then(serde_json::Value::as_str))
-}
-
-fn parse_suppress_line_comment(comment: &str) -> Vec<String> {
-    comment
-        .strip_prefix("// plow-ignore-next-line ")
-        .map(|rest| {
-            rest.split(|c: char| c == ',' || c.is_whitespace())
-                .filter(|token| !token.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn sort_suppression_kinds(kinds: &mut [String]) {
-    kinds.sort_by_key(|kind| suppression_kind_rank(kind));
-}
-
-fn suppression_kind_rank(kind: &str) -> usize {
-    match kind {
-        "unused-file" => 0,
-        "unused-export" => 1,
-        "unused-type" => 2,
-        "private-type-leak" => 3,
-        "unused-enum-member" => 4,
-        "unused-class-member" => 5,
-        "unused-store-member" => 6,
-        "unresolved-import" => 7,
-        "unlisted-dependency" => 8,
-        "duplicate-export" => 9,
-        "circular-dependency" => 10,
-        "re-export-cycle" => 11,
-        "boundary-violation" => 12,
-        "code-duplication" => 13,
-        "complexity" => 14,
-        "unprovided-inject" => 15,
-        "unrendered-component" => 16,
-        "unused-server-action" => 17,
-        _ => usize::MAX,
-    }
-}
-
-pub fn build_baseline_deltas_json<'a>(
-    total_delta: i64,
-    per_category: impl Iterator<Item = (&'a str, usize, usize, i64)>,
-) -> serde_json::Value {
-    let mut per_cat = serde_json::Map::new();
-    for (cat, current, baseline, delta) in per_category {
-        per_cat.insert(
-            cat.to_string(),
-            serde_json::json!({
-                "current": current,
-                "baseline": baseline,
-                "delta": delta,
-            }),
-        );
-    }
-    serde_json::json!({
-        "total_delta": total_delta,
-        "per_category": per_cat
+    meta: Option<plow_types::envelope::Meta>,
+    extras: CheckJsonExtraOutputs,
+) -> Result<serde_json::Value, serde_json::Error> {
+    plow_api::serialize_check_json(CheckJsonOutputInput {
+        results,
+        root,
+        elapsed,
+        config_fixable,
+        meta,
+        extras,
+        workspace_diagnostics: workspace_diagnostics_for_output(root),
+        next_steps: crate::report::suggestions::build_dead_code_next_steps(
+            results,
+            root,
+            crate::report::suggestions::setup_pointer_applicable(root),
+            crate::report::suggestions::due_impact_digest(root),
+        ),
+        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
+        telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     })
 }
 
+pub fn api_check_json_payload_with_config_fixable(
+    results: &AnalysisResults,
+    root: &Path,
+    elapsed: Duration,
+    config_fixable: bool,
+) -> Result<serde_json::Value, serde_json::Error> {
+    api_check_json_payload_with_config_fixable_and_extras(
+        results,
+        root,
+        elapsed,
+        config_fixable,
+        CheckJsonExtraOutputs::default(),
+    )
+}
+
+pub fn api_check_json_payload_with_config_fixable_and_extras(
+    results: &AnalysisResults,
+    root: &Path,
+    elapsed: Duration,
+    config_fixable: bool,
+    extras: CheckJsonExtraOutputs,
+) -> Result<serde_json::Value, serde_json::Error> {
+    plow_api::serialize_check_json_payload(CheckJsonPayloadInput {
+        results,
+        root,
+        elapsed,
+        config_fixable,
+        extras,
+        workspace_diagnostics: workspace_diagnostics_for_output(root),
+    })
+}
+
+fn workspace_diagnostics_for_output(root: &Path) -> Vec<WorkspaceDiagnostic> {
+    crate::runtime_support::workspace_diagnostics_for(root)
+}
+
+pub fn check_json_extras(
+    regression: Option<&crate::regression::RegressionOutcome>,
+    baseline_deltas: Option<BaselineDeltas>,
+    baseline_matched: Option<(usize, usize)>,
+) -> CheckJsonExtraOutputs {
+    CheckJsonExtraOutputs {
+        regression: regression.map(regression_output),
+        baseline_deltas,
+        baseline: baseline_matched.map(|(entries, matched)| BaselineMatch { entries, matched }),
+    }
+}
+
+#[must_use]
+pub fn regression_output(outcome: &crate::regression::RegressionOutcome) -> RegressionResult {
+    match outcome {
+        crate::regression::RegressionOutcome::Pass {
+            baseline_total,
+            current_total,
+        } => {
+            let baseline_total = *baseline_total as i64;
+            let current_total = *current_total as i64;
+            RegressionResult {
+                status: RegressionStatus::Pass,
+                baseline_total: Some(baseline_total),
+                current_total: Some(current_total),
+                delta: Some(current_total - baseline_total),
+                tolerance: None,
+                tolerance_kind: None,
+                exceeded: false,
+                reason: None,
+            }
+        }
+        crate::regression::RegressionOutcome::Exceeded {
+            baseline_total,
+            current_total,
+            tolerance,
+            ..
+        } => {
+            let baseline_total = *baseline_total as i64;
+            let current_total = *current_total as i64;
+            let (tolerance, tolerance_kind) = match tolerance {
+                crate::regression::Tolerance::Percentage(percent) => {
+                    (*percent, RegressionToleranceKind::Percentage)
+                }
+                crate::regression::Tolerance::Absolute(count) => {
+                    (*count as f64, RegressionToleranceKind::Absolute)
+                }
+            };
+            RegressionResult {
+                status: RegressionStatus::Exceeded,
+                baseline_total: Some(baseline_total),
+                current_total: Some(current_total),
+                delta: Some(current_total - baseline_total),
+                tolerance: Some(tolerance),
+                tolerance_kind: Some(tolerance_kind),
+                exceeded: true,
+                reason: None,
+            }
+        }
+        crate::regression::RegressionOutcome::Skipped { reason } => RegressionResult {
+            status: RegressionStatus::Skipped,
+            baseline_total: None,
+            current_total: None,
+            delta: None,
+            tolerance: None,
+            tolerance_kind: None,
+            exceeded: false,
+            reason: Some((*reason).to_string()),
+        },
+    }
+}
+
+pub fn build_baseline_deltas_output<'a>(
+    total_delta: i64,
+    per_category: impl Iterator<Item = (&'a str, usize, usize, i64)>,
+) -> BaselineDeltas {
+    BaselineDeltas {
+        total_delta,
+        per_category: per_category
+            .map(|(category, current, baseline, delta)| {
+                (
+                    category.to_string(),
+                    BaselineCategoryDelta {
+                        current,
+                        baseline,
+                        delta,
+                    },
+                )
+            })
+            .collect(),
+    }
+}
+
 /// Insert a `_meta` key into a JSON object value.
+#[cfg(test)]
 fn insert_meta(output: &mut serde_json::Value, meta: serde_json::Value) {
     if let serde_json::Value::Object(map) = output {
         let telemetry = map
@@ -541,44 +324,69 @@ fn insert_meta(output: &mut serde_json::Value, meta: serde_json::Value) {
     }
 }
 
-pub fn build_health_json(
-    report: &crate::health_types::HealthReport,
+pub(super) fn api_health_json_document(
+    report: &plow_output::HealthReport,
     root: &Path,
     elapsed: Duration,
     explain: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let envelope = HealthOutput {
-        schema_version: SchemaVersion(SCHEMA_VERSION),
-        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
+    let output = plow_api::serialize_health_report_json(plow_api::HealthJsonReportInput {
         report: report.clone(),
+        root,
+        elapsed,
+        explain,
         grouped_by: None,
         groups: None,
-        meta: None,
-        workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
-        next_steps: crate::report::suggestions::build_health_next_steps(
-            report,
-            root,
-            crate::report::suggestions::setup_pointer_applicable(root),
-            crate::report::suggestions::due_impact_digest(root),
+        workspace_diagnostics: workspace_diagnostics_for_output(root),
+        next_steps: plow_output::build_health_next_steps(
+            crate::report::suggestions::health_next_steps_input(
+                report,
+                root,
+                crate::report::suggestions::setup_pointer_applicable(root),
+                crate::report::suggestions::due_impact_digest(root),
+            ),
         ),
-    };
-    let mut output = serialize_root_output(PlowOutput::Health(envelope))?;
-    let root_prefix = format!("{}/", root.display());
-    strip_root_prefix(&mut output, &root_prefix);
-    if explain {
-        insert_meta(&mut output, explain::health_meta());
-    }
+        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
+        telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+    })?;
     Ok(output)
 }
 
+pub(super) fn api_grouped_health_json_document(
+    report: &plow_output::HealthReport,
+    grouping: &plow_output::HealthGrouping,
+    root: &Path,
+    elapsed: Duration,
+    explain: bool,
+) -> Result<serde_json::Value, serde_json::Error> {
+    plow_api::serialize_health_report_json(plow_api::HealthJsonReportInput {
+        report: report.clone(),
+        root,
+        elapsed,
+        explain,
+        grouped_by: Some(group_by_mode_from_label(grouping.mode)),
+        groups: Some(grouping.groups.clone()),
+        workspace_diagnostics: workspace_diagnostics_for_output(root),
+        next_steps: plow_output::build_health_next_steps(
+            crate::report::suggestions::health_next_steps_input(
+                report,
+                root,
+                crate::report::suggestions::setup_pointer_applicable(root),
+                crate::report::suggestions::due_impact_digest(root),
+            ),
+        ),
+        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
+        telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+    })
+}
+
 pub(super) fn print_health_json(
-    report: &crate::health_types::HealthReport,
+    report: &plow_output::HealthReport,
     root: &Path,
     elapsed: Duration,
     explain: bool,
 ) -> ExitCode {
-    match build_health_json(report, root, elapsed, explain) {
+    match api_health_json_document(report, root, elapsed, explain) {
         Ok(output) => emit_json(&output, "JSON"),
         Err(e) => {
             eprintln!("Error: failed to serialize health report: {e}");
@@ -587,62 +395,14 @@ pub(super) fn print_health_json(
     }
 }
 
-pub fn build_grouped_health_json(
-    report: &crate::health_types::HealthReport,
-    grouping: &crate::health_types::HealthGrouping,
-    root: &Path,
-    elapsed: Duration,
-    explain: bool,
-) -> Result<serde_json::Value, serde_json::Error> {
-    let root_prefix = format!("{}/", root.display());
-    let envelope = HealthOutput {
-        schema_version: SchemaVersion(SCHEMA_VERSION),
-        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
-        report: report.clone(),
-        grouped_by: Some(group_by_mode_from_label(grouping.mode)),
-        groups: None,
-        meta: None,
-        workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
-        next_steps: crate::report::suggestions::build_health_next_steps(
-            report,
-            root,
-            crate::report::suggestions::setup_pointer_applicable(root),
-            crate::report::suggestions::due_impact_digest(root),
-        ),
-    };
-    let mut output = serialize_root_output(PlowOutput::Health(envelope))?;
-    strip_root_prefix(&mut output, &root_prefix);
-
-    let group_values: Vec<serde_json::Value> = grouping
-        .groups
-        .iter()
-        .map(|g| {
-            let mut value = serde_json::to_value(g)?;
-            strip_root_prefix(&mut value, &root_prefix);
-            Ok(value)
-        })
-        .collect::<Result<_, serde_json::Error>>()?;
-
-    if let serde_json::Value::Object(ref mut map) = output {
-        map.insert("groups".to_string(), serde_json::Value::Array(group_values));
-    }
-
-    if explain {
-        insert_meta(&mut output, explain::health_meta());
-    }
-
-    Ok(output)
-}
-
 pub(super) fn print_grouped_health_json(
-    report: &crate::health_types::HealthReport,
-    grouping: &crate::health_types::HealthGrouping,
+    report: &plow_output::HealthReport,
+    grouping: &plow_output::HealthGrouping,
     root: &Path,
     elapsed: Duration,
     explain: bool,
 ) -> ExitCode {
-    match build_grouped_health_json(report, grouping, root, elapsed, explain) {
+    match api_grouped_health_json_document(report, grouping, root, elapsed, explain) {
         Ok(output) => emit_json(&output, "JSON"),
         Err(e) => {
             eprintln!("Error: failed to serialize grouped health report: {e}");
@@ -651,7 +411,7 @@ pub(super) fn print_grouped_health_json(
     }
 }
 
-pub fn build_duplication_json(
+pub(super) fn api_duplication_json_document(
     report: &DuplicationReport,
     root: &Path,
     elapsed: Duration,
@@ -664,27 +424,16 @@ pub fn build_duplication_json(
         crate::report::suggestions::setup_pointer_applicable(root),
         crate::report::suggestions::due_impact_digest(root),
     );
-    let envelope = DupesOutput {
-        schema_version: SchemaVersion(SCHEMA_VERSION),
-        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
-        report: payload,
-        grouped_by: None,
-        total_issues: None,
-        groups: None,
-        meta: None,
-        workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
+    plow_api::serialize_duplication_json(DuplicationJsonOutputInput {
+        report,
+        root,
+        elapsed,
+        meta: explain.then(plow_output::dupes_meta),
+        workspace_diagnostics: workspace_diagnostics_for_output(root),
         next_steps,
-    };
-    let mut output = serialize_root_output(PlowOutput::Dupes(envelope))?;
-    let root_prefix = format!("{}/", root.display());
-    strip_root_prefix(&mut output, &root_prefix);
-
-    if explain {
-        insert_meta(&mut output, explain::dupes_meta());
-    }
-
-    Ok(output)
+        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
+        telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+    })
 }
 
 pub(super) fn print_duplication_json(
@@ -693,7 +442,7 @@ pub(super) fn print_duplication_json(
     elapsed: Duration,
     explain: bool,
 ) -> ExitCode {
-    match build_duplication_json(report, root, elapsed, explain) {
+    match api_duplication_json_document(report, root, elapsed, explain) {
         Ok(output) => emit_json(&output, "JSON"),
         Err(e) => {
             eprintln!("Error: failed to serialize duplication report: {e}");
@@ -702,14 +451,13 @@ pub(super) fn print_duplication_json(
     }
 }
 
-pub fn build_grouped_duplication_json(
+pub(super) fn api_grouped_duplication_json_document(
     report: &DuplicationReport,
-    grouping: &super::dupes_grouping::DuplicationGrouping,
+    grouping: &DuplicationGrouping,
     root: &Path,
     elapsed: Duration,
     explain: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let root_prefix = format!("{}/", root.display());
     let payload = DupesReportPayload::from_report(report);
     let next_steps = crate::report::suggestions::build_dupes_next_steps(
         &payload,
@@ -717,40 +465,17 @@ pub fn build_grouped_duplication_json(
         crate::report::suggestions::setup_pointer_applicable(root),
         crate::report::suggestions::due_impact_digest(root),
     );
-    let envelope = DupesOutput {
-        schema_version: SchemaVersion(SCHEMA_VERSION),
-        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
-        report: payload,
-        grouped_by: Some(group_by_mode_from_label(grouping.mode)),
-        total_issues: Some(report.clone_groups.len()),
-        groups: None,
-        meta: None,
-        workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
+    plow_api::serialize_grouped_duplication_json(GroupedDuplicationJsonOutputInput {
+        report,
+        grouping,
+        root,
+        elapsed,
+        meta: explain.then(plow_output::dupes_meta),
+        workspace_diagnostics: workspace_diagnostics_for_output(root),
         next_steps,
-    };
-    let mut output = serialize_root_output(PlowOutput::Dupes(envelope))?;
-    strip_root_prefix(&mut output, &root_prefix);
-
-    let group_values: Vec<serde_json::Value> = grouping
-        .groups
-        .iter()
-        .map(|g| {
-            let mut value = serde_json::to_value(g)?;
-            strip_root_prefix(&mut value, &root_prefix);
-            Ok(value)
-        })
-        .collect::<Result<_, serde_json::Error>>()?;
-
-    if let serde_json::Value::Object(ref mut map) = output {
-        map.insert("groups".to_string(), serde_json::Value::Array(group_values));
-    }
-
-    if explain {
-        insert_meta(&mut output, explain::dupes_meta());
-    }
-
-    Ok(output)
+        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
+        telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+    })
 }
 
 fn group_by_mode_from_label(label: &str) -> GroupByMode {
@@ -764,12 +489,12 @@ fn group_by_mode_from_label(label: &str) -> GroupByMode {
 
 pub(super) fn print_grouped_duplication_json(
     report: &DuplicationReport,
-    grouping: &super::dupes_grouping::DuplicationGrouping,
+    grouping: &DuplicationGrouping,
     root: &Path,
     elapsed: Duration,
     explain: bool,
 ) -> ExitCode {
-    match build_grouped_duplication_json(report, grouping, root, elapsed, explain) {
+    match api_grouped_duplication_json_document(report, grouping, root, elapsed, explain) {
         Ok(output) => emit_json(&output, "JSON"),
         Err(e) => {
             eprintln!("Error: failed to serialize grouped duplication report: {e}");
@@ -795,25 +520,63 @@ pub(super) fn print_trace_json<T: serde::Serialize>(value: &T) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::health_types::{
+    use crate::report::test_helpers::sample_results;
+    use plow_output::{
         RuntimeCoverageAction, RuntimeCoverageConfidence, RuntimeCoverageDataSource,
         RuntimeCoverageEvidence, RuntimeCoverageFinding, RuntimeCoverageHotPath,
         RuntimeCoverageMessage, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
         RuntimeCoverageSchemaVersion, RuntimeCoverageSummary, RuntimeCoverageVerdict,
         RuntimeCoverageWatermark,
     };
-    use crate::report::test_helpers::sample_results;
-    use plow_core::extract::MemberKind;
-    use plow_core::results::*;
+    use plow_types::extract::MemberKind;
+    use plow_types::output_dead_code::*;
+    use plow_types::results::*;
     use std::path::PathBuf;
     use std::time::Duration;
+
+    #[test]
+    fn typed_regression_output_matches_legacy_json_shape() {
+        let outcome = crate::regression::RegressionOutcome::Exceeded {
+            baseline_total: 10,
+            current_total: 13,
+            tolerance: crate::regression::Tolerance::Absolute(2),
+            type_deltas: Vec::new(),
+        };
+
+        assert_eq!(
+            serde_json::to_value(regression_output(&outcome)).expect("regression serializes"),
+            outcome.to_json()
+        );
+    }
+
+    #[test]
+    fn typed_baseline_deltas_output_matches_legacy_json_shape() {
+        let typed = build_baseline_deltas_output(
+            2,
+            [("unused_exports", 4_usize, 2_usize, 2_i64)].into_iter(),
+        );
+
+        assert_eq!(
+            serde_json::to_value(typed).expect("baseline deltas serialize"),
+            serde_json::json!({
+                "total_delta": 2,
+                "per_category": {
+                    "unused_exports": {
+                        "current": 4,
+                        "baseline": 2,
+                        "delta": 2
+                    }
+                }
+            })
+        );
+    }
 
     #[test]
     fn json_output_has_metadata_fields() {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(123);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["kind"], "dead-code");
         assert_eq!(output["schema_version"], 7);
@@ -827,7 +590,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
         let elapsed = Duration::from_millis(50);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["unused_files"].as_array().unwrap().len(), 1);
         assert_eq!(output["unused_exports"].as_array().unwrap().len(), 1);
@@ -850,9 +613,13 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+    )]
     fn health_json_includes_runtime_coverage_with_relative_paths_and_actions() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = plow_output::HealthReport {
             runtime_coverage: Some(RuntimeCoverageReport {
                 schema_version: RuntimeCoverageSchemaVersion::V1,
                 verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
@@ -868,7 +635,7 @@ mod tests {
                     trace_count: 2_847_291,
                     period_days: 30,
                     deployments_seen: 14,
-                    capture_quality: Some(crate::health_types::RuntimeCoverageCaptureQuality {
+                    capture_quality: Some(plow_output::RuntimeCoverageCaptureQuality {
                         window_seconds: 720,
                         instances_observed: 1,
                         lazy_parse_warning: true,
@@ -899,6 +666,7 @@ mod tests {
                         auto_fixable: false,
                     }],
                     source_hash: None,
+                    discriminators: None,
                 }],
                 hot_paths: vec![RuntimeCoverageHotPath {
                     id: "plow:hot:cafebabe".to_owned(),
@@ -918,11 +686,18 @@ mod tests {
                     code: "partial-merge".to_owned(),
                     message: "Merged coverage omitted one chunk.".to_owned(),
                 }],
+                actionable: true,
+                actionability_reason: None,
+                actionability_verdict: None,
+                provenance: plow_output::RuntimeCoverageProvenance::default(),
             }),
             ..Default::default()
         };
 
-        let envelope = HealthOutput {
+        let envelope: plow_output::HealthOutput<
+            plow_output::HealthReport,
+            plow_output::HealthGroup,
+        > = plow_output::HealthOutput {
             schema_version: SchemaVersion(SCHEMA_VERSION),
             version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
             elapsed_ms: ElapsedMs(7),
@@ -972,11 +747,55 @@ mod tests {
     }
 
     #[test]
+    fn grouped_health_json_uses_api_contract_for_group_paths() {
+        let root = PathBuf::from("/project");
+        let grouping = plow_output::HealthGrouping {
+            mode: "package",
+            groups: vec![plow_output::HealthGroup {
+                key: "app".to_string(),
+                owners: None,
+                files_analyzed: 1,
+                functions_above_threshold: 0,
+                coverage_source_consistency: None,
+                vital_signs: None,
+                health_score: None,
+                findings: Vec::new(),
+                file_scores: Vec::new(),
+                hotspots: Vec::new(),
+                large_functions: vec![plow_output::LargeFunctionEntry {
+                    path: root.join("src/large.ts"),
+                    name: "large".to_string(),
+                    line: 12,
+                    line_count: 80,
+                }],
+                targets: Vec::new(),
+                actions_meta: None,
+            }],
+        };
+
+        let output = api_grouped_health_json_document(
+            &plow_output::HealthReport::default(),
+            &grouping,
+            &root,
+            Duration::ZERO,
+            false,
+        )
+        .expect("grouped health JSON should serialize");
+
+        assert_eq!(output["kind"], "health");
+        assert_eq!(output["grouped_by"], "package");
+        assert_eq!(
+            output["groups"][0]["large_functions"][0]["path"],
+            "src/large.ts"
+        );
+    }
+
+    #[test]
     fn json_metadata_fields_appear_first() {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
         let keys: Vec<&String> = output.as_object().unwrap().keys().collect();
         assert_eq!(keys[0], "kind");
         assert_eq!(keys[1], "schema_version");
@@ -991,7 +810,7 @@ mod tests {
         let results = sample_results(&root);
         let total = results.total_issues();
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["total_issues"], total);
     }
@@ -1012,7 +831,7 @@ mod tests {
                 is_re_export: false,
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let export = &output["unused_exports"][0];
         assert_eq!(export["export_name"], "helperFn");
@@ -1028,7 +847,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
         let elapsed = Duration::from_millis(42);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let json_str = serde_json::to_string_pretty(&output).expect("should stringify");
         let reparsed: serde_json::Value =
@@ -1041,7 +860,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["total_issues"], 0);
         assert_eq!(output["unused_files"].as_array().unwrap().len(), 0);
@@ -1069,7 +888,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let json_str = serde_json::to_string(&output).expect("should stringify");
         let reparsed: serde_json::Value =
@@ -1087,7 +906,7 @@ mod tests {
                 path: root.join("src/deep/nested/file.ts"),
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let path = output["unused_files"][0]["path"].as_str().unwrap();
         assert_eq!(path, "src/deep/nested/file.ts");
@@ -1111,7 +930,7 @@ mod tests {
                 },
             ));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let site_path = output["unlisted_dependencies"][0]["imported_from"][0]["path"]
             .as_str()
@@ -1141,7 +960,7 @@ mod tests {
                 ],
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let loc0 = output["duplicate_exports"][0]["locations"][0]["path"]
             .as_str()
@@ -1170,7 +989,7 @@ mod tests {
                 },
             ));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let files = output["circular_dependencies"][0]["files"]
             .as_array()
@@ -1189,7 +1008,7 @@ mod tests {
                 path: PathBuf::from("/other/project/src/file.ts"),
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let path = output["unused_files"][0]["path"].as_str().unwrap();
         assert!(path.contains("/other/project/"));
@@ -1205,7 +1024,7 @@ mod tests {
                 path: root.join("src/orphan.ts"),
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let file = &output["unused_files"][0];
         assert_eq!(file["path"], "src/orphan.ts");
@@ -1227,7 +1046,7 @@ mod tests {
                 is_re_export: false,
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let typ = &output["unused_types"][0];
         assert_eq!(typ["export_name"], "OldInterface");
@@ -1250,7 +1069,7 @@ mod tests {
                 used_in_workspaces: Vec::new(),
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let dep = &output["unused_dependencies"][0];
         assert_eq!(dep["package_name"], "axios");
@@ -1272,7 +1091,7 @@ mod tests {
                 used_in_workspaces: vec![root.join("packages/consumer")],
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let dep = &output["unused_dependencies"][0];
         assert_eq!(
@@ -1295,7 +1114,7 @@ mod tests {
                 used_in_workspaces: Vec::new(),
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let dep = &output["unused_dev_dependencies"][0];
         assert_eq!(dep["package_name"], "vitest");
@@ -1317,7 +1136,7 @@ mod tests {
                 },
             ));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let dep = &output["unused_optional_dependencies"][0];
         assert_eq!(dep["package_name"], "fsevents");
@@ -1339,7 +1158,7 @@ mod tests {
                 col: 2,
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let member = &output["unused_enum_members"][0];
         assert_eq!(member["parent_name"], "Color");
@@ -1363,7 +1182,7 @@ mod tests {
                 col: 4,
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let member = &output["unused_class_members"][0];
         assert_eq!(member["parent_name"], "ApiClient");
@@ -1385,7 +1204,7 @@ mod tests {
                 specifier_col: 0,
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let import = &output["unresolved_imports"][0];
         assert_eq!(import["specifier"], "@acme/missing-pkg");
@@ -1417,7 +1236,7 @@ mod tests {
                 },
             ));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let dep = &output["unlisted_dependencies"][0];
         assert_eq!(dep["package_name"], "dotenv");
@@ -1449,7 +1268,7 @@ mod tests {
                 ],
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let dup = &output["duplicate_exports"][0];
         assert_eq!(dup["export_name"], "Button");
@@ -1483,7 +1302,7 @@ mod tests {
                 ],
             }));
 
-        let output = build_json(&results, root, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, root, Duration::ZERO).unwrap();
         let actions = output["duplicate_exports"][0]["actions"]
             .as_array()
             .unwrap();
@@ -1514,7 +1333,7 @@ mod tests {
                 ],
             }));
 
-        let output = build_json(&results, root, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, root, Duration::ZERO).unwrap();
         let actions = output["duplicate_exports"][0]["actions"]
             .as_array()
             .unwrap();
@@ -1552,7 +1371,7 @@ mod tests {
                 ],
             }));
 
-        let output = build_json(&results, &sub, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, &sub, Duration::ZERO).unwrap();
         let actions = output["duplicate_exports"][0]["actions"]
             .as_array()
             .unwrap();
@@ -1574,7 +1393,7 @@ mod tests {
                 },
             ));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let dep = &output["type_only_dependencies"][0];
         assert_eq!(dep["package_name"], "zod");
@@ -1602,7 +1421,7 @@ mod tests {
                 },
             ));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let cycle = &output["circular_dependencies"][0];
         assert_eq!(cycle["length"], 3);
@@ -1627,7 +1446,7 @@ mod tests {
                 is_re_export: true,
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["unused_exports"][0]["is_re_export"], true);
     }
@@ -1637,7 +1456,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["schema_version"], SCHEMA_VERSION);
         assert_eq!(output["schema_version"], 7);
@@ -1648,7 +1467,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["version"], env!("CARGO_PKG_VERSION"));
     }
@@ -1657,7 +1476,8 @@ mod tests {
     fn json_elapsed_ms_zero_duration() {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
-        let output = build_json(&results, &root, Duration::ZERO).expect("should serialize");
+        let output =
+            api_check_json_document(&results, &root, Duration::ZERO).expect("should serialize");
 
         assert_eq!(output["elapsed_ms"], 0);
     }
@@ -1667,7 +1487,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_mins(2);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["elapsed_ms"], 120_000);
     }
@@ -1677,7 +1497,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_micros(500);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["elapsed_ms"], 0);
     }
@@ -1702,7 +1522,7 @@ mod tests {
                 path: root.join("src/c.ts"),
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["unused_files"].as_array().unwrap().len(), 3);
         assert_eq!(output["total_issues"], 3);
@@ -1801,7 +1621,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
         let elapsed = Duration::from_millis(100);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["total_issues"], results.total_issues());
     }
@@ -1811,7 +1631,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let json_str = serde_json::to_string(&output).expect("should stringify");
         assert!(!json_str.contains("/project/src/"));
@@ -1824,8 +1644,8 @@ mod tests {
         let results = sample_results(&root);
         let elapsed = Duration::from_millis(50);
 
-        let output1 = build_json(&results, &root, elapsed).expect("first build");
-        let output2 = build_json(&results, &root, elapsed).expect("second build");
+        let output1 = api_check_json_document(&results, &root, elapsed).expect("first build");
+        let output2 = api_check_json_document(&results, &root, elapsed).expect("second build");
 
         assert_eq!(output1, output2);
     }
@@ -1835,7 +1655,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(99);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["kind"], "dead-code");
         assert_eq!(output["schema_version"], 7);
@@ -1847,7 +1667,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let expected_arrays = [
             "unused_files",
@@ -1962,8 +1782,12 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(0);
-        let mut output = build_json(&results, &root, elapsed).expect("should serialize");
-        insert_meta(&mut output, crate::explain::check_meta());
+        let mut output =
+            api_check_json_document(&results, &root, elapsed).expect("should serialize");
+        insert_meta(
+            &mut output,
+            serde_json::to_value(plow_output::check_meta()).unwrap(),
+        );
 
         assert!(output["_meta"]["docs"].is_string());
         assert!(output["_meta"]["rules"].is_object());
@@ -1995,7 +1819,7 @@ mod tests {
             }));
 
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let enum_member = &output["unused_enum_members"][0];
         assert!(enum_member["kind"].is_string());
@@ -2018,7 +1842,7 @@ mod tests {
                 span_start: 120,
                 is_re_export: false,
             }));
-        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
 
         let actions = output["unused_exports"][0]["actions"].as_array().unwrap();
         assert_eq!(actions.len(), 2);
@@ -2048,7 +1872,7 @@ mod tests {
                 },
             ));
 
-        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
         let action = &output["boundary_coverage_violations"][0]["actions"][1];
 
         assert_eq!(
@@ -2088,7 +1912,7 @@ mod tests {
                 span_start: 60,
                 is_re_export: false,
             }));
-        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
 
         let export_actions = output["unused_exports"][0]["actions"].as_array().unwrap();
         let type_actions = output["unused_types"][0]["actions"].as_array().unwrap();
@@ -2103,51 +1927,6 @@ mod tests {
     }
 
     #[test]
-    fn audit_like_json_shares_suppression_comment_across_dead_code_and_complexity() {
-        let mut output = serde_json::json!({
-            "dead_code": {
-                "unused_exports": [{
-                    "path": "src/main.ts",
-                    "line": 1,
-                    "actions": [
-                        { "type": "remove-export", "auto_fixable": true },
-                        {
-                            "type": "suppress-line",
-                            "auto_fixable": false,
-                            "comment": "// plow-ignore-next-line unused-export"
-                        }
-                    ]
-                }]
-            },
-            "complexity": {
-                "findings": [{
-                    "path": "src/main.ts",
-                    "line": 1,
-                    "actions": [
-                        { "type": "refactor-function", "auto_fixable": false },
-                        {
-                            "type": "suppress-line",
-                            "auto_fixable": false,
-                            "comment": "// plow-ignore-next-line complexity"
-                        }
-                    ]
-                }]
-            }
-        });
-
-        harmonize_multi_kind_suppress_line_actions(&mut output);
-
-        assert_eq!(
-            output["dead_code"]["unused_exports"][0]["actions"][1]["comment"],
-            "// plow-ignore-next-line unused-export, complexity"
-        );
-        assert_eq!(
-            output["complexity"]["findings"][0]["actions"][1]["comment"],
-            "// plow-ignore-next-line unused-export, complexity"
-        );
-    }
-
-    #[test]
     fn json_unused_file_has_file_suppress_and_note() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
@@ -2156,7 +1935,7 @@ mod tests {
             .push(UnusedFileFinding::with_actions(UnusedFile {
                 path: root.join("src/dead.ts"),
             }));
-        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
 
         let actions = output["unused_files"][0]["actions"].as_array().unwrap();
         assert_eq!(actions[0]["type"], "delete-file");
@@ -2179,7 +1958,7 @@ mod tests {
                 line: 5,
                 used_in_workspaces: Vec::new(),
             }));
-        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
 
         let actions = output["unused_dependencies"][0]["actions"]
             .as_array()
@@ -2205,7 +1984,7 @@ mod tests {
                 line: 5,
                 used_in_workspaces: vec![root.join("packages/consumer")],
             }));
-        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
 
         let actions = output["unused_dependencies"][0]["actions"]
             .as_array()
@@ -2225,7 +2004,7 @@ mod tests {
     fn json_empty_results_have_no_actions_in_empty_arrays() {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
-        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
 
         assert!(output["unused_exports"].as_array().unwrap().is_empty());
         assert!(output["unused_files"].as_array().unwrap().is_empty());
@@ -2235,7 +2014,7 @@ mod tests {
     fn json_all_issue_types_have_actions() {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
-        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
 
         let issue_keys = [
             "unused_files",
@@ -2274,7 +2053,7 @@ mod tests {
     /// the JSON post-pass into the typed wrapper.
     fn build_actions_for_finding_json(
         finding_json: serde_json::Value,
-        opts: crate::health_types::HealthActionOptions,
+        opts: plow_output::HealthActionOptions,
         max_cyclomatic_threshold: u16,
         max_cognitive_threshold: u16,
         max_crap_threshold: f64,
@@ -2291,14 +2070,14 @@ mod tests {
                 .or_insert(serde_json::Value::String("moderate".to_string()));
         }
         let violation = synthesize_complexity_violation(&value);
-        let ctx = crate::health_types::HealthActionContext {
+        let ctx = plow_output::HealthActionContext {
             opts,
             max_cyclomatic_threshold,
             max_cognitive_threshold,
             max_crap_threshold,
             crap_refactor_band: 5,
         };
-        let finding = crate::health_types::HealthFinding::with_actions(violation, &ctx);
+        let finding = plow_output::HealthFinding::with_actions(violation, &ctx);
         let serialized = serde_json::to_value(&finding).expect("serialize HealthFinding");
         serialized["actions"]
             .as_array()
@@ -2312,10 +2091,8 @@ mod tests {
     /// shape.
     fn synthesize_complexity_violation(
         value: &serde_json::Value,
-    ) -> crate::health_types::ComplexityViolation {
-        use crate::health_types::{
-            CoverageSource, CoverageTier, ExceededThreshold, FindingSeverity,
-        };
+    ) -> plow_output::ComplexityViolation {
+        use plow_output::{CoverageSource, CoverageTier, ExceededThreshold, FindingSeverity};
         let exceeded = match value["exceeded"].as_str().unwrap_or("crap") {
             "cyclomatic" => ExceededThreshold::Cyclomatic,
             "cognitive" => ExceededThreshold::Cognitive,
@@ -2351,7 +2128,7 @@ mod tests {
                     "estimated_component_inherited" => CoverageSource::EstimatedComponentInherited,
                     other => panic!("unknown coverage_source label: {other}"),
                 });
-        crate::health_types::ComplexityViolation {
+        plow_output::ComplexityViolation {
             path: std::path::PathBuf::from(value["path"].as_str().unwrap_or("src/x.ts")),
             name: value["name"].as_str().unwrap_or("fn").to_string(),
             line: u32::try_from(value["line"].as_u64().unwrap_or(0)).unwrap_or(0),
@@ -2360,6 +2137,29 @@ mod tests {
             cognitive: u16::try_from(value["cognitive"].as_u64().unwrap_or(0)).unwrap_or(0),
             line_count: u32::try_from(value["line_count"].as_u64().unwrap_or(0)).unwrap_or(0),
             param_count: u8::try_from(value["param_count"].as_u64().unwrap_or(0)).unwrap_or(0),
+            react_hook_count: u16::try_from(value["react_hook_count"].as_u64().unwrap_or(0))
+                .unwrap_or(0),
+            react_jsx_max_depth: u16::try_from(value["react_jsx_max_depth"].as_u64().unwrap_or(0))
+                .unwrap_or(0),
+            react_prop_count: u16::try_from(value["react_prop_count"].as_u64().unwrap_or(0))
+                .unwrap_or(0),
+            react_hook_profile: value.get("react_hook_profile").map(|p| {
+                let read_u16 = |key: &str| {
+                    u16::try_from(p.get(key).and_then(serde_json::Value::as_u64).unwrap_or(0))
+                        .unwrap_or(0)
+                };
+                plow_output::ReactHookProfile {
+                    state: read_u16("state"),
+                    effect: read_u16("effect"),
+                    memo: read_u16("memo"),
+                    callback: read_u16("callback"),
+                    custom: read_u16("custom"),
+                    max_effect_dep_arity: p
+                        .get("max_effect_dep_arity")
+                        .and_then(serde_json::Value::as_u64)
+                        .and_then(|v| u32::try_from(v).ok()),
+                }
+            }),
             exceeded,
             severity,
             crap: value.get("crap").and_then(|v| v.as_f64()),
@@ -2372,7 +2172,7 @@ mod tests {
                 .map(std::path::PathBuf::from),
             component_rollup: value.get("component_rollup").and_then(|v| {
                 let map = v.as_object()?;
-                Some(crate::health_types::ComponentRollup {
+                Some(plow_output::ComponentRollup {
                     component: map.get("component")?.as_str()?.to_string(),
                     class_worst_function: map.get("class_worst_function")?.as_str()?.to_string(),
                     class_cyclomatic: u16::try_from(map.get("class_cyclomatic")?.as_u64()?).ok()?,
@@ -2403,7 +2203,7 @@ mod tests {
                 "line_count": 150,
                 "exceeded": "both"
             }),
-            crate::health_types::HealthActionOptions::default(),
+            plow_output::HealthActionOptions::default(),
             20,
             15,
             30.0,
@@ -2435,7 +2235,7 @@ mod tests {
                 "line_count": 150,
                 "exceeded": "both"
             }),
-            crate::health_types::HealthActionOptions::default(),
+            plow_output::HealthActionOptions::default(),
             20,
             15,
             30.0,
@@ -2457,7 +2257,7 @@ mod tests {
                 "line_count": 40,
                 "exceeded": "both"
             }),
-            crate::health_types::HealthActionOptions::default(),
+            plow_output::HealthActionOptions::default(),
             20,
             15,
             30.0,
@@ -2482,7 +2282,7 @@ mod tests {
                 "line_count": 40,
                 "exceeded": "both"
             }),
-            crate::health_types::HealthActionOptions::default(),
+            plow_output::HealthActionOptions::default(),
             20,
             15,
             30.0,
@@ -2564,13 +2364,17 @@ mod tests {
             max_cyclomatic_threshold,
             max_cognitive_threshold,
             max_crap_threshold,
-            crate::health_types::HealthActionOptions::default(),
+            plow_output::HealthActionOptions::default(),
         )
     }
 
     /// Build a single-finding health JSON envelope with the supplied action
     /// context. Used by the suppress-line gating tests to exercise the
     /// `baseline-active` / `config-disabled` reasons.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "test scaffold; positional envelope builder over independent metric/threshold knobs, bundling adds churn with no production value"
+    )]
     fn build_finding_envelope_with_ctx(
         coverage_tier: Option<&str>,
         cyclomatic: u16,
@@ -2578,15 +2382,15 @@ mod tests {
         max_cyclomatic_threshold: u16,
         max_cognitive_threshold: u16,
         max_crap_threshold: f64,
-        action_opts: crate::health_types::HealthActionOptions,
+        action_opts: plow_output::HealthActionOptions,
     ) -> serde_json::Value {
         let tier = coverage_tier.map(|t| match t {
-            "none" => crate::health_types::CoverageTier::None,
-            "partial" => crate::health_types::CoverageTier::Partial,
-            "high" => crate::health_types::CoverageTier::High,
+            "none" => plow_output::CoverageTier::None,
+            "partial" => plow_output::CoverageTier::Partial,
+            "high" => plow_output::CoverageTier::High,
             other => panic!("unknown coverage tier label: {other}"),
         });
-        let violation = crate::health_types::ComplexityViolation {
+        let violation = plow_output::ComplexityViolation {
             path: std::path::PathBuf::from("src/risk.ts"),
             name: "computeScore".to_string(),
             line: 12,
@@ -2595,8 +2399,12 @@ mod tests {
             cognitive,
             line_count: 40,
             param_count: 0,
-            exceeded: crate::health_types::ExceededThreshold::Crap,
-            severity: crate::health_types::FindingSeverity::Moderate,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
+            react_hook_profile: None,
+            exceeded: plow_output::ExceededThreshold::Crap,
+            severity: plow_output::FindingSeverity::Moderate,
             crap: Some(35.5),
             coverage_pct: None,
             coverage_tier: tier,
@@ -2607,14 +2415,14 @@ mod tests {
             effective_thresholds: None,
             threshold_source: None,
         };
-        let ctx = crate::health_types::HealthActionContext {
+        let ctx = plow_output::HealthActionContext {
             opts: action_opts,
             max_cyclomatic_threshold,
             max_cognitive_threshold,
             max_crap_threshold,
             crap_refactor_band: 5,
         };
-        let finding = crate::health_types::HealthFinding::with_actions(violation, &ctx);
+        let finding = plow_output::HealthFinding::with_actions(violation, &ctx);
         let actions_meta = if action_opts.omit_suppress_line {
             Some(serde_json::json!({
                 "suppression_hints_omitted": true,
@@ -2758,7 +2566,7 @@ mod tests {
 
     #[test]
     fn crap_only_secondary_refactor_respects_configured_band() {
-        let violation = crate::health_types::ComplexityViolation {
+        let violation = plow_output::ComplexityViolation {
             path: std::path::PathBuf::from("src/risk.ts"),
             name: "computeScore".to_string(),
             line: 12,
@@ -2767,11 +2575,15 @@ mod tests {
             cognitive: 10,
             line_count: 40,
             param_count: 0,
-            exceeded: crate::health_types::ExceededThreshold::Crap,
-            severity: crate::health_types::FindingSeverity::Moderate,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
+            react_hook_profile: None,
+            exceeded: plow_output::ExceededThreshold::Crap,
+            severity: plow_output::FindingSeverity::Moderate,
             crap: Some(35.5),
             coverage_pct: None,
-            coverage_tier: Some(crate::health_types::CoverageTier::None),
+            coverage_tier: Some(plow_output::CoverageTier::None),
             coverage_source: None,
             inherited_from: None,
             component_rollup: None,
@@ -2779,21 +2591,20 @@ mod tests {
             effective_thresholds: None,
             threshold_source: None,
         };
-        let narrow_ctx = crate::health_types::HealthActionContext {
-            opts: crate::health_types::HealthActionOptions::default(),
+        let narrow_ctx = plow_output::HealthActionContext {
+            opts: plow_output::HealthActionOptions::default(),
             max_cyclomatic_threshold: 20,
             max_cognitive_threshold: 15,
             max_crap_threshold: 30.0,
             crap_refactor_band: 5,
         };
-        let wide_ctx = crate::health_types::HealthActionContext {
+        let wide_ctx = plow_output::HealthActionContext {
             crap_refactor_band: 6,
             ..narrow_ctx
         };
 
-        let narrow_actions =
-            crate::health_types::build_health_finding_actions(&violation, &narrow_ctx);
-        let wide_actions = crate::health_types::build_health_finding_actions(&violation, &wide_ctx);
+        let narrow_actions = plow_output::build_health_finding_actions(&violation, &narrow_ctx);
+        let wide_actions = plow_output::build_health_finding_actions(&violation, &wide_ctx);
 
         assert!(
             !narrow_actions.iter().any(|a| {
@@ -2828,7 +2639,7 @@ mod tests {
                 "line_count": 80,
                 "exceeded": "cyclomatic",
             }),
-            crate::health_types::HealthActionOptions::default(),
+            plow_output::HealthActionOptions::default(),
             20,
             15,
             30.0,
@@ -2856,7 +2667,7 @@ mod tests {
             20,
             15,
             30.0,
-            crate::health_types::HealthActionOptions {
+            plow_output::HealthActionOptions {
                 omit_suppress_line: true,
                 omit_reason: Some("baseline-active"),
             },
@@ -2883,7 +2694,7 @@ mod tests {
             20,
             15,
             30.0,
-            crate::health_types::HealthActionOptions {
+            plow_output::HealthActionOptions {
                 omit_suppress_line: true,
                 omit_reason: Some("config-disabled"),
             },
@@ -2941,7 +2752,7 @@ mod tests {
             }
             let actions = build_actions_for_finding_json(
                 finding,
-                crate::health_types::HealthActionOptions::default(),
+                plow_output::HealthActionOptions::default(),
                 max,
                 15,
                 30.0,

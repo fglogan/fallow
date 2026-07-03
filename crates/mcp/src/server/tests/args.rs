@@ -4,10 +4,10 @@ use crate::tools::{
     build_check_changed_args, build_check_runtime_coverage_args, build_explain_args,
     build_feature_flags_args, build_find_dupes_args, build_fix_apply_args, build_fix_preview_args,
     build_get_blast_radius_args, build_get_cleanup_candidates_args, build_get_hot_paths_args,
-    build_get_importance_args, build_health_args, build_impact_all_args, build_impact_args,
-    build_list_boundaries_args, build_project_info_args, build_security_candidates_args,
-    build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
-    build_trace_file_args,
+    build_get_importance_args, build_get_token_blast_radius_args, build_health_args,
+    build_impact_all_args, build_impact_args, build_list_boundaries_args, build_project_info_args,
+    build_security_candidates_args, build_trace_clone_args, build_trace_dependency_args,
+    build_trace_export_args, build_trace_file_args,
 };
 
 /// Parse a validation error body into its `message` field. Arg builders emit
@@ -1307,6 +1307,10 @@ fn health_args_minimal() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn health_args_with_all_options() {
     let params = HealthParams {
         root: Some("/src".to_string()),
@@ -1319,6 +1323,7 @@ fn health_args_with_all_options() {
         changed_since: Some("develop".to_string()),
         complexity: Some(true),
         complexity_breakdown: Some(true),
+        css: None,
         file_scores: Some(true),
         hotspots: Some(true),
         targets: None,
@@ -1810,6 +1815,45 @@ fn runtime_context_split_tools_share_runtime_coverage_pipeline() {
     assert_eq!(build_get_blast_radius_args(&params), expected);
     assert_eq!(build_get_importance_args(&params), expected);
     assert_eq!(build_get_cleanup_candidates_args(&params), expected);
+}
+
+#[test]
+fn get_token_blast_radius_emits_css_health_json() {
+    let args = build_get_token_blast_radius_args(&GetTokenBlastRadiusParams::default());
+    assert_eq!(
+        args,
+        vec![
+            "health".to_string(),
+            "--css".to_string(),
+            "--format".to_string(),
+            "json".to_string(),
+        ],
+        "get_token_blast_radius must force `health --css --format json`"
+    );
+}
+
+#[test]
+fn get_token_blast_radius_threads_root_and_config() {
+    let params = GetTokenBlastRadiusParams {
+        root: Some("/repo".to_string()),
+        config: Some("plow.toml".to_string()),
+        no_cache: Some(true),
+        threads: Some(4),
+    };
+    let args = build_get_token_blast_radius_args(&params);
+    assert!(args.starts_with(&[
+        "health".to_string(),
+        "--css".to_string(),
+        "--format".to_string(),
+        "json".to_string(),
+    ]));
+    assert!(args.contains(&"--root".to_string()));
+    assert!(args.contains(&"/repo".to_string()));
+    assert!(args.contains(&"--config".to_string()));
+    assert!(args.contains(&"plow.toml".to_string()));
+    assert!(args.contains(&"--no-cache".to_string()));
+    assert!(args.contains(&"--threads".to_string()));
+    assert!(args.contains(&"4".to_string()));
 }
 
 #[test]
@@ -2388,8 +2432,7 @@ fn feature_flags_args_with_all_options() {
         config: Some(".plowrc.json".to_string()),
         production: Some(true),
         workspace: Some("@app/core".to_string()),
-        flag_type: None,
-        confidence: None,
+        top: Some(5),
         no_cache: Some(true),
         threads: Some(4),
     });
@@ -2403,4 +2446,6 @@ fn feature_flags_args_with_all_options() {
     assert!(args.contains(&"--no-cache".to_string()));
     assert!(args.contains(&"--threads".to_string()));
     assert!(args.contains(&"4".to_string()));
+    assert!(args.contains(&"--top".to_string()));
+    assert!(args.contains(&"5".to_string()));
 }

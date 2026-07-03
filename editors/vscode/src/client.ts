@@ -1,4 +1,3 @@
-import * as fs from "node:fs";
 // VS Code injects this module into the extension host at runtime.
 // plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
@@ -9,7 +8,7 @@ import {
   ServerOptions,
   State,
   TransportKind,
-} from "vscode-languageclient/node.js";
+} from "vscode-languageclient/node";
 import { DocumentDiagnosticRequest, Trace } from "vscode-languageserver-protocol";
 import {
   getLspPath,
@@ -30,7 +29,7 @@ import {
   getMutedDiagnosticCategories,
 } from "./config.js";
 import { showBinarySkewToastOnce } from "./binary-skew.js";
-import { findBinaryInPath, findLocalBinary } from "./binary-utils.js";
+import { findBinaryInPath, findLocalBinary, resolveConfiguredBinaryPath } from "./binary-utils.js";
 import type { DiagnosticFilter } from "./diagnosticFilter.js";
 import type { AnalysisCompleteParams } from "./statusBar-utils.js";
 import type { DuplicationMode, IssueTypeConfig } from "./types.js";
@@ -118,12 +117,16 @@ const resolveBinaryPath = async (
 ): Promise<string | null> => {
   const configPath = getLspPath();
   if (configPath) {
-    if (fs.existsSync(configPath)) {
-      outputChannel?.appendLine(`Binary resolution: using plow.lspPath setting: ${configPath}`);
-      return configPath;
+    // Honor `plow.lspPath` as the user typed it, tolerating a missing Windows
+    // extension and a directory pointing at the install folder, so a manually
+    // set path actually resolves instead of silently failing existsSync.
+    const resolved = resolveConfiguredBinaryPath(configPath, "plow-lsp");
+    if (resolved) {
+      outputChannel?.appendLine(`Binary resolution: using plow.lspPath setting: ${resolved}`);
+      return resolved;
     }
     void vscode.window.showWarningMessage(
-      `Plow: configured LSP path "${configPath}" does not exist.`,
+      `Plow: configured LSP path "${configPath}" does not point to a plow-lsp binary.`,
     );
     return null;
   }
@@ -264,7 +267,7 @@ export const requestServerDiagnosticRefresh = async (lspClient: LanguageClient):
 
 export const startClient = async (
   context: vscode.ExtensionContext,
-  outputChannel: vscode.OutputChannel,
+  outputChannel: vscode.LogOutputChannel,
   diagnosticFilter?: DiagnosticFilter,
   onAnalysisComplete?: (params: AnalysisCompleteParams) => void,
 ): Promise<LanguageClient | null> => {
@@ -423,7 +426,7 @@ export const stopClient = async (outputChannel?: vscode.OutputChannel): Promise<
 
 export const restartClient = (
   context: vscode.ExtensionContext,
-  outputChannel: vscode.OutputChannel,
+  outputChannel: vscode.LogOutputChannel,
   diagnosticFilter?: DiagnosticFilter,
   onAnalysisComplete?: (params: AnalysisCompleteParams) => void,
 ): Promise<LanguageClient | null> => {

@@ -1,6 +1,10 @@
 use std::process::ExitCode;
 
 use clap::CommandFactory;
+#[cfg(test)]
+use plow_output::issue_output_contracts;
+use plow_output::{TsAliasMeta, issue_output_contract_by_code};
+use plow_types::issue_meta::issue_meta_by_code;
 use plow_types::mcp_manifest::{MCP_TOOLS, RUNTIME_COVERAGE_LICENSE_NOTE};
 
 use crate::Cli;
@@ -109,6 +113,13 @@ fn task_matrix_schema() -> serde_json::Value {
 #[derive(Default)]
 struct IssueTypeMeta {
     filter_flag: Option<&'static str>,
+    result_key: Option<&'static str>,
+    summary_label: Option<&'static str>,
+    summary_docs_anchor: Option<&'static str>,
+    sarif_rule_ids: Option<Vec<String>>,
+    codeclimate_check_names: Option<Vec<String>>,
+    ts_alias: Option<TsAliasMeta>,
+    counts_in_total: bool,
     fixable: bool,
     /// `(suppression token, file_level)` when comment-suppressible. The
     /// token MUST round-trip through `IssueKind::parse`; a test below
@@ -116,6 +127,30 @@ struct IssueTypeMeta {
     suppress: Option<(&'static str, bool)>,
     note: Option<&'static str>,
     freemium: bool,
+}
+
+impl IssueTypeMeta {
+    fn from_shared(bare_id: &str) -> Self {
+        let mut meta = Self::default();
+        if let Some(shared) = issue_meta_by_code(bare_id) {
+            meta.filter_flag = shared.filter_flag;
+            if let Some(token) = shared.suppress_token {
+                meta.suppress = Some((token, shared.suppress_file_level));
+            }
+        }
+        if let Some(contract) = issue_output_contract_by_code(bare_id) {
+            meta.result_key = Some(contract.result_key);
+            meta.summary_label = Some(contract.summary_label);
+            meta.summary_docs_anchor = Some(contract.summary_docs_anchor);
+            meta.sarif_rule_ids = Some(contract.sarif_rule_ids);
+            if !contract.codeclimate_check_names.is_empty() {
+                meta.codeclimate_check_names = Some(contract.codeclimate_check_names);
+            }
+            meta.ts_alias = contract.ts_alias;
+            meta.counts_in_total = contract.counts_in_total;
+        }
+        meta
+    }
 }
 
 fn issue_types_schema() -> serde_json::Value {
@@ -155,6 +190,16 @@ fn issue_type_row(rule: &RuleDef, command: &str) -> serde_json::Value {
         "category": rule.category,
         "description": rule.short,
         "filter_flag": meta.filter_flag,
+        "result_key": meta.result_key,
+        "summary_label": meta.summary_label,
+        "summary_docs_anchor": meta.summary_docs_anchor,
+        "sarif_rule_ids": meta.sarif_rule_ids,
+        "codeclimate_check_names": meta.codeclimate_check_names,
+        "ts_alias": meta.ts_alias.map(|alias| serde_json::json!({
+            "name": alias.name,
+            "parent": alias.parent,
+        })),
+        "counts_in_total": meta.counts_in_total,
         "fixable": meta.fixable,
         "suppressible": meta.suppress.is_some(),
         "suppress_comment": suppress_comment,
@@ -166,26 +211,27 @@ fn issue_type_row(rule: &RuleDef, command: &str) -> serde_json::Value {
 }
 
 fn issue_type_meta(bare_id: &str, command: &str) -> IssueTypeMeta {
+    let mut meta = IssueTypeMeta::from_shared(bare_id);
     match command {
-        "dead-code" => dead_code_issue_meta(bare_id),
-        "health" => health_issue_meta(bare_id),
-        "security" => security_issue_meta(bare_id),
-        _ => standalone_issue_meta(bare_id),
+        "dead-code" => apply_dead_code_issue_meta(bare_id, &mut meta),
+        "health" => apply_health_issue_meta(bare_id, &mut meta),
+        "security" => apply_security_issue_meta(bare_id, &mut meta),
+        _ => apply_standalone_issue_meta(bare_id, &mut meta),
     }
+    meta
 }
 
-fn dead_code_issue_meta(bare_id: &str) -> IssueTypeMeta {
-    let mut m = IssueTypeMeta::default();
-    if apply_source_issue_meta(bare_id, &mut m)
-        || apply_dependency_issue_meta(bare_id, &mut m)
-        || apply_architecture_issue_meta(bare_id, &mut m)
-        || apply_catalog_issue_meta(bare_id, &mut m)
-    {
-        return m;
-    }
-    m
+fn apply_dead_code_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) {
+    apply_source_issue_meta(bare_id, m);
+    apply_dependency_issue_meta(bare_id, m);
+    apply_architecture_issue_meta(bare_id, m);
+    apply_catalog_issue_meta(bare_id, m);
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "flat per-issue-id metadata table (one match arm per rule); no branching logic to extract"
+)]
 fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
     match bare_id {
         "unused-file" => {
@@ -235,9 +281,52 @@ fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
             m.filter_flag = Some("--unused-component-emits");
             m.suppress = Some(("unused-component-emit", false));
         }
+        "unused-component-input" => {
+            m.filter_flag = Some("--unused-component-inputs");
+            m.suppress = Some(("unused-component-input", false));
+        }
+        "unused-component-output" => {
+            m.filter_flag = Some("--unused-component-outputs");
+            m.suppress = Some(("unused-component-output", false));
+        }
+        "unused-svelte-event" => {
+            m.filter_flag = Some("--unused-svelte-events");
+            m.suppress = Some(("unused-svelte-event", false));
+        }
         "unused-server-action" => {
             m.filter_flag = Some("--unused-server-actions");
             m.suppress = Some(("unused-server-action", false));
+        }
+        "unused-load-data-key" => {
+            m.filter_flag = Some("--unused-load-data-keys");
+            m.suppress = Some(("unused-load-data-key", false));
+        }
+        "prop-drilling" => {
+            // Dormant health signal (rule defaults to off); suppress-only, no
+            // dead-code filter flag. The line-level suppress anchors at the
+            // source prop declaration (the first hop).
+            m.suppress = Some(("prop-drilling", false));
+            m.note = Some(
+                "Opt-in: set rules.prop-drilling to warn or error to enable. Defaults to off.",
+            );
+        }
+        "thin-wrapper" => {
+            // Dormant health signal (rule defaults to off); suppress-only, no
+            // dead-code filter flag. The line-level suppress anchors at the
+            // wrapper component definition.
+            m.suppress = Some(("thin-wrapper", false));
+            m.note =
+                Some("Opt-in: set rules.thin-wrapper to warn or error to enable. Defaults to off.");
+        }
+        "duplicate-prop-shape" => {
+            // Dormant multi-file health signal (rule defaults to off);
+            // suppress-only, no dead-code filter flag. The line-level suppress
+            // anchors at a member's component definition; a suppressed member
+            // still appears in siblings' sharing_components.
+            m.suppress = Some(("duplicate-prop-shape", false));
+            m.note = Some(
+                "Opt-in: set rules.duplicate-prop-shape to warn or error to enable. Defaults to off.",
+            );
         }
         "unresolved-import" => {
             m.filter_flag = Some("--unresolved-imports");
@@ -356,8 +445,7 @@ fn apply_catalog_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
     true
 }
 
-fn health_issue_meta(bare_id: &str) -> IssueTypeMeta {
-    let mut m = IssueTypeMeta::default();
+fn apply_health_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) {
     match bare_id {
         "high-cyclomatic-complexity"
         | "high-cognitive-complexity"
@@ -391,11 +479,9 @@ fn health_issue_meta(bare_id: &str) -> IssueTypeMeta {
         }
         _ => {}
     }
-    m
 }
 
-fn standalone_issue_meta(bare_id: &str) -> IssueTypeMeta {
-    let mut m = IssueTypeMeta::default();
+fn apply_standalone_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) {
     match bare_id {
         "code-duplication" => {
             m.suppress = Some(("code-duplication", false));
@@ -407,11 +493,9 @@ fn standalone_issue_meta(bare_id: &str) -> IssueTypeMeta {
         }
         _ => {}
     }
-    m
 }
 
-fn security_issue_meta(bare_id: &str) -> IssueTypeMeta {
-    let mut m = IssueTypeMeta::default();
+fn apply_security_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) {
     match bare_id {
         "client-server-leak" => {
             m.suppress = Some(("security-client-server-leak", true));
@@ -432,7 +516,6 @@ fn security_issue_meta(bare_id: &str) -> IssueTypeMeta {
             );
         }
     }
-    m
 }
 
 fn mcp_tools_schema() -> serde_json::Value {
@@ -458,7 +541,7 @@ fn mcp_tools_schema() -> serde_json::Value {
 }
 
 fn plugins_schema() -> serde_json::Value {
-    let names = plow_core::plugins::registry::builtin_plugin_names();
+    let names = plow_engine::builtin_plugin_names();
     serde_json::json!({
         "count": names.len(),
         "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run plow list --plugins for the set active in a specific project",
@@ -695,6 +778,7 @@ fn build_arg_schema(arg: &clap::Arg) -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
+    use plow_types::results::TOTAL_ISSUE_RESULT_KEYS;
     use plow_types::suppress::{DEAD_CODE_FILTER_FLAGS, IssueKind, KNOWN_ISSUE_KIND_NAMES};
     use rustc_hash::FxHashSet;
 
@@ -947,12 +1031,19 @@ mod tests {
             let obj = row.as_object().unwrap();
             for key in [
                 "filter_flag",
+                "result_key",
+                "summary_label",
+                "summary_docs_anchor",
+                "sarif_rule_ids",
+                "codeclimate_check_names",
+                "ts_alias",
                 "suppress_comment",
                 "note",
                 "license_note",
                 "rule_id",
                 "command",
                 "category",
+                "counts_in_total",
                 "fixable",
                 "suppressible",
                 "license",
@@ -964,6 +1055,231 @@ mod tests {
                     row["id"]
                 );
             }
+        }
+    }
+
+    #[test]
+    fn dead_code_result_keys_match_total_issue_contract() {
+        let schema = schema();
+        let rows = schema["issue_types"].as_array().unwrap();
+
+        let expected: FxHashSet<&str> = TOTAL_ISSUE_RESULT_KEYS.iter().copied().collect();
+        let mut counted = FxHashSet::default();
+        let mut advisory = FxHashSet::default();
+
+        for row in rows {
+            if row["command"].as_str() != Some("dead-code") {
+                assert!(
+                    row["result_key"].is_null(),
+                    "non dead-code row {} must not expose a dead-code result_key",
+                    row["id"]
+                );
+                assert!(
+                    row["summary_label"].is_null(),
+                    "non dead-code row {} must not expose a dead-code summary_label",
+                    row["id"]
+                );
+                assert!(
+                    row["summary_docs_anchor"].is_null(),
+                    "non dead-code row {} must not expose a dead-code summary_docs_anchor",
+                    row["id"]
+                );
+                assert!(
+                    row["sarif_rule_ids"].is_null(),
+                    "non dead-code row {} must not expose dead-code sarif_rule_ids",
+                    row["id"]
+                );
+                assert!(
+                    row["codeclimate_check_names"].is_null(),
+                    "non dead-code row {} must not expose dead-code codeclimate_check_names",
+                    row["id"]
+                );
+                assert!(
+                    row["ts_alias"].is_null(),
+                    "non dead-code row {} must not expose a dead-code ts_alias",
+                    row["id"]
+                );
+                assert_eq!(
+                    row["counts_in_total"].as_bool(),
+                    Some(false),
+                    "non dead-code row {} must not count in total_issues",
+                    row["id"]
+                );
+                continue;
+            }
+
+            let counts = row["counts_in_total"].as_bool().unwrap();
+            if let Some(result_key) = row["result_key"].as_str() {
+                assert!(
+                    row["summary_label"]
+                        .as_str()
+                        .is_some_and(|label| !label.is_empty()),
+                    "dead-code row {} has result_key {result_key} but no summary_label",
+                    row["id"]
+                );
+                assert!(
+                    row["summary_docs_anchor"]
+                        .as_str()
+                        .is_some_and(|anchor| !anchor.is_empty()),
+                    "dead-code row {} has result_key {result_key} but no summary_docs_anchor",
+                    row["id"]
+                );
+                let sarif_rule_ids: FxHashSet<&str> = row["sarif_rule_ids"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|value| value.as_str().unwrap())
+                    .collect();
+                assert!(
+                    sarif_rule_ids.contains(row["rule_id"].as_str().unwrap()),
+                    "dead-code row {} must include the rule id in SARIF rule ids",
+                    row["id"]
+                );
+                if row["id"].as_str() == Some("stale-suppression") {
+                    assert!(
+                        sarif_rule_ids.contains("plow/missing-suppression-reason"),
+                        "stale-suppression must expose its missing-reason SARIF variant"
+                    );
+                }
+                if counts {
+                    counted.insert(result_key);
+                } else {
+                    advisory.insert(result_key);
+                }
+            } else {
+                assert!(
+                    !counts,
+                    "dead-code row {} counts in total_issues but has no result_key",
+                    row["id"]
+                );
+            }
+        }
+
+        assert_eq!(expected, counted);
+        assert_eq!(
+            FxHashSet::from_iter([
+                "duplicate_prop_shapes",
+                "prop_drilling_chains",
+                "thin_wrappers",
+            ]),
+            advisory
+        );
+    }
+
+    #[test]
+    fn dead_code_codeclimate_contract_is_explicit() {
+        let schema = schema();
+        let rows = schema["issue_types"].as_array().unwrap();
+
+        let missing: FxHashSet<&str> = rows
+            .iter()
+            .filter(|row| row["command"].as_str() == Some("dead-code"))
+            .filter(|row| row["result_key"].as_str().is_some())
+            .filter(|row| row["codeclimate_check_names"].is_null())
+            .map(|row| row["id"].as_str().unwrap())
+            .collect();
+
+        assert_eq!(
+            FxHashSet::from_iter(["duplicate-prop-shape", "prop-drilling", "thin-wrapper"]),
+            missing
+        );
+
+        for row in rows {
+            if row["command"].as_str() == Some("dead-code")
+                && row["codeclimate_check_names"].as_array().is_some()
+            {
+                let codeclimate_check_names: FxHashSet<&str> = row["codeclimate_check_names"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|value| value.as_str().unwrap())
+                    .collect();
+                assert!(
+                    codeclimate_check_names.contains(row["rule_id"].as_str().unwrap()),
+                    "dead-code row {} must include the rule id in CodeClimate check names",
+                    row["id"]
+                );
+                if row["id"].as_str() == Some("stale-suppression") {
+                    assert!(
+                        codeclimate_check_names.contains("plow/missing-suppression-reason"),
+                        "stale-suppression must expose its missing-reason CodeClimate variant"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn dead_code_ts_alias_contract_is_explicit() {
+        let schema = schema();
+        let rows = schema["issue_types"].as_array().unwrap();
+        let aliases: FxHashSet<(String, String, String)> = rows
+            .iter()
+            .filter(|row| row["command"].as_str() == Some("dead-code"))
+            .filter_map(|row| {
+                let alias = row["ts_alias"].as_object()?;
+                Some((
+                    row["id"].as_str().unwrap().to_string(),
+                    alias["name"].as_str().unwrap().to_string(),
+                    alias["parent"].as_str().unwrap().to_string(),
+                ))
+            })
+            .collect();
+        let expected: FxHashSet<(String, String, String)> = issue_output_contracts()
+            .filter_map(|contract| {
+                let alias = contract.ts_alias?;
+                Some((
+                    contract.code.to_string(),
+                    alias.name.to_string(),
+                    alias.parent.to_string(),
+                ))
+            })
+            .collect();
+
+        assert!(aliases.contains(&(
+            "unused-dependency".to_string(),
+            "UnusedDependency".to_string(),
+            "UnusedDependencyFinding".to_string()
+        )));
+        assert!(aliases.contains(&(
+            "unused-dev-dependency".to_string(),
+            "UnusedDependency".to_string(),
+            "UnusedDevDependencyFinding".to_string()
+        )));
+        assert!(aliases.contains(&(
+            "unused-optional-dependency".to_string(),
+            "UnusedDependency".to_string(),
+            "UnusedOptionalDependencyFinding".to_string()
+        )));
+        assert!(aliases.contains(&(
+            "unused-class-member".to_string(),
+            "UnusedMember".to_string(),
+            "UnusedClassMemberFinding".to_string()
+        )));
+        assert!(aliases.contains(&(
+            "unused-enum-member".to_string(),
+            "UnusedMember".to_string(),
+            "UnusedEnumMemberFinding".to_string()
+        )));
+        assert!(aliases.contains(&(
+            "unused-store-member".to_string(),
+            "UnusedMember".to_string(),
+            "UnusedStoreMemberFinding".to_string()
+        )));
+        assert_eq!(
+            expected, aliases,
+            "schema ts_alias rows must exactly mirror plow-output contracts"
+        );
+
+        for (_, name, parent) in aliases {
+            assert!(
+                name.chars().next().is_some_and(char::is_uppercase),
+                "TS alias name must be PascalCase: {name}"
+            );
+            assert!(
+                parent.ends_with("Finding"),
+                "TS alias parent must target a finding wrapper: {parent}"
+            );
         }
     }
 
@@ -1060,10 +1376,7 @@ mod tests {
         let names = block["names"].as_array().unwrap();
         let count = usize::try_from(block["count"].as_u64().unwrap()).unwrap();
         assert_eq!(names.len(), count);
-        assert_eq!(
-            count,
-            plow_core::plugins::registry::builtin_plugin_names().len()
-        );
+        assert_eq!(count, plow_engine::builtin_plugin_names().len());
         assert!(count >= 110, "plugin registry shrank unexpectedly");
     }
 

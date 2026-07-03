@@ -7,6 +7,7 @@ mod health_runtime;
 mod health_targets;
 mod perf;
 mod traces;
+pub(super) mod walkthrough;
 
 pub(super) use check::*;
 pub(super) use cross_ref::*;
@@ -71,6 +72,13 @@ pub(super) fn build_section_header(title: &str, count: usize, level: Level) -> S
 
 /// Section footer: description + docs URL (with anchor to specific section).
 fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
+    section_dead_code_footer_text(title)
+        .or_else(|| section_dependency_footer_text(title))
+        .or_else(|| section_framework_footer_text(title))
+        .or_else(|| section_component_footer_text(title))
+}
+
+fn section_dead_code_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
     match title {
         "Unused files" => Some((
             "Files not reachable from any entry point",
@@ -113,9 +121,15 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "https://docs.genesis-plow.dev/explanations/dead-code#unused-store-members",
         )),
         "Unresolved imports" => Some((
-            "Import paths that could not be resolved \u{2014} check for missing packages or broken paths. Framework-specific imports may need a plugin: https://docs.genesis-plow.dev/plugins",
+            "Import paths that could not be resolved, check for missing packages or broken paths. Framework-specific imports may need a plugin: https://docs.genesis-plow.dev/plugins",
             "https://docs.genesis-plow.dev/explanations/dead-code#unresolved-imports",
         )),
+        _ => None,
+    }
+}
+
+fn section_dependency_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
+    match title {
         "Unlisted dependencies" => Some((
             "Packages imported in code but missing from package.json",
             "https://docs.genesis-plow.dev/explanations/dead-code#unlisted-dependencies",
@@ -152,6 +166,16 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "pnpm `overrides:` entries with an unparsable key or empty value (pnpm install will error)",
             "https://docs.genesis-plow.dev/explanations/dead-code#misconfigured-dependency-overrides",
         )),
+        t if t.starts_with("Type-only") => Some((
+            "Dependencies only used for type imports; consider moving to devDependencies",
+            "https://docs.genesis-plow.dev/explanations/dead-code#type-only-dependencies",
+        )),
+        _ => None,
+    }
+}
+
+fn section_framework_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
+    match title {
         "Invalid client exports" => Some((
             "Server-only or route-config exports in a \"use client\" file (Next.js rejects this at build time)",
             "https://docs.genesis-plow.dev/explanations/dead-code#invalid-client-exports",
@@ -168,25 +192,55 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "A Vue inject / Svelte getContext whose key is provided nowhere in the project, so at runtime it returns undefined",
             "https://docs.genesis-plow.dev/explanations/dead-code#unprovided-injects",
         )),
+        _ => None,
+    }
+}
+
+fn section_component_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
+    match title {
         "Unrendered components" => Some((
             "A Vue / Svelte component reachable through a barrel but rendered nowhere in the project (render it somewhere or remove it)",
             "https://docs.genesis-plow.dev/explanations/dead-code#unrendered-components",
         )),
         "Unused component props" => Some((
-            "A Vue <script setup> defineProps prop referenced nowhere inside its own component (remove it or use it)",
+            "A Vue, Svelte, or React component prop referenced nowhere inside its own component (remove it or use it)",
             "https://docs.genesis-plow.dev/explanations/dead-code#unused-component-props",
+        )),
+        "Prop drilling" => Some((
+            "A React/Preact prop forwarded unused through two or more intermediate components before a component consumes it (colocate the consumer or lift it to a context); opt-in, off by default",
+            "https://docs.genesis-plow.dev/explanations/dead-code#prop-drilling",
+        )),
+        "Thin wrappers" => Some((
+            "A React/Preact component whose whole body forwards props to a single child (return <Child {...props}/>); inline it at call sites or delete it; opt-in, off by default",
+            "https://docs.genesis-plow.dev/explanations/dead-code#thin-wrapper",
+        )),
+        "Duplicate prop shapes" => Some((
+            "Three or more React/Preact components across two or more files declaring an identical prop-name set (after stripping common DOM props); extract a shared Props type or base component; opt-in, off by default",
+            "https://docs.genesis-plow.dev/explanations/dead-code#duplicate-prop-shape",
         )),
         "Unused component emits" => Some((
             "A Vue <script setup> defineEmits event emitted nowhere inside its own component (remove it or emit it)",
             "https://docs.genesis-plow.dev/explanations/dead-code#unused-component-emits",
         )),
+        "Unused component inputs" => Some((
+            "An Angular @Input() / signal input() declaration read nowhere inside its own component (remove it or use it)",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-component-inputs",
+        )),
+        "Unused component outputs" => Some((
+            "An Angular @Output() / signal output() declaration emitted nowhere inside its own component (remove it or emit it)",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-component-outputs",
+        )),
+        "Unused Svelte events" => Some((
+            "A Svelte component dispatching a createEventDispatcher event whose name is listened to nowhere in the project (remove it or listen for it)",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-svelte-events",
+        )),
         "Unused server actions" => Some((
             "A Next.js Server Action exported from a \"use server\" file that no code in the project references (wire it to a consumer or remove it)",
             "https://docs.genesis-plow.dev/explanations/dead-code#unused-server-actions",
         )),
-        t if t.starts_with("Type-only") => Some((
-            "Dependencies only used for type imports \u{2014} consider moving to devDependencies",
-            "https://docs.genesis-plow.dev/explanations/dead-code#type-only-dependencies",
+        "Unused load data keys" => Some((
+            "A SvelteKit load() return-object key no consumer reads (sibling +page.svelte data.<key> or project-wide page.data.<key>); delete the key or wire a consumer",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-load-data-keys",
         )),
         _ => None,
     }
@@ -220,8 +274,15 @@ fn section_suppress_rule(title: &str) -> Option<&'static str> {
         "Unprovided injects" => Some("unprovided-injects"),
         "Unrendered components" => Some("unrendered-components"),
         "Unused component props" => Some("unused-component-props"),
+        "Prop drilling" => Some("prop-drilling"),
+        "Thin wrappers" => Some("thin-wrapper"),
+        "Duplicate prop shapes" => Some("duplicate-prop-shape"),
         "Unused component emits" => Some("unused-component-emits"),
+        "Unused component inputs" => Some("unused-component-inputs"),
+        "Unused component outputs" => Some("unused-component-outputs"),
+        "Unused Svelte events" => Some("unused-svelte-event"),
         "Unused server actions" => Some("unused-server-actions"),
+        "Unused load data keys" => Some("unused-load-data-keys"),
         _ => None,
     }
 }
@@ -345,46 +406,22 @@ pub(super) fn build_grouped_by_file<'out, 'items, T, P, F>(
         max_files,
         max_items_per_file,
     } = input;
-    let mut file_groups: Vec<(String, Vec<usize>)> = Vec::new();
-    let mut file_map: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
 
-    for (i, item) in items.iter().enumerate() {
-        let file_str = relative_path(get_path(item), root).display().to_string();
-        if let Some(&group_idx) = file_map.get(&file_str) {
-            file_groups[group_idx].1.push(i);
-        } else {
-            file_map.insert(file_str.clone(), file_groups.len());
-            file_groups.push((file_str, vec![i]));
-        }
-    }
-
+    let mut file_groups = group_item_indices_by_file(items, root, get_path);
     file_groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(&b.0)));
 
     let total_files = file_groups.len();
     let shown_files = total_files.min(max_files);
 
     for (file_str, indices) in &file_groups[..shown_files] {
-        let count_tag = if indices.len() > 1 {
-            format!(" ({})", indices.len()).dimmed().to_string()
-        } else {
-            String::new()
-        };
-        lines.push(format!("  {}{}", format_path(file_str), count_tag));
-
-        let shown_items = indices.len().min(max_items_per_file);
-        for &i in &indices[..shown_items] {
-            lines.push(format!("    {}", format_detail(&items[i])));
-        }
-        if indices.len() > max_items_per_file {
-            lines.push(format!(
-                "    {}",
-                format!(
-                    "... and {} more (--format json for full list)",
-                    indices.len() - max_items_per_file
-                )
-                .dimmed()
-            ));
-        }
+        push_grouped_file_lines(
+            lines,
+            file_str,
+            indices,
+            items,
+            format_detail,
+            max_items_per_file,
+        );
     }
 
     if total_files > max_files {
@@ -400,6 +437,64 @@ pub(super) fn build_grouped_by_file<'out, 'items, T, P, F>(
                 hidden_items,
                 hidden_files,
                 plural(hidden_files)
+            )
+            .dimmed()
+        ));
+    }
+}
+
+/// Group item indices by their relative file path, preserving first-seen order.
+fn group_item_indices_by_file<'items, T, P>(
+    items: &'items [T],
+    root: &Path,
+    get_path: P,
+) -> Vec<(String, Vec<usize>)>
+where
+    P: Fn(&'items T) -> &'items Path,
+{
+    let mut file_groups: Vec<(String, Vec<usize>)> = Vec::new();
+    let mut file_map: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
+
+    for (i, item) in items.iter().enumerate() {
+        let file_str = relative_path(get_path(item), root).display().to_string();
+        if let Some(&group_idx) = file_map.get(&file_str) {
+            file_groups[group_idx].1.push(i);
+        } else {
+            file_map.insert(file_str.clone(), file_groups.len());
+            file_groups.push((file_str, vec![i]));
+        }
+    }
+    file_groups
+}
+
+/// Render one file's header and its (truncated) per-item detail lines.
+fn push_grouped_file_lines<T, F>(
+    lines: &mut Vec<String>,
+    file_str: &str,
+    indices: &[usize],
+    items: &[T],
+    format_detail: &F,
+    max_items_per_file: usize,
+) where
+    F: Fn(&T) -> String,
+{
+    let count_tag = if indices.len() > 1 {
+        format!(" ({})", indices.len()).dimmed().to_string()
+    } else {
+        String::new()
+    };
+    lines.push(format!("  {}{}", format_path(file_str), count_tag));
+
+    let shown_items = indices.len().min(max_items_per_file);
+    for &i in &indices[..shown_items] {
+        lines.push(format!("    {}", format_detail(&items[i])));
+    }
+    if indices.len() > max_items_per_file {
+        lines.push(format!(
+            "    {}",
+            format!(
+                "... and {} more (--format json for full list)",
+                indices.len() - max_items_per_file
             )
             .dimmed()
         ));

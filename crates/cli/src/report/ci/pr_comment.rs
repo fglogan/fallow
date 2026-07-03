@@ -1,11 +1,15 @@
 use crate::report::sink::outln;
-use std::fmt::Write as _;
+use plow_output::CodeClimateIssue;
 use std::process::ExitCode;
 use std::sync::OnceLock;
 
 use serde_json::Value;
 
-use crate::output_envelope::{CodeClimateIssue, CodeClimateSeverity};
+pub use plow_output::{
+    CiIssue, CiProvider as Provider, issues_from_codeclimate, issues_from_codeclimate_issues,
+};
+#[cfg(test)]
+use plow_output::{escape_md, is_project_level_rule};
 
 /// Workspace name, set once by `main()` when the binary is invoked with
 /// `--workspace <name>`. Read by `sticky_marker_id` to auto-suffix the
@@ -60,188 +64,16 @@ fn short_hex_hash(value: &str) -> String {
     format!("{:06x}", (hash & 0x00ff_ffff) as u32)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Provider {
-    Github,
-    Gitlab,
-}
-
-impl Provider {
-    #[must_use]
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Github => "GitHub",
-            Self::Gitlab => "GitLab",
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CiIssue {
-    pub rule_id: String,
-    pub description: String,
-    pub severity: String,
-    pub path: String,
-    pub line: u64,
-    pub fingerprint: String,
-}
-
 #[must_use]
-pub fn issues_from_codeclimate(value: &Value) -> Vec<CiIssue> {
-    let mut issues = value
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(issue_from_codeclimate)
-        .collect::<Vec<_>>();
-    sort_ci_issues(&mut issues);
-    issues
-}
-
-#[must_use]
-pub fn issues_from_codeclimate_issues(issues: &[CodeClimateIssue]) -> Vec<CiIssue> {
-    let mut issues = issues
-        .iter()
-        .map(issue_from_codeclimate_issue)
-        .collect::<Vec<_>>();
-    sort_ci_issues(&mut issues);
-    issues
-}
-
-fn issue_from_codeclimate(value: &Value) -> Option<CiIssue> {
-    let path = value.pointer("/location/path")?.as_str()?.to_string();
-    let line = value
-        .pointer("/location/lines/begin")
-        .and_then(Value::as_u64)
-        .unwrap_or(1);
-    Some(CiIssue {
-        rule_id: value
-            .get("check_name")
-            .and_then(Value::as_str)
-            .unwrap_or("plow/finding")
-            .to_string(),
-        description: value
-            .get("description")
-            .and_then(Value::as_str)
-            .unwrap_or("Plow finding")
-            .to_string(),
-        severity: value
-            .get("severity")
-            .and_then(Value::as_str)
-            .unwrap_or("minor")
-            .to_string(),
-        fingerprint: value
-            .get("fingerprint")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-        path,
-        line,
-    })
-}
-
-fn issue_from_codeclimate_issue(issue: &CodeClimateIssue) -> CiIssue {
-    CiIssue {
-        rule_id: issue.check_name.clone(),
-        description: issue.description.clone(),
-        severity: codeclimate_severity_label(issue.severity).to_owned(),
-        path: issue.location.path.clone(),
-        line: u64::from(issue.location.lines.begin),
-        fingerprint: issue.fingerprint.clone(),
-    }
-}
-
-const fn codeclimate_severity_label(severity: CodeClimateSeverity) -> &'static str {
-    match severity {
-        CodeClimateSeverity::Info => "info",
-        CodeClimateSeverity::Minor => "minor",
-        CodeClimateSeverity::Major => "major",
-        CodeClimateSeverity::Critical => "critical",
-        CodeClimateSeverity::Blocker => "blocker",
-    }
-}
-
-fn sort_ci_issues(issues: &mut [CiIssue]) {
-    issues
-        .sort_by(|a, b| (&a.path, a.line, &a.fingerprint).cmp(&(&b.path, b.line, &b.fingerprint)));
-}
-
-#[must_use]
-#[expect(clippy::expect_used, reason = "formatting into String is infallible")]
 pub fn render_pr_comment(command: &str, provider: Provider, issues: &[CiIssue]) -> String {
-    let marker_id = sticky_marker_id();
-    let marker = format!("<!-- plow-id: {marker_id} -->");
-    let max = max_comments();
-    let title = command_title(command);
-    let count = issues.len();
-    let noun = if count == 1 { "finding" } else { "findings" };
-
-    let mut out = String::new();
-    out.push_str(&marker);
-    out.push('\n');
-    write!(&mut out, "### Plow {title}\n\n").expect("write to string");
-    if count == 0 {
-        writeln!(
-            &mut out,
-            "No {provider} PR/MR findings.",
-            provider = provider.name()
-        )
-        .expect("write to string");
-    } else {
-        write!(&mut out, "Found **{count}** {noun}.\n\n").expect("write to string");
-        let groups = group_by_category(issues);
-        if let [(_, group_issues)] = groups.as_slice() {
-            render_findings_table(&mut out, group_issues, max, "Details");
-        } else {
-            for (category, group_issues) in &groups {
-                let summary_label = summary_label(category, group_issues.len(), max);
-                render_findings_table(&mut out, group_issues, max, &summary_label);
-            }
-        }
-    }
-    out.push_str("\nGenerated by plow.");
-    out
-}
-
-/// Build the `<details>` summary label for one category section. When the
-/// section is truncated by `max`, the label foreshadows the truncation
-/// (`Duplication (160, showing 50)`) so a reviewer expanding the section
-/// isn't surprised by the missing rows. When not truncated, the bare count
-/// reads as before.
-fn summary_label(category: &str, total: usize, max: usize) -> String {
-    if total > max {
-        format!("{category} ({total}, showing {max})")
-    } else {
-        format!("{category} ({total})")
-    }
-}
-
-#[expect(clippy::expect_used, reason = "formatting into String is infallible")]
-fn render_findings_table(out: &mut String, issues: &[&CiIssue], max: usize, summary: &str) {
-    writeln!(out, "<details>\n<summary>{summary}</summary>\n").expect("write to string");
-    out.push_str("| Severity | Rule | Location | Description |\n");
-    out.push_str("| --- | --- | --- | --- |\n");
-    for issue in issues.iter().take(max) {
-        writeln!(
-            out,
-            "| {} | `{}` | `{}`:{} | {} |",
-            escape_md(&issue.severity),
-            escape_md(&issue.rule_id),
-            escape_md(&issue.path),
-            issue.line,
-            escape_md(&issue.description),
-        )
-        .expect("write to string");
-    }
-    if issues.len() > max {
-        writeln!(
-            out,
-            "\nShowing {max} of {} findings. Run plow locally or inspect the CI output for the full report.",
-            issues.len(),
-        )
-        .expect("write to string");
-    }
-    out.push_str("\n</details>\n\n");
+    plow_output::render_pr_comment(&plow_output::PrCommentRenderInput {
+        command,
+        provider,
+        issues,
+        marker_id: sticky_marker_id(),
+        max_comments: max_comments(),
+        category_for_rule: &category_for_rule,
+    })
 }
 
 /// Map a plow rule id to its category for sticky-comment grouping.
@@ -254,70 +86,6 @@ fn render_findings_table(out: &mut String, issues: &[&CiIssue], max: usize, summ
 #[must_use]
 pub fn category_for_rule(rule_id: &str) -> &'static str {
     crate::explain::rule_by_id(rule_id).map_or("Dead code", |def| def.category)
-}
-
-/// Rule ids whose findings describe a project-wide config state (dependency
-/// hygiene, catalog state, override hygiene) rather than a change touching a
-/// specific source line. These findings anchor at fixed lines inside
-/// `package.json` / `pnpm-workspace.yaml`; the resolved-tree shifts that
-/// trigger them rarely coincide with a diff on the anchored line, so the
-/// line-based diff filter would silently hide them while CI still exits
-/// non-zero because of the same finding.
-///
-/// `filter_issues_for_summary` consults this list so the PR-comment body
-/// always explains config-anchored findings, matching the typical user
-/// expectation that `comment: true` produces a body covering every
-/// CI-failure reason. The review-envelope path keeps the unconditional
-/// filter because inline review comments must anchor on diff lines.
-const PROJECT_LEVEL_RULE_IDS: &[&str] = &[
-    "plow/unused-catalog-entry",
-    "plow/empty-catalog-group",
-    "plow/unresolved-catalog-reference",
-    "plow/unused-dependency-override",
-    "plow/misconfigured-dependency-override",
-    "plow/unused-dependency",
-    "plow/unused-dev-dependency",
-    "plow/unused-optional-dependency",
-    "plow/type-only-dependency",
-    "plow/test-only-dependency",
-];
-
-/// True when the rule's findings reflect project-wide config state and
-/// should bypass diff-aware filtering in the typed PR-comment renderer.
-/// See `PROJECT_LEVEL_RULE_IDS` for the full list and rationale.
-#[must_use]
-pub fn is_project_level_rule(rule_id: &str) -> bool {
-    PROJECT_LEVEL_RULE_IDS.contains(&rule_id)
-}
-
-/// Stable category ordering for the sticky comment. Reviewers see categories
-/// in the same order across PRs / runs, which matters for muscle memory.
-const CATEGORY_ORDER: [&str; 6] = [
-    "Dead code",
-    "Dependencies",
-    "Duplication",
-    "Health",
-    "Architecture",
-    "Suppressions",
-];
-
-fn group_by_category(issues: &[CiIssue]) -> Vec<(&'static str, Vec<&CiIssue>)> {
-    let mut buckets: std::collections::BTreeMap<&'static str, Vec<&CiIssue>> =
-        std::collections::BTreeMap::new();
-    for issue in issues {
-        let category = category_for_rule(&issue.rule_id);
-        buckets.entry(category).or_default().push(issue);
-    }
-    let mut ordered: Vec<(&'static str, Vec<&CiIssue>)> = Vec::with_capacity(buckets.len());
-    for category in CATEGORY_ORDER {
-        if let Some(items) = buckets.remove(category) {
-            ordered.push((category, items));
-        }
-    }
-    for (category, items) in buckets {
-        ordered.push((category, items));
-    }
-    ordered
 }
 
 fn max_comments() -> usize {
@@ -403,75 +171,12 @@ fn print_pr_comment_from_ci_issues(
     ExitCode::SUCCESS
 }
 
-#[must_use]
-pub fn command_title(command: &str) -> &'static str {
-    match command {
-        "dead-code" | "check" => "dead-code report",
-        "dupes" => "duplication report",
-        "health" => "health report",
-        "audit" => "audit report",
-        "" | "combined" => "combined report",
-        _ => "report",
-    }
-}
-
-/// Escape a string for inclusion in a Markdown table cell.
-///
-/// Table cells render through GitHub-Flavored Markdown and GitLab Flavored
-/// Markdown as inline content, so cell-internal markers can flip the cell to
-/// emphasis, link, image, code, HTML, or strikethrough. Newlines collapse to
-/// spaces because a literal newline terminates the table row. The escape set
-/// covers every CommonMark inline construct that can fire mid-cell:
-///
-/// - `\` (escape character itself)
-/// - `` ` `` (inline code)
-/// - `*` `_` (emphasis / strong)
-/// - `[` `]` `(` `)` (link / image syntax)
-/// - `!` (image when followed by `[`)
-/// - `<` `>` (raw HTML / autolinks)
-/// - `#` (cell rendered as heading when first character of the cell)
-/// - `|` (table cell separator)
-/// - `~` (strikethrough on GFM)
-/// - `&` (HTML numeric / named entity decode: `&#42;` would otherwise
-///   render as `*` after our escape and reintroduce the bypass)
-///
-/// Line-start markers (`.`, `-`, `+`, `1.`) are intentionally NOT escaped:
-/// they are only meaningful at the start of a block-level line, and table
-/// cells render as paragraph-equivalent inline content where these are inert.
-/// Escaping them produces visually noisy output (`plow/test\-only-dep`)
-/// without correctness benefit.
-#[must_use]
-pub fn escape_md(value: &str) -> String {
-    let collapsed = value.replace('\n', " ");
-    let mut out = String::with_capacity(collapsed.len());
-    for ch in collapsed.chars() {
-        if matches!(
-            ch,
-            '\\' | '`'
-                | '*'
-                | '_'
-                | '['
-                | ']'
-                | '('
-                | ')'
-                | '!'
-                | '<'
-                | '>'
-                | '#'
-                | '|'
-                | '~'
-                | '&'
-        ) {
-            out.push('\\');
-        }
-        out.push(ch);
-    }
-    out.trim().to_owned()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plow_output::{
+        CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation, CodeClimateSeverity,
+    };
 
     #[test]
     fn extracts_issues_from_codeclimate() {
@@ -501,18 +206,20 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(index, (severity, _))| CodeClimateIssue {
-                kind: crate::output_envelope::CodeClimateIssueKind::Issue,
+                kind: CodeClimateIssueKind::Issue,
                 check_name: format!("plow/rule-{index}"),
                 description: format!("Finding {index}"),
                 categories: vec!["Complexity".to_owned()],
                 severity: *severity,
                 fingerprint: format!("fp-{index}"),
-                location: crate::output_envelope::CodeClimateLocation {
+                location: CodeClimateLocation {
                     path: format!("src/{index}.ts"),
-                    lines: crate::output_envelope::CodeClimateLines {
+                    lines: CodeClimateLines {
                         begin: u32::try_from(index + 1).expect("small fixture index"),
                     },
                 },
+                owner: None,
+                group: None,
             })
             .collect::<Vec<_>>();
         let value = serde_json::to_value(&typed).expect("typed fixture serializes");
@@ -589,11 +296,14 @@ mod tests {
     #[test]
     fn summary_label_foreshadows_truncation() {
         assert_eq!(
-            summary_label("Duplication", 160, 50),
+            plow_output::summary_label("Duplication", 160, 50),
             "Duplication (160, showing 50)"
         );
-        assert_eq!(summary_label("Health", 12, 50), "Health (12)");
-        assert_eq!(summary_label("Dependencies", 50, 50), "Dependencies (50)");
+        assert_eq!(plow_output::summary_label("Health", 12, 50), "Health (12)");
+        assert_eq!(
+            plow_output::summary_label("Dependencies", 50, 50),
+            "Dependencies (50)"
+        );
     }
 
     #[test]
@@ -622,7 +332,7 @@ mod tests {
 
     #[test]
     fn is_project_level_rule_covers_config_anchored_dependency_findings() {
-        for rule_id in PROJECT_LEVEL_RULE_IDS {
+        for rule_id in plow_output::PROJECT_LEVEL_RULE_IDS {
             assert!(
                 is_project_level_rule(rule_id),
                 "{rule_id} must be project-level"
@@ -655,7 +365,7 @@ mod tests {
 
     #[test]
     fn project_level_rule_ids_each_register_in_explain_registry() {
-        for rule_id in PROJECT_LEVEL_RULE_IDS {
+        for rule_id in plow_output::PROJECT_LEVEL_RULE_IDS {
             assert!(
                 crate::explain::rule_by_id(rule_id).is_some(),
                 "{rule_id} listed in PROJECT_LEVEL_RULE_IDS but not in explain registry"

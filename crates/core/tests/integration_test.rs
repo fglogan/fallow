@@ -13,22 +13,34 @@ mod common;
 
 #[path = "integration_test/angular_ng_package.rs"]
 mod angular_ng_package;
+#[path = "integration_test/angular_unrendered_component.rs"]
+mod angular_unrendered_component;
+#[path = "integration_test/astro_unrendered_component.rs"]
+mod astro_unrendered_component;
+#[path = "integration_test/astro_unused_component_prop.rs"]
+mod astro_unused_component_prop;
 #[path = "integration_test/barrel_exports.rs"]
 mod barrel_exports;
 #[path = "integration_test/basic_analysis.rs"]
 mod basic_analysis;
 #[path = "integration_test/caching.rs"]
 mod caching;
+#[path = "integration_test/css_in_js_styled.rs"]
+mod css_in_js_styled;
 #[path = "integration_test/css_modules.rs"]
 mod css_modules;
 #[path = "integration_test/dependencies.rs"]
 mod dependencies;
+#[path = "integration_test/duplicate_prop_shape.rs"]
+mod duplicate_prop_shape;
 #[path = "integration_test/duplicates.rs"]
 mod duplicates;
 #[path = "integration_test/dynamic_import_then.rs"]
 mod dynamic_import_then;
 #[path = "integration_test/dynamic_imports.rs"]
 mod dynamic_imports;
+#[path = "integration_test/e8_symbol_chain.rs"]
+mod e8_symbol_chain;
 #[path = "integration_test/external_plugins.rs"]
 mod external_plugins;
 #[path = "integration_test/extraction.rs"]
@@ -53,6 +65,8 @@ mod framework_convention_coverage_router;
 mod framework_convention_coverage_vitepress;
 #[path = "integration_test/frameworks.rs"]
 mod frameworks;
+#[path = "integration_test/graph_cache_transparency.rs"]
+mod graph_cache_transparency;
 #[path = "integration_test/graphql_imports.rs"]
 mod graphql_imports;
 #[path = "integration_test/hono_html_tagged_template.rs"]
@@ -61,6 +75,8 @@ mod hono_html_tagged_template;
 mod html_entry;
 #[path = "integration_test/issue_1032_tsconfig_sibling_src_paths.rs"]
 mod issue_1032_tsconfig_sibling_src_paths;
+#[path = "integration_test/issue_1304_effect_schema_same_name.rs"]
+mod issue_1304_effect_schema_same_name;
 #[path = "integration_test/issue_546_storybook_runtime_resources.rs"]
 mod issue_546_storybook_runtime_resources;
 #[path = "integration_test/issue_914_pnpm_bare_binary.rs"]
@@ -73,6 +89,10 @@ mod issue_952_package_path_resolution;
 mod issue_954_pino_transport_target;
 #[path = "integration_test/jsx_assets_and_jsdoc.rs"]
 mod jsx_assets_and_jsdoc;
+#[path = "integration_test/lit_unrendered_element.rs"]
+mod lit_unrendered_element;
+#[path = "integration_test/lit_unused_state.rs"]
+mod lit_unused_state;
 #[path = "integration_test/member_detection.rs"]
 mod member_detection;
 #[path = "integration_test/nx_project_json.rs"]
@@ -87,6 +107,8 @@ mod rules_config;
 mod safe_analysis;
 #[path = "integration_test/sfc_parsing.rs"]
 mod sfc_parsing;
+#[path = "integration_test/svelte_dead_event.rs"]
+mod svelte_dead_event;
 #[path = "integration_test/unreachable_exports.rs"]
 mod unreachable_exports;
 #[path = "integration_test/workspaces.rs"]
@@ -114,8 +136,14 @@ mod policy_violations;
 mod private_type_leaks;
 #[path = "integration_test/production_mode.rs"]
 mod production_mode;
+#[path = "integration_test/prop_drilling.rs"]
+mod prop_drilling;
 #[path = "integration_test/re_export_chains.rs"]
 mod re_export_chains;
+#[path = "integration_test/react_component_intel.rs"]
+mod react_component_intel;
+#[path = "integration_test/render_fan_in.rs"]
+mod render_fan_in;
 #[path = "integration_test/security_catalogue_categories.rs"]
 mod security_catalogue_categories;
 #[path = "integration_test/security_client_server_leak.rs"]
@@ -150,18 +178,28 @@ mod stale_suppressions;
 mod suppression_comments;
 #[path = "integration_test/test_only_deps.rs"]
 mod test_only_deps;
+#[path = "integration_test/thin_wrapper.rs"]
+mod thin_wrapper;
 #[path = "integration_test/type_only_deps.rs"]
 mod type_only_deps;
 #[path = "integration_test/unprovided_injects.rs"]
 mod unprovided_injects;
 #[path = "integration_test/unrendered_components.rs"]
 mod unrendered_components;
+#[path = "integration_test/unrendered_components_namespace.rs"]
+mod unrendered_components_namespace;
 #[path = "integration_test/unused_component_emits.rs"]
 mod unused_component_emits;
+#[path = "integration_test/unused_component_io_angular.rs"]
+mod unused_component_io_angular;
 #[path = "integration_test/unused_component_props.rs"]
 mod unused_component_props;
 #[path = "integration_test/unused_enum_members.rs"]
 mod unused_enum_members;
+#[path = "integration_test/unused_load_data_keys.rs"]
+mod unused_load_data_keys;
+#[path = "integration_test/unused_react_props.rs"]
+mod unused_react_props;
 #[path = "integration_test/unused_server_actions.rs"]
 mod unused_server_actions;
 #[path = "integration_test/unused_store_members.rs"]
@@ -175,6 +213,10 @@ mod workspace_internal_deps;
 
 #[path = "integration_test/inheritance_members.rs"]
 mod inheritance_members;
+#[path = "integration_test/issue_1441_factory_return_member.rs"]
+mod issue_1441_factory_return_member;
+#[path = "integration_test/issue_1640_commit_and_tag_version_updater.rs"]
+mod issue_1640_commit_and_tag_version_updater;
 #[path = "integration_test/issue_346_static_factory_method.rs"]
 mod issue_346_static_factory_method;
 #[path = "integration_test/issue_604_vite_rollup_path_helpers.rs"]
@@ -217,6 +259,10 @@ mod arrow_wrapped_imports;
 mod bin_script_deps;
 #[path = "integration_test/entry_export_validation.rs"]
 mod entry_export_validation;
+#[path = "integration_test/issue_1301_bun_catalog.rs"]
+mod issue_1301_bun_catalog;
+#[path = "integration_test/issue_1648_unused_prop_ignore_pattern.rs"]
+mod issue_1648_unused_prop_ignore_pattern;
 #[path = "integration_test/issue_195_non_source_entry_points.rs"]
 mod issue_195_non_source_entry_points;
 #[path = "integration_test/issue_317_namespace_barrel_ignore_exports.rs"]
@@ -285,12 +331,35 @@ mod lexical_nodes;
 mod script_multiplexers;
 #[path = "integration_test/visibility_tags.rs"]
 mod visibility_tags;
+#[path = "integration_test/vue_options_api_prop_emit.rs"]
+mod vue_options_api_prop_emit;
 
 #[path = "integration_test/ember_classic.rs"]
 mod ember_classic;
 
 #[path = "integration_test/issue_620_error_subclass_name.rs"]
 mod issue_620_error_subclass_name;
+
+#[path = "integration_test/issue_1638_openlayers_dispatch.rs"]
+mod issue_1638_openlayers_dispatch;
+
+#[path = "integration_test/issue_1638_tostring_coercion.rs"]
+mod issue_1638_tostring_coercion;
+
+#[path = "integration_test/issue_1707_vue_vfor_class_member.rs"]
+mod issue_1707_vue_vfor_class_member;
+
+#[path = "integration_test/issue_1711_vue_props_vfor.rs"]
+mod issue_1711_vue_props_vfor;
+
+#[path = "integration_test/iteration_binding_element_types.rs"]
+mod iteration_binding_element_types;
+
+#[path = "integration_test/issue_1712_angular_for_class_member.rs"]
+mod issue_1712_angular_for_class_member;
+
+#[path = "integration_test/astro_template_map_class_member.rs"]
+mod astro_template_map_class_member;
 
 #[path = "integration_test/issue_843_nestjs_lifecycle.rs"]
 mod issue_843_nestjs_lifecycle;

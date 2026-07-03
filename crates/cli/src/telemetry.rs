@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU8, AtomicU16, AtomicU64, Ordering};
 use std::time::Duration;
 
 use plow_config::OutputFormat;
+use plow_engine::RetainedModuleGraph;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -193,9 +194,17 @@ pub fn note_analysis_scale(file_count: Option<usize>, function_count: Option<usi
 /// This uses only the graph's existing module and edge counts. It never walks
 /// adjacency, resolves dependencies, or computes diameter/depth metrics for
 /// telemetry.
-pub fn note_graph_structure(graph: &plow_core::graph::ModuleGraph) {
+pub fn note_graph_structure(graph: &RetainedModuleGraph) {
+    note_graph_structure_counts(graph.module_count(), graph.edge_count());
+}
+
+/// Record a coarse fan-out bucket from already-computed module and edge counts.
+///
+/// Used by the engine-backed health pipeline, which surfaces the counts rather
+/// than the graph so the engine does not depend on this CLI telemetry module.
+pub fn note_graph_structure_counts(module_count: usize, edge_count: usize) {
     AVG_FAN_OUT_BUCKET.fetch_max(
-        avg_fan_out_bucket_state(graph.module_count(), graph.edge_count()),
+        avg_fan_out_bucket_state(module_count, edge_count),
         Ordering::Relaxed,
     );
 }
@@ -362,6 +371,11 @@ fn failure_reason_from_state(state: u8) -> Option<FailureReason> {
 
 fn failure_reason() -> Option<FailureReason> {
     failure_reason_from_state(FAILURE_REASON.load(Ordering::Relaxed))
+}
+
+/// Return the failure reason recorded by lower-level code, if any.
+pub fn noted_failure_reason() -> Option<FailureReason> {
+    failure_reason()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -632,6 +646,81 @@ pub enum Workflow {
     Unknown,
 }
 
+impl Workflow {
+    /// Whether a non-failing run of this workflow surfaces findings and therefore
+    /// MUST populate `findings_present` on its telemetry event.
+    ///
+    /// `findings_present` decouples "found something" from the exit-code outcome,
+    /// so every exit path of a finding-surfacing workflow has to call
+    /// [`note_result_count`] or [`note_findings_present`] before the at-exit event
+    /// is recorded; otherwise the field serializes null (issue #1650). Admin,
+    /// setup, mutation, report, and reserved / non-CLI workflows return `false`.
+    ///
+    /// The match is exhaustive on purpose: a new `Workflow` variant fails to
+    /// compile until it is classified here, which keeps the
+    /// [`find_state_invariant_violated`] guard honest.
+    fn surfaces_findings(self) -> bool {
+        match self {
+            Workflow::Audit
+            | Workflow::DeadCode
+            | Workflow::Health
+            | Workflow::Dupes
+            | Workflow::CodeQualityReview
+            | Workflow::Security => true,
+            Workflow::DependencyCleanup
+            | Workflow::GithubAction
+            | Workflow::GitlabCi
+            | Workflow::EditorDiagnostic
+            | Workflow::ProgrammaticAnalysis
+            | Workflow::RuntimeCoverageSetup
+            | Workflow::Impact
+            | Workflow::Fix
+            | Workflow::Explain
+            | Workflow::ProjectInventory
+            | Workflow::Setup
+            | Workflow::License
+            | Workflow::Unknown => false,
+        }
+    }
+}
+
+/// Debug-only guard predicate: `true` when a finding-surfacing workflow recorded
+/// a non-failing event without noting its find-state (findings_present stayed
+/// `None`).
+///
+/// Pure so it can be unit-tested without the process-global accumulator. A
+/// `failed` outcome may legitimately leave findings_present unset because
+/// analysis never completed.
+fn find_state_invariant_violated(
+    workflow: Workflow,
+    outcome: &str,
+    findings_present: Option<bool>,
+) -> bool {
+    workflow.surfaces_findings() && outcome != "failed" && findings_present.is_none()
+}
+
+/// Debug-time guard at the single event-emission choke point in
+/// [`record_workflow`]: a finding-surfacing workflow that emits a non-failing
+/// event must have noted its find-state, or a dispatch arm forgot to call
+/// `note_result_count` / `note_findings_present` (the originating bug was issue
+/// #1650). Runs on every recorded workflow regardless of telemetry mode so the
+/// check is deterministic across machines. `findings_present` reflects what the
+/// analysis surfaced independent of the output view, so focused trace / closure
+/// views record their underlying analysis count rather than skipping the note.
+fn debug_assert_find_state_noted(
+    workflow: Workflow,
+    outcome: &str,
+    findings_present: Option<bool>,
+) {
+    debug_assert!(
+        !find_state_invariant_violated(workflow, outcome, findings_present),
+        "telemetry find-state invariant violated: workflow {workflow:?} surfaced findings but \
+         findings_present is unset on a non-failing run. Every exit path of a finding-surfacing \
+         workflow must call telemetry::note_result_count or note_findings_present before the \
+         event is recorded (issue #1650)."
+    );
+}
+
 #[expect(
     dead_code,
     reason = "telemetry schema reserves v1 values for LSP/editor/programmatic surfaces before every surface is wired"
@@ -807,6 +896,16 @@ struct EffectiveConfig {
     config_path: Option<PathBuf>,
 }
 
+#[derive(Debug)]
+struct TelemetryStatus {
+    state: &'static str,
+    source: &'static str,
+    config_path: Option<PathBuf>,
+    admin_disabled: bool,
+    explicit_decision: bool,
+    install_grouping_token: bool,
+}
+
 #[derive(Debug, Serialize)]
 struct TelemetryEvent {
     schema_version: u8,
@@ -925,6 +1024,7 @@ pub fn run(command: TelemetryCommand, output: OutputFormat) -> ExitCode {
 pub fn record_workflow(record: &WorkflowRecord<'_>) {
     let parent_run = parent_run_context(record.parent_run, record.workflow);
     let event = build_workflow_event(record, &parent_run);
+    debug_assert_find_state_noted(record.workflow, event.outcome, event.findings_present);
     match effective_config().mode {
         EffectiveMode::Off | EffectiveMode::DisabledByAdmin => {}
         EffectiveMode::Inspect => print_event_to_stderr(&event),
@@ -1037,72 +1137,85 @@ pub fn maybe_print_opt_in_note(output: OutputFormat, quiet: bool) -> bool {
 }
 
 fn print_status(output: OutputFormat) -> ExitCode {
+    let status = collect_status();
+    match output {
+        OutputFormat::Json => print_status_json(&status),
+        _ => print_status_human(status),
+    }
+}
+
+fn collect_status() -> TelemetryStatus {
     let effective = effective_config();
     let state = mode_label(effective.mode);
     let source = source_label(effective.source);
-    // Whether an anonymous install grouping token currently exists on disk. The
-    // token itself is never surfaced (it is a private grouping identifier); only
-    // its presence is reported so the user can see opt-in minted one and disable
-    // forgot it. Never read or created when telemetry is off or admin-disabled.
-    let install_grouping_token = matches!(effective.mode, EffectiveMode::On)
-        && effective
-            .config_path
-            .as_deref()
-            .and_then(|path| read_config_from(path).ok())
-            .is_some_and(|config| config.install_id.is_some());
-    let explicit_decision = effective
+    let config = effective
         .config_path
         .as_deref()
-        .and_then(|path| read_config_from(path).ok())
-        .is_some_and(|config| config.explicit_decision);
-    match output {
-        OutputFormat::Json => {
-            let value = serde_json::json!({
-                "telemetry": {
-                    "state": state,
-                    "source": source,
-                    "config_path": effective.config_path.as_ref().map(|p| p.display().to_string()),
-                    "admin_disabled": matches!(effective.mode, EffectiveMode::DisabledByAdmin),
-                    "explicit_decision": explicit_decision,
-                    "install_grouping_token": install_grouping_token,
-                    "commands": {
-                        "enable": "plow telemetry enable",
-                        "disable": "plow telemetry disable",
-                        "inspect_example": "plow telemetry inspect --example",
-                        "inspect_command": "PLOW_TELEMETRY=inspect plow audit --format json --quiet"
-                    },
-                    "docs": "docs/telemetry.md"
-                }
-            });
-            crate::report::emit_json(&value, "telemetry status")
-        }
-        _ => {
-            println!("Telemetry: {state} ({source})");
-            if let Some(path) = effective.config_path {
-                println!("Config: {}", path.display());
-            }
-            println!(
-                "Install grouping token: {}",
-                if install_grouping_token {
-                    "present (anonymous, random; sent as a private header, never an event property)"
-                } else {
-                    "none"
-                }
-            );
-            println!(
-                "Explicit decision: {}",
-                if explicit_decision { "yes" } else { "no" }
-            );
-            println!("Enable:  plow telemetry enable");
-            println!("Disable: plow telemetry disable");
-            println!("Inspect an example: plow telemetry inspect --example");
-            println!(
-                "Inspect a real command: PLOW_TELEMETRY=inspect plow audit --format json --quiet"
-            );
-            println!("Docs: docs/telemetry.md");
-            ExitCode::SUCCESS
-        }
+        .and_then(|path| read_config_from(path).ok());
+
+    TelemetryStatus {
+        state,
+        source,
+        config_path: effective.config_path,
+        admin_disabled: matches!(effective.mode, EffectiveMode::DisabledByAdmin),
+        explicit_decision: config
+            .as_ref()
+            .is_some_and(|config| config.explicit_decision),
+        // Whether an anonymous install grouping token currently exists on disk.
+        // The token itself is never surfaced; only its presence is reported.
+        install_grouping_token: matches!(effective.mode, EffectiveMode::On)
+            && config.is_some_and(|config| config.install_id.is_some()),
     }
+}
+
+fn print_status_json(status: &TelemetryStatus) -> ExitCode {
+    let value = serde_json::json!({
+        "telemetry": {
+            "state": status.state,
+            "source": status.source,
+            "config_path": status.config_path.as_ref().map(|p| p.display().to_string()),
+            "admin_disabled": status.admin_disabled,
+            "explicit_decision": status.explicit_decision,
+            "install_grouping_token": status.install_grouping_token,
+            "commands": {
+                "enable": "plow telemetry enable",
+                "disable": "plow telemetry disable",
+                "inspect_example": "plow telemetry inspect --example",
+                "inspect_command": "PLOW_TELEMETRY=inspect plow audit --format json --quiet"
+            },
+            "docs": "docs/telemetry.md"
+        }
+    });
+    crate::report::emit_json(&value, "telemetry status")
+}
+
+fn print_status_human(status: TelemetryStatus) -> ExitCode {
+    println!("Telemetry: {} ({})", status.state, status.source);
+    if let Some(path) = status.config_path {
+        println!("Config: {}", path.display());
+    }
+    println!(
+        "Install grouping token: {}",
+        if status.install_grouping_token {
+            "present (anonymous, random; sent as a private header, never an event property)"
+        } else {
+            "none"
+        }
+    );
+    println!(
+        "Explicit decision: {}",
+        if status.explicit_decision {
+            "yes"
+        } else {
+            "no"
+        }
+    );
+    println!("Enable:  plow telemetry enable");
+    println!("Disable: plow telemetry disable");
+    println!("Inspect an example: plow telemetry inspect --example");
+    println!("Inspect a real command: PLOW_TELEMETRY=inspect plow audit --format json --quiet");
+    println!("Docs: docs/telemetry.md");
+    ExitCode::SUCCESS
 }
 
 fn set_enabled(enabled: bool, output: OutputFormat) -> ExitCode {
@@ -1373,6 +1486,14 @@ fn example_event() -> TelemetryEvent {
 }
 
 fn field_purposes() -> Vec<(&'static str, &'static str)> {
+    let mut fields = telemetry_context_field_purposes();
+    fields.extend(telemetry_analysis_field_purposes());
+    fields.extend(telemetry_result_field_purposes());
+    fields.extend(telemetry_run_field_purposes());
+    fields
+}
+
+fn telemetry_context_field_purposes() -> Vec<(&'static str, &'static str)> {
     vec![
         (
             "workflow",
@@ -1414,6 +1535,11 @@ fn field_purposes() -> Vec<(&'static str, &'static str)> {
             "output_destination",
             "Classifies the report sink as stdout, file, or CI comment without storing paths or URLs.",
         ),
+    ]
+}
+
+fn telemetry_analysis_field_purposes() -> Vec<(&'static str, &'static str)> {
+    vec![
         (
             "analysis_mode",
             "Classifies static, runtime-coverage, production-coverage, security, and fix workflows without storing raw command lines.",
@@ -1430,6 +1556,11 @@ fn field_purposes() -> Vec<(&'static str, &'static str)> {
             "avg_fan_out_bucket",
             "Coarse average fan-out from an already-retained module graph, derived from existing module and edge counts only. Absent when the workflow has no retained graph.",
         ),
+    ]
+}
+
+fn telemetry_result_field_purposes() -> Vec<(&'static str, &'static str)> {
+    vec![
         (
             "findings_present",
             "Whether the analysis surfaced any findings, decoupled from the exit-code gate. On combined and audit workflows it is an OR across sub-analyses; per-analysis find-rate is answerable only on standalone dead_code, dupes, and health.",
@@ -1454,6 +1585,11 @@ fn field_purposes() -> Vec<(&'static str, &'static str)> {
             "mcp_tool",
             "Which MCP tool an agent called, from a fixed allowlist, so MCP usage is attributable per tool.",
         ),
+    ]
+}
+
+fn telemetry_run_field_purposes() -> Vec<(&'static str, &'static str)> {
+    vec![
         (
             "has_parent_run",
             "Shows whether a run has a sanitized parent-run correlation token without exposing the token.",
@@ -1907,7 +2043,7 @@ fn post_telemetry_payload(
 /// across two inodes. The kernel releases the lock when the file handle drops,
 /// including at process exit, so an abandoned drain never wedges the next run.
 struct SpoolLock {
-    file: std::fs::File,
+    _file: std::fs::File,
 }
 
 impl SpoolLock {
@@ -1919,7 +2055,7 @@ impl SpoolLock {
             .open(lock_path)
             .ok()?;
         match file.try_lock() {
-            Ok(()) => Some(Self { file }),
+            Ok(()) => Some(Self { _file: file }),
             // Another process holds the lock; skip and let the next run retry.
             Err(std::fs::TryLockError::WouldBlock) => None,
             Err(std::fs::TryLockError::Error(err)) => {
@@ -1927,12 +2063,6 @@ impl SpoolLock {
                 None
             }
         }
-    }
-}
-
-impl Drop for SpoolLock {
-    fn drop(&mut self) {
-        let _ = self.file.unlock();
     }
 }
 
@@ -2734,6 +2864,94 @@ mod tests {
     }
 
     #[test]
+    fn surfaces_findings_classification_pins_the_analysis_workflows() {
+        // Workflows whose successful runs surface findings and therefore MUST
+        // populate findings_present (each has a note_result_count/note_findings_present
+        // call on every exit path). The exhaustive match in `surfaces_findings`
+        // forces a new variant to be classified; this test pins the intent.
+        for workflow in [
+            Workflow::Audit,
+            Workflow::DeadCode,
+            Workflow::Health,
+            Workflow::Dupes,
+            Workflow::CodeQualityReview,
+            Workflow::Security,
+        ] {
+            assert!(
+                workflow.surfaces_findings(),
+                "{workflow:?} must require findings_present"
+            );
+        }
+        // The constructed non-surfacing workflows. The reserved, never-constructed
+        // variants (DependencyCleanup, EditorDiagnostic, ProgrammaticAnalysis) are
+        // intentionally omitted so they stay dead for the enum's expect(dead_code);
+        // the exhaustive match in `surfaces_findings` still forces them to be
+        // classified.
+        for workflow in [
+            Workflow::GithubAction,
+            Workflow::GitlabCi,
+            Workflow::RuntimeCoverageSetup,
+            Workflow::Impact,
+            Workflow::Fix,
+            Workflow::Explain,
+            Workflow::ProjectInventory,
+            Workflow::Setup,
+            Workflow::License,
+            Workflow::Unknown,
+        ] {
+            assert!(
+                !workflow.surfaces_findings(),
+                "{workflow:?} must not require findings_present"
+            );
+        }
+    }
+
+    #[test]
+    fn find_state_invariant_catches_unnoted_surfacing_runs() {
+        // Violation: a finding-surfacing workflow recorded a non-failing event
+        // without noting find-state (the issue #1650 / flags / watch bug shape).
+        assert!(find_state_invariant_violated(
+            Workflow::Security,
+            "success",
+            None
+        ));
+        assert!(find_state_invariant_violated(
+            Workflow::CodeQualityReview,
+            "issues_found",
+            None
+        ));
+        // Noted (clean or found): fine.
+        assert!(!find_state_invariant_violated(
+            Workflow::Security,
+            "success",
+            Some(false)
+        ));
+        assert!(!find_state_invariant_violated(
+            Workflow::Dupes,
+            "issues_found",
+            Some(true)
+        ));
+        // A failed run may legitimately leave findings_present unset (analysis
+        // never completed).
+        assert!(!find_state_invariant_violated(
+            Workflow::Security,
+            "failed",
+            None
+        ));
+        // Non-surfacing workflows never require findings_present.
+        assert!(!find_state_invariant_violated(
+            Workflow::License,
+            "success",
+            None
+        ));
+        assert!(!find_state_invariant_violated(
+            Workflow::Fix,
+            "success",
+            None
+        ));
+    }
+
+    #[test]
     fn result_count_state_maps_to_buckets() {
         assert_eq!(result_count_bucket_from_state(RESULT_COUNT_UNSET), None);
         assert_eq!(
@@ -3370,5 +3588,870 @@ mod tests {
             None,
             "the transport header name must never leak into the payload",
         );
+    }
+
+    // --- note_findings_present (lines 140-152) ---
+
+    #[test]
+    fn note_findings_present_clean_path_yields_some_false() {
+        // The "clean" branch (present == false) is distinct from UNSET.
+        assert_eq!(findings_present_from_state(FINDINGS_CLEAN), Some(false));
+        assert_ne!(findings_present_from_state(FINDINGS_CLEAN), None);
+    }
+
+    #[test]
+    fn note_findings_present_found_path_yields_some_true() {
+        assert_eq!(findings_present_from_state(FINDINGS_FOUND), Some(true));
+    }
+
+    // --- note_analysis_scale with function_count Some (lines 185-188) ---
+
+    #[test]
+    fn note_analysis_scale_function_count_bucket_maps_correctly() {
+        // Pure helper: function_count_bucket_from_state(function_count_bucket_state(...))
+        assert_eq!(
+            function_count_bucket_from_state(function_count_bucket_state(500)),
+            Some(FunctionCountBucket::Small),
+        );
+        assert_eq!(
+            function_count_bucket_from_state(function_count_bucket_state(1000)),
+            Some(FunctionCountBucket::Medium),
+        );
+        assert_eq!(
+            function_count_bucket_from_state(function_count_bucket_state(10_001)),
+            Some(FunctionCountBucket::Large),
+        );
+    }
+
+    // --- config_shape_rank / config_shape_from_state (lines 259-278) ---
+
+    #[test]
+    fn config_shape_rank_round_trips_through_state() {
+        let pairs = [
+            (ConfigShape::Unknown, Some(ConfigShape::Unknown)),
+            (ConfigShape::Default, Some(ConfigShape::Default)),
+            (ConfigShape::CustomConfig, Some(ConfigShape::CustomConfig)),
+            (ConfigShape::CustomRules, Some(ConfigShape::CustomRules)),
+            (
+                ConfigShape::PluginsEnabled,
+                Some(ConfigShape::PluginsEnabled),
+            ),
+        ];
+        for (shape, expected) in pairs {
+            assert_eq!(
+                config_shape_from_state(config_shape_rank(shape)),
+                expected,
+                "config shape {shape:?} must survive a rank -> state -> enum round-trip",
+            );
+        }
+    }
+
+    #[test]
+    fn config_shape_from_state_rejects_unknown_state() {
+        assert_eq!(config_shape_from_state(99), None);
+        // UNSET (0) must not produce a shape.
+        assert_eq!(config_shape_from_state(CONFIG_SHAPE_UNSET), None);
+    }
+
+    // --- FailureReason::state (lines 305-318) ---
+
+    #[test]
+    fn failure_reason_state_constants_are_distinct() {
+        // Every FailureReason must map to a distinct non-zero state constant so
+        // the CAS accumulator can distinguish between them.
+        let states = [
+            FailureReason::Validation.state(),
+            FailureReason::UnsupportedFormat.state(),
+            FailureReason::Config.state(),
+            FailureReason::Analysis.state(),
+            FailureReason::Diff.state(),
+            FailureReason::Network.state(),
+            FailureReason::Auth.state(),
+            FailureReason::Gate.state(),
+            FailureReason::Signal.state(),
+            FailureReason::Unknown.state(),
+        ];
+        for &s in &states {
+            assert_ne!(
+                s, FAILURE_REASON_UNSET,
+                "no reason may map to the unset sentinel"
+            );
+        }
+        // Uniqueness check via sorted dedup.
+        let mut sorted = states.to_vec();
+        sorted.sort_unstable();
+        let before_len = sorted.len();
+        sorted.dedup();
+        assert_eq!(
+            before_len,
+            sorted.len(),
+            "every FailureReason::state() value must be unique"
+        );
+    }
+
+    // --- note_failure_reason CAS logic (lines 326-345) ---
+
+    #[test]
+    fn failure_reason_from_state_round_trips_all_variants() {
+        // All variants must round-trip through state -> from_state.
+        let pairs = [
+            (FAILURE_REASON_VALIDATION, FailureReason::Validation),
+            (
+                FAILURE_REASON_UNSUPPORTED_FORMAT,
+                FailureReason::UnsupportedFormat,
+            ),
+            (FAILURE_REASON_CONFIG, FailureReason::Config),
+            (FAILURE_REASON_ANALYSIS, FailureReason::Analysis),
+            (FAILURE_REASON_DIFF, FailureReason::Diff),
+            (FAILURE_REASON_NETWORK, FailureReason::Network),
+            (FAILURE_REASON_AUTH, FailureReason::Auth),
+            (FAILURE_REASON_GATE, FailureReason::Gate),
+            (FAILURE_REASON_SIGNAL, FailureReason::Signal),
+            (FAILURE_REASON_UNKNOWN, FailureReason::Unknown),
+        ];
+        for (state, expected) in pairs {
+            assert_eq!(failure_reason_from_state(state), Some(expected));
+        }
+        assert_eq!(failure_reason_from_state(FAILURE_REASON_UNSET), None);
+    }
+
+    // --- truncation_reason_to_state / from_state (lines 405-422) ---
+
+    #[test]
+    fn truncation_reason_round_trips_all_variants() {
+        let variants = [
+            TruncationReason::Unknown,
+            TruncationReason::MaxItems,
+            TruncationReason::CommentLimit,
+            TruncationReason::SizeLimit,
+        ];
+        for variant in variants {
+            let state = truncation_reason_to_state(variant);
+            assert_ne!(
+                state, TRUNCATION_REASON_UNSET,
+                "no reason maps to the unset sentinel"
+            );
+            assert_eq!(
+                truncation_reason_from_state(state),
+                Some(variant),
+                "{variant:?} must survive to_state -> from_state",
+            );
+        }
+    }
+
+    #[test]
+    fn truncation_reason_from_state_rejects_unset() {
+        assert_eq!(truncation_reason_from_state(TRUNCATION_REASON_UNSET), None);
+        assert_eq!(truncation_reason_from_state(99), None);
+    }
+
+    // --- status_changed_event shape (lines 1322-1358) ---
+
+    #[test]
+    fn status_changed_event_has_expected_schema_fields() {
+        let event = status_changed_event(true);
+        let value = serde_json::to_value(&event).expect("status changed event serializes");
+        assert_eq!(
+            value["schema_version"].as_u64(),
+            Some(u64::from(TELEMETRY_SCHEMA_VERSION))
+        );
+        assert_eq!(value["event"].as_str(), Some("telemetry_status_changed"));
+        assert_eq!(value["outcome"].as_str(), Some("enabled"));
+        // Optional fields that are None on a status-change event must be absent.
+        assert!(
+            value.get("failure_reason").is_none(),
+            "failure_reason must be absent"
+        );
+        assert!(value.get("run_scope").is_none(), "run_scope must be absent");
+        assert!(
+            value.get("config_shape").is_none(),
+            "config_shape must be absent"
+        );
+        assert!(
+            value.get("findings_present").is_none(),
+            "findings_present must be absent"
+        );
+    }
+
+    #[test]
+    fn status_changed_event_disabled_outcome() {
+        let event = status_changed_event(false);
+        let value = serde_json::to_value(&event).expect("status changed event serializes");
+        assert_eq!(value["outcome"].as_str(), Some("disabled"));
+    }
+
+    // --- example_event shape (lines 1360-1396) ---
+
+    #[test]
+    fn example_event_has_all_optional_fields_present() {
+        // The example event is documentation: every optional field must be Some
+        // so the documented payload shows the full schema surface.
+        let event = example_event();
+        assert!(
+            event.agent_source.is_some(),
+            "example must show agent_source"
+        );
+        assert!(
+            event.failure_reason.is_none(),
+            "completed workflow has no failure_reason"
+        );
+        assert!(event.run_scope.is_some(), "example must show run_scope");
+        assert!(
+            event.findings_present.is_some(),
+            "example must show findings_present"
+        );
+        assert!(event.mcp_tool.is_some(), "example must show mcp_tool");
+        assert!(
+            event.report_truncated.is_some(),
+            "example must show report_truncated"
+        );
+        assert!(
+            event.truncation_reason.is_some(),
+            "example must show truncation_reason"
+        );
+        assert!(event.cache_state.is_some(), "example must show cache_state");
+    }
+
+    // --- field_purposes and transport_headers (lines 1398-1532) ---
+
+    #[test]
+    fn field_purposes_is_non_empty_and_unique() {
+        let purposes = field_purposes();
+        assert!(
+            !purposes.is_empty(),
+            "field_purposes must return at least one entry"
+        );
+        // No duplicate field names.
+        let mut seen_fields = std::collections::BTreeSet::new();
+        for (field, _purpose) in &purposes {
+            assert!(
+                seen_fields.insert(*field),
+                "duplicate field name in field_purposes: {field}",
+            );
+        }
+    }
+
+    #[test]
+    fn transport_headers_includes_expected_header_names() {
+        let headers = transport_headers();
+        let names: Vec<&str> = headers.iter().map(|(name, _)| *name).collect();
+        assert!(
+            names.contains(&PARENT_RUN_HEADER),
+            "transport_headers must list {PARENT_RUN_HEADER}",
+        );
+        assert!(
+            names.contains(&INSTALL_HEADER),
+            "transport_headers must list {INSTALL_HEADER}",
+        );
+        // Verify purposes are non-empty strings.
+        for (header, purpose) in &headers {
+            assert!(
+                !purpose.is_empty(),
+                "transport header {header} must have a non-empty purpose"
+            );
+        }
+    }
+
+    // --- parse_env_mode coverage for all aliases (lines 1631-1638) ---
+
+    #[test]
+    fn parse_env_mode_accepts_all_aliases() {
+        // Off aliases
+        for value in &["off", "0", "false", "disabled"] {
+            assert_eq!(
+                parse_env_mode(value),
+                Some(EffectiveMode::Off),
+                "{value} must parse as Off",
+            );
+        }
+        // On aliases
+        for value in &["on", "1", "true", "enabled"] {
+            assert_eq!(
+                parse_env_mode(value),
+                Some(EffectiveMode::On),
+                "{value} must parse as On",
+            );
+        }
+        // Inspect aliases
+        for value in &["inspect", "debug", "log"] {
+            assert_eq!(
+                parse_env_mode(value),
+                Some(EffectiveMode::Inspect),
+                "{value} must parse as Inspect",
+            );
+        }
+        // Whitespace tolerance
+        assert_eq!(parse_env_mode("  on  "), Some(EffectiveMode::On));
+        // Case insensitivity
+        assert_eq!(parse_env_mode("ON"), Some(EffectiveMode::On));
+        assert_eq!(parse_env_mode("OFF"), Some(EffectiveMode::Off));
+        // Unknown
+        assert_eq!(parse_env_mode("maybe"), None);
+    }
+
+    // --- config_dir / read_config / write_config (lines 1663-1695) ---
+
+    #[test]
+    fn read_config_from_returns_err_on_missing_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("nonexistent.json");
+        assert!(
+            read_config_from(&path).is_err(),
+            "missing file must return Err"
+        );
+    }
+
+    #[test]
+    fn read_config_from_returns_err_on_invalid_json() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("bad.json");
+        std::fs::write(&path, "{ not valid json }").expect("write");
+        assert!(
+            read_config_from(&path).is_err(),
+            "invalid JSON must return Err"
+        );
+    }
+
+    #[test]
+    fn write_config_creates_parent_directories() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let deep = dir.path().join("a").join("b").join("telemetry.json");
+        let config = TelemetryConfig::default();
+        write_config_to(&deep, &config).expect("write must create parent dirs");
+        assert!(deep.exists(), "config file must be created");
+    }
+
+    // --- spool_event / rewrite_spool (lines 1732-1816) ---
+
+    #[test]
+    fn rewrite_spool_with_no_lines_removes_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let spool = dir.path().join(SPOOL_FILE_NAME);
+        std::fs::write(&spool, "line1\n").expect("create spool");
+        rewrite_spool(&spool, &[]);
+        assert!(
+            !spool.exists(),
+            "rewrite with empty lines must remove the spool file"
+        );
+    }
+
+    #[test]
+    fn rewrite_spool_with_lines_overwrites_atomically() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let spool = dir.path().join(SPOOL_FILE_NAME);
+        std::fs::write(&spool, "old_line\n").expect("seed spool");
+        rewrite_spool(&spool, &["{\"new\":1}", "{\"new\":2}"]);
+        let contents = std::fs::read_to_string(&spool).expect("read after rewrite");
+        assert_eq!(contents, "{\"new\":1}\n{\"new\":2}\n");
+    }
+
+    // --- drain_spool_file with empty spool (lines 1871-1881) ---
+
+    #[test]
+    fn drain_empty_spool_removes_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let spool = dir.path().join(SPOOL_FILE_NAME);
+        // Whitespace-only content; all lines filter out as empty.
+        std::fs::write(&spool, "   \n  \n").expect("write empty spool");
+        let mut calls = 0;
+        drain_spool_file(&spool, None, |_value, _parent_run, _install| {
+            calls += 1;
+            Ok(())
+        });
+        assert_eq!(calls, 0, "no valid events to post");
+        assert!(!spool.exists(), "empty spool must be removed after drain");
+    }
+
+    // --- parse_spool_line envelope vs bare event (lines 1907-1917) ---
+
+    #[test]
+    fn parse_spool_line_bare_event_has_no_parent_run() {
+        let line = "{\"event\":\"workflow_completed\",\"n\":1}";
+        let (payload, parent_run) = parse_spool_line(line).expect("parse bare line");
+        assert_eq!(payload["n"].as_i64(), Some(1));
+        assert_eq!(parent_run, None);
+    }
+
+    #[test]
+    fn parse_spool_line_envelope_extracts_payload_and_sanitized_parent_run() {
+        let line =
+            r#"{"payload":{"event":"workflow_completed"},"parent_run_header":"run_abc123def456"}"#;
+        let (payload, parent_run) = parse_spool_line(line).expect("parse envelope");
+        assert_eq!(
+            payload["event"].as_str(),
+            Some("workflow_completed"),
+            "payload field must be extracted from envelope",
+        );
+        assert_eq!(
+            parent_run.as_deref(),
+            Some("run_abc123def456"),
+            "parent_run_header must be sanitized and returned",
+        );
+    }
+
+    #[test]
+    fn parse_spool_line_envelope_drops_invalid_parent_run() {
+        // A parent_run_header that fails sanitize_parent_run is dropped to None.
+        let line =
+            r#"{"payload":{"event":"workflow_completed"},"parent_run_header":"../evil/path"}"#;
+        let (payload, parent_run) = parse_spool_line(line).expect("parse envelope");
+        assert!(payload.get("event").is_some());
+        assert_eq!(parent_run, None, "invalid parent run must be dropped");
+    }
+
+    #[test]
+    fn parse_spool_line_rejects_invalid_json() {
+        assert!(parse_spool_line("not json").is_err());
+    }
+
+    // --- classify_invocation_context (lines 1987-2002) ---
+
+    #[test]
+    fn invocation_context_is_ci_when_agent_source_is_none_and_ci_is_set() {
+        // We cannot safely mutate env vars in parallel tests. However, we can
+        // exercise the pure helper classify_agent_source_from_env with no keys,
+        // which yields AgentSource::None, and then observe that is_ci() returns
+        // a bool based on the actual env (which may or may not be CI).
+        // The function classify_invocation_context() itself reads env directly, so
+        // we verify the surrounding pure helpers cover the branches instead.
+
+        // Branch: classify_agent_source_from_env with empty keys => AgentSource::None
+        let source = classify_agent_source_from_env(std::iter::empty::<OsString>());
+        assert_eq!(
+            source,
+            AgentSource::None,
+            "no env keys must yield AgentSource::None"
+        );
+    }
+
+    // --- duration_bucket (lines 2160-2169) ---
+
+    #[test]
+    fn duration_bucket_covers_all_ranges() {
+        assert_eq!(duration_bucket(Duration::from_millis(0)), "<100");
+        assert_eq!(duration_bucket(Duration::from_millis(99)), "<100");
+        assert_eq!(duration_bucket(Duration::from_millis(100)), "100-500");
+        assert_eq!(duration_bucket(Duration::from_millis(499)), "100-500");
+        assert_eq!(duration_bucket(Duration::from_millis(500)), "500-2000");
+        assert_eq!(duration_bucket(Duration::from_millis(1_999)), "500-2000");
+        assert_eq!(duration_bucket(Duration::from_secs(2)), "2s-10s");
+        assert_eq!(duration_bucket(Duration::from_millis(9_999)), "2s-10s");
+        assert_eq!(duration_bucket(Duration::from_secs(10)), "10s+");
+        assert_eq!(duration_bucket(Duration::from_mins(1)), "10s+");
+    }
+
+    // --- parent_run_context path: valid token (lines 2193-2219) ---
+
+    #[test]
+    fn parent_run_context_none_produces_root_role() {
+        let ctx = parent_run_context(None, Workflow::DeadCode);
+        assert_eq!(ctx.token, None);
+        assert!(!ctx.has_parent_run);
+        assert_eq!(ctx.run_role, RunRole::Root);
+        assert_eq!(ctx.followup_kind, FollowupKind::Unknown);
+    }
+
+    #[test]
+    fn parent_run_context_valid_token_produces_followup_role() {
+        let ctx = parent_run_context(Some("run_abc123def456"), Workflow::Health);
+        assert!(ctx.token.is_some(), "valid token must be kept");
+        assert!(ctx.has_parent_run);
+        assert_eq!(ctx.run_role, RunRole::Followup);
+        assert_eq!(ctx.followup_kind, FollowupKind::Health);
+    }
+
+    // --- followup_kind mapping (lines 2221-2243) ---
+
+    #[test]
+    fn followup_kind_maps_known_workflows() {
+        let pairs = [
+            (Workflow::Audit, FollowupKind::Audit),
+            (Workflow::Security, FollowupKind::Security),
+            (Workflow::Health, FollowupKind::Health),
+            (Workflow::DeadCode, FollowupKind::Check),
+            (Workflow::Dupes, FollowupKind::Dupes),
+            (Workflow::Fix, FollowupKind::Fix),
+            (Workflow::Explain, FollowupKind::Explain),
+            (Workflow::Unknown, FollowupKind::Unknown),
+            (Workflow::Impact, FollowupKind::Unknown),
+            (Workflow::License, FollowupKind::Unknown),
+        ];
+        for (workflow, expected) in pairs {
+            assert_eq!(
+                followup_kind(workflow),
+                expected,
+                "workflow {workflow:?} must map to {expected:?}",
+            );
+        }
+    }
+
+    // --- sanitize_parent_run boundary cases (lines 2245-2258) ---
+
+    #[test]
+    fn sanitize_parent_run_boundary_lengths() {
+        // Minimum valid length is 6 chars.
+        assert!(
+            sanitize_parent_run("abcdef").is_some(),
+            "6-char token must be accepted"
+        );
+        // 5 chars is below minimum.
+        assert!(
+            sanitize_parent_run("abcde").is_none(),
+            "5-char token must be rejected"
+        );
+        // 64-char token is at the upper limit.
+        let max_len = "a".repeat(64);
+        assert!(
+            sanitize_parent_run(&max_len).is_some(),
+            "64-char token must be accepted"
+        );
+        // 65 chars is above maximum.
+        let too_long = "a".repeat(65);
+        assert!(
+            sanitize_parent_run(&too_long).is_none(),
+            "65-char token must be rejected"
+        );
+    }
+
+    #[test]
+    fn sanitize_parent_run_allows_alphanumeric_underscores_hyphens() {
+        assert!(sanitize_parent_run("run_ABC-123").is_some());
+        assert!(sanitize_parent_run("Run-123_abc").is_some());
+    }
+
+    #[test]
+    fn sanitize_parent_run_rejects_disallowed_chars() {
+        assert!(
+            sanitize_parent_run("run abc 12").is_none(),
+            "spaces not allowed"
+        );
+        assert!(
+            sanitize_parent_run("run/abc/12").is_none(),
+            "slashes not allowed"
+        );
+        assert!(
+            sanitize_parent_run("run@abc#12").is_none(),
+            "special chars not allowed"
+        );
+    }
+
+    // --- parse_agent_source_value additional aliases (lines 2011-2030) ---
+
+    #[test]
+    fn parse_agent_source_value_none_and_empty_map_to_agent_none() {
+        assert_eq!(parse_agent_source_value("none"), Some(AgentSource::None));
+        assert_eq!(parse_agent_source_value(""), Some(AgentSource::None));
+        assert_eq!(parse_agent_source_value("  "), Some(AgentSource::None));
+    }
+
+    #[test]
+    fn parse_agent_source_value_unknown_maps_to_unknown() {
+        assert_eq!(
+            parse_agent_source_value("unknown"),
+            Some(AgentSource::Unknown)
+        );
+    }
+
+    #[test]
+    fn parse_agent_source_value_openai_codex_alias() {
+        assert_eq!(
+            parse_agent_source_value("openai_codex"),
+            Some(AgentSource::Codex)
+        );
+    }
+
+    #[test]
+    fn parse_agent_source_value_github_copilot_alias() {
+        assert_eq!(
+            parse_agent_source_value("github_copilot"),
+            Some(AgentSource::Copilot)
+        );
+    }
+
+    #[test]
+    fn parse_agent_source_value_roo_code_alias() {
+        assert_eq!(parse_agent_source_value("roo-code"), Some(AgentSource::Roo));
+    }
+
+    #[test]
+    fn parse_agent_source_value_open_code_alias() {
+        assert_eq!(
+            parse_agent_source_value("open-code"),
+            Some(AgentSource::Opencode)
+        );
+    }
+
+    #[test]
+    fn parse_agent_source_value_continue_dev_alias() {
+        assert_eq!(
+            parse_agent_source_value("continue_dev"),
+            Some(AgentSource::Continue)
+        );
+    }
+
+    #[test]
+    fn parse_agent_source_value_other_known_alias() {
+        assert_eq!(
+            parse_agent_source_value("other"),
+            Some(AgentSource::OtherKnown)
+        );
+        assert_eq!(
+            parse_agent_source_value("other_known"),
+            Some(AgentSource::OtherKnown)
+        );
+    }
+
+    #[test]
+    fn parse_agent_source_value_unknown_vendor_returns_none() {
+        assert_eq!(parse_agent_source_value("devin"), None);
+        assert_eq!(parse_agent_source_value("private_agent_x"), None);
+    }
+
+    #[test]
+    fn parse_agent_source_value_is_case_insensitive() {
+        // The function lowercases before matching, so CURSOR and cursor both work.
+        assert_eq!(
+            parse_agent_source_value("CURSOR"),
+            Some(AgentSource::Cursor)
+        );
+        assert_eq!(
+            parse_agent_source_value("Gemini"),
+            Some(AgentSource::Gemini)
+        );
+    }
+
+    // --- parse_integration_surface_override remaining variants (lines 2112-2120) ---
+
+    #[test]
+    fn parse_integration_surface_override_vscode_and_napi() {
+        assert_eq!(
+            parse_integration_surface_override("vscode"),
+            Some(IntegrationSurface::Vscode),
+        );
+        assert_eq!(
+            parse_integration_surface_override("napi"),
+            Some(IntegrationSurface::Napi),
+        );
+    }
+
+    // --- mcp_tool_from_value known tools from manifest (lines 2127-2142) ---
+
+    #[test]
+    fn mcp_tool_from_value_returns_static_str_for_known_tools() {
+        // Check a few tools that exist in the manifest; the actual set is in
+        // plow_types::mcp_manifest::MCP_TOOLS.
+        let tools: Vec<&str> = plow_types::mcp_manifest::MCP_TOOLS
+            .iter()
+            .map(|t| t.name)
+            .collect();
+        // Verify every manifest entry round-trips.
+        for tool_name in &tools {
+            let result = mcp_tool_from_value(tool_name);
+            assert_eq!(
+                result,
+                Some(*tool_name),
+                "{tool_name} must be accepted by the allowlist",
+            );
+        }
+        // Off-allowlist values are rejected.
+        assert_eq!(mcp_tool_from_value("__proto__"), None);
+    }
+
+    // --- spool_event with parent_run envelope (lines 1736-1752) ---
+
+    #[test]
+    fn spool_event_with_parent_run_writes_envelope_line() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let record = WorkflowRecord {
+            workflow: Workflow::DeadCode,
+            output: OutputFormat::Json,
+            quiet: true,
+            elapsed: Duration::from_millis(10),
+            exit_code: ExitCode::SUCCESS,
+            failure_reason: None,
+            parent_run: Some("run_abc123def456"),
+            context: WorkflowContext {
+                run_scope: RunScope::FullProject,
+                config_shape: ConfigShape::Default,
+                output_destination: OutputDestination::Stdout,
+                analysis_mode: AnalysisMode::Static,
+            },
+        };
+        let parent_run_ctx = parent_run_context(record.parent_run, record.workflow);
+        let event = build_workflow_event(&record, &parent_run_ctx);
+
+        let spool_path = dir.path().join(SPOOL_FILE_NAME);
+        // Manually replicate what spool_event would do when given a parent_run:
+        // produce the envelope shape and write it.
+        let envelope = serde_json::json!({
+            "payload": event,
+            "parent_run_header": parent_run_ctx.token.as_deref(),
+        });
+        let line = serde_json::to_string(&envelope).expect("serialize envelope");
+        append_spool_line(&spool_path, &line).expect("append");
+
+        let mut seen: Vec<(serde_json::Value, Option<String>)> = Vec::new();
+        drain_spool_file(&spool_path, None, |value, parent_run, _install| {
+            seen.push((value.clone(), parent_run.map(str::to_owned)));
+            Ok(())
+        });
+
+        assert_eq!(seen.len(), 1);
+        assert_eq!(
+            seen[0].1.as_deref(),
+            Some("run_abc123def456"),
+            "parent run token must be threaded through the envelope",
+        );
+        // The token must not appear as a payload field.
+        assert_eq!(seen[0].0.get("parent_run_header"), None);
+    }
+
+    // --- failure_reason_for_value success path (lines 1306-1320) ---
+
+    #[test]
+    fn failure_reason_for_value_absent_on_success() {
+        let record = WorkflowRecord {
+            workflow: Workflow::DeadCode,
+            output: OutputFormat::Human,
+            quiet: false,
+            elapsed: Duration::from_millis(10),
+            exit_code: ExitCode::SUCCESS,
+            failure_reason: Some(FailureReason::Config),
+            parent_run: None,
+            context: WorkflowContext {
+                run_scope: RunScope::FullProject,
+                config_shape: ConfigShape::Default,
+                output_destination: OutputDestination::Stdout,
+                analysis_mode: AnalysisMode::Static,
+            },
+        };
+        // A successful exit code must not emit any failure_reason, even when one
+        // is recorded.
+        assert_eq!(
+            failure_reason_for_value(&record, Some(FailureReason::Analysis)),
+            None
+        );
+    }
+
+    #[test]
+    fn failure_reason_for_value_recorded_reason_fills_unknown_gap() {
+        // When the record has no explicit reason but a recorded one exists,
+        // the recorded one is used.
+        let record = WorkflowRecord {
+            workflow: Workflow::Audit,
+            output: OutputFormat::Json,
+            quiet: true,
+            elapsed: Duration::from_millis(100),
+            exit_code: ExitCode::from(2),
+            failure_reason: None,
+            parent_run: None,
+            context: WorkflowContext {
+                run_scope: RunScope::ChangedOnly,
+                config_shape: ConfigShape::Default,
+                output_destination: OutputDestination::Stdout,
+                analysis_mode: AnalysisMode::Static,
+            },
+        };
+        assert_eq!(
+            failure_reason_for_value(&record, Some(FailureReason::Network)),
+            Some(FailureReason::Network),
+        );
+    }
+
+    // --- output_format_label (lines 2144-2158) ---
+
+    #[test]
+    fn output_format_label_covers_all_variants() {
+        let pairs = [
+            (OutputFormat::Human, "human"),
+            (OutputFormat::Json, "json"),
+            (OutputFormat::Sarif, "sarif"),
+            (OutputFormat::Compact, "compact"),
+            (OutputFormat::Markdown, "markdown"),
+            (OutputFormat::CodeClimate, "codeclimate"),
+            (OutputFormat::PrCommentGithub, "pr_comment_github"),
+            (OutputFormat::PrCommentGitlab, "pr_comment_gitlab"),
+            (OutputFormat::ReviewGithub, "review_github"),
+            (OutputFormat::ReviewGitlab, "review_gitlab"),
+            (OutputFormat::Badge, "badge"),
+        ];
+        for (format, expected) in pairs {
+            assert_eq!(
+                output_format_label(format),
+                expected,
+                "{format:?} must map to '{expected}'",
+            );
+        }
+    }
+
+    // --- exit_code_bucket covers all ranges (lines 2171-2181) ---
+
+    #[test]
+    fn exit_code_bucket_covers_expected_codes() {
+        assert_eq!(exit_code_bucket(ExitCode::SUCCESS), "0");
+        assert_eq!(exit_code_bucket(ExitCode::from(1)), "1");
+        assert_eq!(exit_code_bucket(ExitCode::from(2)), "2");
+        // Any code >= 3 falls into the catch-all bucket.
+        assert_eq!(exit_code_bucket(ExitCode::from(3)), "3-7");
+        assert_eq!(exit_code_bucket(ExitCode::from(7)), "3-7");
+    }
+
+    // --- outcome (lines 2183-2191) ---
+
+    #[test]
+    fn outcome_maps_exit_codes_to_labels() {
+        assert_eq!(outcome(ExitCode::SUCCESS), "success");
+        assert_eq!(outcome(ExitCode::from(1)), "issues_found");
+        assert_eq!(outcome(ExitCode::from(2)), "failed");
+        assert_eq!(outcome(ExitCode::from(7)), "failed");
+    }
+
+    // --- is_failed (lines 2260-2262) ---
+
+    #[test]
+    fn is_failed_returns_false_for_success_and_issues_found() {
+        assert!(!is_failed(ExitCode::SUCCESS));
+        assert!(!is_failed(ExitCode::from(1)));
+    }
+
+    #[test]
+    fn is_failed_returns_true_for_error_codes() {
+        assert!(is_failed(ExitCode::from(2)));
+        assert!(is_failed(ExitCode::from(7)));
+    }
+
+    // --- mode_label and source_label (lines 2264-2280) ---
+
+    #[test]
+    fn mode_label_covers_all_variants() {
+        assert_eq!(mode_label(EffectiveMode::Off), "off");
+        assert_eq!(mode_label(EffectiveMode::On), "on");
+        assert_eq!(mode_label(EffectiveMode::Inspect), "inspect");
+        assert_eq!(
+            mode_label(EffectiveMode::DisabledByAdmin),
+            "disabled_by_admin"
+        );
+    }
+
+    #[test]
+    fn source_label_covers_all_variants() {
+        assert_eq!(source_label(ModeSource::AdminEnv), "admin_env");
+        assert_eq!(source_label(ModeSource::Env), "env");
+        assert_eq!(source_label(ModeSource::UserConfig), "user_config");
+        assert_eq!(source_label(ModeSource::Default), "default");
+    }
+
+    // --- key_has_token word-boundary logic (lines 2075-2078) ---
+
+    #[test]
+    fn key_has_token_requires_leading_word_boundary() {
+        // Matches at position 0.
+        assert!(key_has_token("CLAUDE_HOME", "CLAUDE"));
+        // Matches after underscore.
+        assert!(key_has_token("MY_CLAUDE_HOME", "CLAUDE"));
+        // Does NOT match mid-word (CHROOT contains ROO but not at a boundary).
+        assert!(!key_has_token("CHROOT", "ROO"));
+        // Does NOT match inside a word without preceding underscore.
+        assert!(!key_has_token("XCLAUDEFOO", "CLAUDE"));
     }
 }

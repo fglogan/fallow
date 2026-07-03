@@ -1,6 +1,7 @@
 mod boundary;
 mod boundary_calls;
 mod boundary_coverage;
+mod duplicate_prop_shape;
 mod dynamic_segment_name_conflict;
 pub mod feature_flags;
 mod iconify;
@@ -10,22 +11,34 @@ mod mixed_barrel;
 mod package_json_utils;
 mod policy;
 mod predicates;
+mod prop_drilling;
 mod re_export_cycles;
+mod react_intel;
+mod react_resolve;
+mod render_fan_in;
 mod route_collision;
 mod route_tree;
 mod security;
 mod server_only;
+mod thin_wrapper;
 mod unprovided_inject;
 mod unrendered_component;
 mod unused_catalog;
 mod unused_component_emit;
+mod unused_component_input;
+mod unused_component_output;
 mod unused_component_prop;
 mod unused_deps;
 mod unused_exports;
 mod unused_files;
+mod unused_load_data_key;
 mod unused_members;
 mod unused_overrides;
 mod unused_server_action;
+mod unused_svelte_event;
+
+#[cfg(test)]
+pub(crate) mod test_support;
 
 #[cfg(test)]
 pub(crate) use unused_deps::matches_virtual_prefix;
@@ -46,29 +59,44 @@ use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use plow_types::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
-    CircularDependencyFinding, DuplicateExportFinding, DynamicSegmentNameConflictFinding,
-    EmptyCatalogGroupFinding, InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
-    MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PolicyViolationFinding,
-    PrivateTypeLeakFinding, ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
-    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
-    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
-    UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
-    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
+    CircularDependencyFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
+    DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding, InvalidClientExportFinding,
+    MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
+    MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
+    PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
+    TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
+    UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
+    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
+    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
+    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
+    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedSvelteEventFinding,
+    UnusedTypeFinding,
 };
 
-use crate::results::{AnalysisResults, CircularDependency, CircularDependencyEdge};
+use crate::results::{
+    AnalysisResults, CircularDependency, CircularDependencyEdge, StaleSuppression,
+    UnusedDependency, UnusedExport, UnusedMember,
+};
 use crate::suppress::{IssueKind, SuppressionContext};
 
+use duplicate_prop_shape::find_duplicate_prop_shapes;
 use dynamic_segment_name_conflict::find_dynamic_segment_name_conflicts;
 use invalid_client_exports::find_invalid_client_exports;
 use misplaced_directive::find_misplaced_directives;
 use mixed_barrel::find_mixed_client_server_barrels;
+use prop_drilling::find_prop_drilling_chains;
 use re_export_cycles::find_re_export_cycles;
+use react_intel::compute_react_component_intel;
+use render_fan_in::compute_render_fan_in;
 use route_collision::find_route_collisions;
-use unprovided_inject::find_unprovided_injects;
-use unrendered_component::find_unrendered_components;
+use thin_wrapper::find_thin_wrappers;
+use unprovided_inject::{UnprovidedInjectInput, find_unprovided_injects};
+use unrendered_component::{
+    LitUnrenderedInput, find_unrendered_angular_components, find_unrendered_components,
+    find_unrendered_lit_elements,
+};
 #[expect(
     deprecated,
     reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
@@ -78,14 +106,16 @@ use unused_catalog::{
     gather_pnpm_catalog_state,
 };
 use unused_component_emit::find_unused_component_emits;
-use unused_component_prop::find_unused_component_props;
+use unused_component_input::find_unused_component_inputs;
+use unused_component_output::find_unused_component_outputs;
+use unused_component_prop::{find_unused_component_props, find_unused_react_props};
 #[expect(
     deprecated,
     reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
 )]
 use unused_deps::{
-    find_test_only_dependencies, find_type_only_dependencies, find_unlisted_dependencies,
-    find_unresolved_imports, find_unused_dependencies,
+    UnlistedDependencyInput, find_test_only_dependencies, find_type_only_dependencies,
+    find_unlisted_dependencies, find_unresolved_imports, find_unused_dependencies,
 };
 #[expect(
     deprecated,
@@ -100,7 +130,8 @@ use unused_exports::{
     reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
 )]
 use unused_files::find_unused_files;
-use unused_members::find_unused_members_with_public_api_entry_points;
+use unused_load_data_key::find_unused_load_data_keys;
+use unused_members::{UnusedMemberScanInput, find_unused_members_with_public_api_entry_points};
 #[expect(
     deprecated,
     reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
@@ -110,6 +141,7 @@ use unused_overrides::{
     gather_pnpm_override_state,
 };
 use unused_server_action::reclassify_unused_server_actions;
+use unused_svelte_event::find_unused_svelte_events;
 
 /// Pre-computed line offset tables indexed by `FileId`, built during parse and
 /// carried through the cache. Eliminates redundant file reads during analysis.
@@ -192,7 +224,7 @@ fn read_source(path: &std::path::Path) -> String {
 
 /// Check whether any two files in a cycle belong to different workspace packages.
 /// Uses longest-prefix-match to assign each file to a workspace root.
-/// Files outside all workspace roots (e.g., root-level shared code) are ignored —
+/// Files outside all workspace roots (e.g., root-level shared code) are ignored,
 /// only cycles between two distinct named workspaces are flagged.
 fn is_cross_package_cycle(
     files: &[std::path::PathBuf],
@@ -241,19 +273,65 @@ fn public_workspace_roots<'a>(
         .collect()
 }
 
+/// Build the raw (as-discovered) module-path -> `FileId` index.
+///
+/// Public-API entry-point resolution previously also canonicalized every module
+/// here (one `realpath` syscall per module, ~21k on a large monorepo) so the map
+/// could match an entry point expressed in a module's canonical form. That eager
+/// sweep is almost entirely wasted: the consumer
+/// ([`add_package_public_api_entry_points`]) already canonicalizes the ENTRY and
+/// matches it against raw module paths, which covers every project without
+/// intra-project symlinks. The residual symlinked-module case is handled lazily
+/// and package-scoped by [`resolve_entry_via_scoped_canonical`], so the common
+/// path pays zero canonicalize syscalls.
 fn graph_path_to_file_id(graph: &ModuleGraph) -> FxHashMap<std::path::PathBuf, FileId> {
-    let mut path_to_file_id = FxHashMap::default();
-    for module in &graph.modules {
-        path_to_file_id.insert(module.path.clone(), module.file_id);
-        if let Ok(canonical) = dunce::canonicalize(&module.path) {
-            path_to_file_id.insert(canonical, module.file_id);
-        }
-    }
-    path_to_file_id
+    graph
+        .modules
+        .iter()
+        .map(|module| (module.path.clone(), module.file_id))
+        .collect()
+}
+
+/// Resolve a canonicalized entry-point path against the canonical form of the
+/// modules UNDER `package_root`, without canonicalizing the whole project.
+///
+/// Only reached when an entry point matches neither a raw module path nor the
+/// canonicalized-entry-against-raw-map lookup, i.e. the module is reached through
+/// an intra-project symlink so its stored (raw) path differs from its canonical
+/// path. Scoping the scan to the entry's own package keeps a fruitless miss
+/// (e.g. a `bin` script that is not a discovered module) bounded by that
+/// package's file count instead of the entire graph.
+fn resolve_entry_via_scoped_canonical(
+    graph: &ModuleGraph,
+    package_root: &std::path::Path,
+    canonical_entry: &std::path::Path,
+) -> Option<FileId> {
+    match_canonical_entry_under_package(
+        graph.modules.iter().map(|m| (m.path.as_path(), m.file_id)),
+        package_root,
+        canonical_entry,
+    )
+}
+
+/// Pure core of [`resolve_entry_via_scoped_canonical`], decoupled from
+/// `ModuleGraph` for direct unit testing of the symlink-resolution path. Returns
+/// the `FileId` of the first candidate under `package_root` whose canonical form
+/// equals `canonical_entry`.
+fn match_canonical_entry_under_package<'a>(
+    candidates: impl Iterator<Item = (&'a std::path::Path, FileId)>,
+    package_root: &std::path::Path,
+    canonical_entry: &std::path::Path,
+) -> Option<FileId> {
+    candidates
+        .filter(|(path, _)| path.starts_with(package_root))
+        .find_map(|(path, file_id)| {
+            (dunce::canonicalize(path).ok().as_deref() == Some(canonical_entry)).then_some(file_id)
+        })
 }
 
 fn add_package_public_api_entry_points(
     public_api_entry_points: &mut FxHashSet<FileId>,
+    graph: &ModuleGraph,
     path_to_file_id: &FxHashMap<std::path::PathBuf, FileId>,
     package_root: &std::path::Path,
     package_json: &PackageJson,
@@ -276,7 +354,11 @@ fn add_package_public_api_entry_points(
         if let Some(file_id) = path_to_file_id.get(&entry_point.path).copied().or_else(|| {
             dunce::canonicalize(&entry_point.path)
                 .ok()
-                .and_then(|canonical| path_to_file_id.get(&canonical).copied())
+                .and_then(|canonical| {
+                    path_to_file_id.get(&canonical).copied().or_else(|| {
+                        resolve_entry_via_scoped_canonical(graph, package_root, &canonical)
+                    })
+                })
         }) {
             public_api_entry_points.insert(file_id);
         }
@@ -325,7 +407,13 @@ fn add_exportless_package_source_indexes(
     }
 }
 
-fn public_api_package_entry_points(
+/// Compute the exports-aware public-API entry-point set: the `package.json`
+/// `exports`-mapped modules (non-private packages) plus the no-`exports`
+/// source-index fallback. This encodes rule R4 (the `exports`-mapped copy is
+/// public; a no-`exports` copy is internal). Exposed for the review brief,
+/// which feeds it into [`ModuleGraph::public_export_keys`] to compute the
+/// exports-aware public-API surface delta.
+pub fn public_api_package_entry_points(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
     root_pkg: Option<&PackageJson>,
@@ -336,42 +424,72 @@ fn public_api_package_entry_points(
     let canonical_project_root =
         dunce::canonicalize(&config.root).unwrap_or_else(|_| config.root.clone());
 
+    add_root_public_api_entry_points(
+        &mut public_api_entry_points,
+        graph,
+        &path_to_file_id,
+        config,
+        root_pkg,
+        &canonical_project_root,
+    );
+    add_workspace_public_api_entry_points(
+        &mut public_api_entry_points,
+        graph,
+        &path_to_file_id,
+        workspaces,
+        &canonical_project_root,
+    );
+
+    public_api_entry_points
+}
+
+fn add_root_public_api_entry_points(
+    public_api_entry_points: &mut FxHashSet<FileId>,
+    graph: &ModuleGraph,
+    path_to_file_id: &FxHashMap<std::path::PathBuf, FileId>,
+    config: &ResolvedConfig,
+    root_pkg: Option<&PackageJson>,
+    canonical_project_root: &std::path::Path,
+) {
     if let Some(pkg) = root_pkg {
         add_package_public_api_entry_points(
-            &mut public_api_entry_points,
-            &path_to_file_id,
-            &config.root,
-            pkg,
-            &canonical_project_root,
-        );
-        add_exportless_package_source_indexes(
-            &mut public_api_entry_points,
+            public_api_entry_points,
             graph,
+            path_to_file_id,
             &config.root,
             pkg,
+            canonical_project_root,
         );
+        add_exportless_package_source_indexes(public_api_entry_points, graph, &config.root, pkg);
     }
+}
 
+fn add_workspace_public_api_entry_points(
+    public_api_entry_points: &mut FxHashSet<FileId>,
+    graph: &ModuleGraph,
+    path_to_file_id: &FxHashMap<std::path::PathBuf, FileId>,
+    workspaces: &[plow_config::WorkspaceInfo],
+    canonical_project_root: &std::path::Path,
+) {
     for workspace in workspaces {
         let Ok(pkg) = PackageJson::load(&workspace.root.join("package.json")) else {
             continue;
         };
         add_package_public_api_entry_points(
-            &mut public_api_entry_points,
-            &path_to_file_id,
+            public_api_entry_points,
+            graph,
+            path_to_file_id,
             &workspace.root,
             &pkg,
-            &canonical_project_root,
+            canonical_project_root,
         );
         add_exportless_package_source_indexes(
-            &mut public_api_entry_points,
+            public_api_entry_points,
             graph,
             &workspace.root,
             &pkg,
         );
     }
-
-    public_api_entry_points
 }
 
 fn find_circular_dependencies(
@@ -387,40 +505,11 @@ fn find_circular_dependencies(
             if is_circular_dependency_suppressed(graph, line_offsets_map, suppressions, &cycle) {
                 return None;
             }
-
-            // One anchor per hop in cycle order: `edges[i]` is the import in
-            // `cycle[i]` pointing to `cycle[i + 1]`. Always populated for every
-            // hop (fallback `(1, 0)` if the span is somehow missing) so
-            // `edges.len() == files.len()` regardless of URL-resolvability on
-            // the consumer side. The LSP renders one squiggly per edge.
-            let edges: Vec<CircularDependencyEdge> = (0..cycle.len())
-                .map(|edge_index| {
-                    let from = cycle[edge_index];
-                    let (line, col) =
-                        cycle_edge_line_col(graph, line_offsets_map, &cycle, edge_index)
-                            .unwrap_or((1, 0));
-                    CircularDependencyEdge {
-                        path: graph.modules[from.0 as usize].path.clone(),
-                        line,
-                        col,
-                    }
-                })
-                .collect();
-
-            let files: Vec<std::path::PathBuf> =
-                edges.iter().map(|edge| edge.path.clone()).collect();
-            let length = files.len();
-            // Top-level `line`/`col` remain the first hop's anchor for
-            // backward compatibility with consumers that predate `edges`.
-            let (line, col) = edges.first().map_or((1, 0), |edge| (edge.line, edge.col));
-            Some(CircularDependency {
-                files,
-                length,
-                line,
-                col,
-                edges,
-                is_cross_package: false,
-            })
+            Some(circular_dependency_from_cycle(
+                graph,
+                line_offsets_map,
+                &cycle,
+            ))
         })
         .collect();
 
@@ -431,6 +520,44 @@ fn find_circular_dependencies(
     }
 
     dependencies
+}
+
+fn circular_dependency_from_cycle(
+    graph: &ModuleGraph,
+    line_offsets_map: &LineOffsetsMap<'_>,
+    cycle: &[FileId],
+) -> CircularDependency {
+    // One anchor per hop in cycle order: `edges[i]` is the import in
+    // `cycle[i]` pointing to `cycle[i + 1]`. Always populated for every
+    // hop (fallback `(1, 0)` if the span is somehow missing) so
+    // `edges.len() == files.len()` regardless of URL-resolvability on
+    // the consumer side. The LSP renders one squiggly per edge.
+    let edges: Vec<CircularDependencyEdge> = (0..cycle.len())
+        .map(|edge_index| {
+            let from = cycle[edge_index];
+            let (line, col) =
+                cycle_edge_line_col(graph, line_offsets_map, cycle, edge_index).unwrap_or((1, 0));
+            CircularDependencyEdge {
+                path: graph.modules[from.0 as usize].path.clone(),
+                line,
+                col,
+            }
+        })
+        .collect();
+
+    let files: Vec<std::path::PathBuf> = edges.iter().map(|edge| edge.path.clone()).collect();
+    let length = files.len();
+    // Top-level `line`/`col` remain the first hop's anchor for backward
+    // compatibility with consumers that predate `edges`.
+    let (line, col) = edges.first().map_or((1, 0), |edge| (edge.line, edge.col));
+    CircularDependency {
+        files,
+        length,
+        line,
+        col,
+        edges,
+        is_cross_package: false,
+    }
 }
 
 /// Thin wrapper around [`find_circular_dependencies`] that gates on
@@ -504,16 +631,24 @@ fn run_policy_detector(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],
     config: &ResolvedConfig,
+    declared_deps: &FxHashSet<String>,
     suppressions: &crate::suppress::SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<PolicyViolationFinding> {
     if config.rules.policy_violation == Severity::Off || config.rule_packs.is_empty() {
         return Vec::new();
     }
-    policy::find_policy_violations(graph, modules, config, suppressions, line_offsets_by_file)
-        .into_iter()
-        .map(PolicyViolationFinding::with_actions)
-        .collect()
+    policy::find_policy_violations(
+        graph,
+        modules,
+        config,
+        declared_deps,
+        suppressions,
+        line_offsets_by_file,
+    )
+    .into_iter()
+    .map(PolicyViolationFinding::with_actions)
+    .collect()
 }
 
 /// Run the boundary-coverage, boundary-call, and rule-pack policy detectors
@@ -523,6 +658,7 @@ fn run_boundary_aux_detectors(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],
     config: &ResolvedConfig,
+    declared_deps: &FxHashSet<String>,
     suppressions: &crate::suppress::SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> (
@@ -545,7 +681,16 @@ fn run_boundary_aux_detectors(
                         line_offsets_by_file,
                     )
                 },
-                || run_policy_detector(graph, modules, config, suppressions, line_offsets_by_file),
+                || {
+                    run_policy_detector(
+                        graph,
+                        modules,
+                        config,
+                        declared_deps,
+                        suppressions,
+                        line_offsets_by_file,
+                    )
+                },
             )
         },
     )
@@ -604,10 +749,50 @@ fn collect_declared_dependency_names(
     deps
 }
 
+struct DeadCodeRunContext<'a> {
+    suppressions: SuppressionContext<'a>,
+    line_offsets_by_file: LineOffsetsMap<'a>,
+    pkg: Option<PackageJson>,
+    public_api_entry_points: FxHashSet<FileId>,
+    declared_deps: FxHashSet<String>,
+}
+
+fn build_dead_code_run_context<'a>(
+    graph: &'a ModuleGraph,
+    config: &ResolvedConfig,
+    workspaces: &[plow_config::WorkspaceInfo],
+    modules: &'a [ModuleInfo],
+) -> DeadCodeRunContext<'a> {
+    let suppressions = SuppressionContext::new(modules);
+    let line_offsets_by_file: LineOffsetsMap<'a> = modules
+        .iter()
+        .filter(|m| !m.line_offsets.is_empty())
+        .map(|m| (m.file_id, m.line_offsets.as_slice()))
+        .collect();
+
+    let pkg_path = config.root.join("package.json");
+    let pkg = PackageJson::load(&pkg_path).ok();
+    let public_api_entry_points =
+        public_api_package_entry_points(graph, config, pkg.as_ref(), workspaces);
+    let declared_deps = collect_declared_dependency_names(config, pkg.as_ref(), workspaces);
+
+    DeadCodeRunContext {
+        suppressions,
+        line_offsets_by_file,
+        pkg,
+        public_api_entry_points,
+        declared_deps,
+    }
+}
+
 /// Find all dead code, with optional resolved module data, plugin context, and workspace info.
 #[deprecated(
     since = "2.76.0",
-    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/plow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_api::run_dead_code for typed output; serialize with plow_api::serialize_dead_code_programmatic_json for JSON output. See docs/plow-core-migration.md and ADR-008."
+)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "frozen deprecated public API (ADR-008); signature must not change"
 )]
 pub fn find_dead_code_full(
     graph: &ModuleGraph,
@@ -620,37 +805,110 @@ pub fn find_dead_code_full(
 ) -> AnalysisResults {
     let _span = tracing::info_span!("find_dead_code").entered();
 
-    let suppressions = crate::suppress::SuppressionContext::new(modules);
+    let run_context = build_dead_code_run_context(graph, config, workspaces, modules);
 
-    let line_offsets_by_file: LineOffsetsMap<'_> = modules
-        .iter()
-        .filter(|m| !m.line_offsets.is_empty())
-        .map(|m| (m.file_id, m.line_offsets.as_slice()))
-        .collect();
+    let mut results = run_setup_and_detect(&SetupAndDetectInput {
+        graph,
+        config,
+        resolved_modules,
+        plugin_result,
+        workspaces,
+        modules,
+        suppressions: &run_context.suppressions,
+        line_offsets_by_file: &run_context.line_offsets_by_file,
+        pkg: run_context.pkg.as_ref(),
+        public_api_entry_points: &run_context.public_api_entry_points,
+        declared_deps: &run_context.declared_deps,
+        collect_usages,
+    });
 
-    let pkg_path = config.root.join("package.json");
-    let pkg = PackageJson::load(&pkg_path).ok();
-    let public_api_entry_points =
-        public_api_package_entry_points(graph, config, pkg.as_ref(), workspaces);
+    populate_post_detection_findings(&mut PostDetectionInput {
+        graph,
+        modules,
+        resolved_modules,
+        config,
+        workspaces,
+        declared_deps: &run_context.declared_deps,
+        public_api_entry_points: &run_context.public_api_entry_points,
+        suppressions: &run_context.suppressions,
+        line_offsets_by_file: &run_context.line_offsets_by_file,
+        collect_usages,
+        results: &mut results,
+    });
 
+    results.sort();
+
+    results
+}
+
+/// Inputs to the dead-code setup-and-detect phase: the pre-run-shared context
+/// plus the raw plugin result the iconify augmentation may extend.
+struct SetupAndDetectInput<'a, 'm> {
+    graph: &'a ModuleGraph,
+    config: &'a ResolvedConfig,
+    resolved_modules: &'a [ResolvedModule],
+    plugin_result: Option<&'a crate::plugins::AggregatedPluginResult>,
+    workspaces: &'a [plow_config::WorkspaceInfo],
+    modules: &'a [ModuleInfo],
+    suppressions: &'a SuppressionContext<'m>,
+    line_offsets_by_file: &'a LineOffsetsMap<'m>,
+    pkg: Option<&'a PackageJson>,
+    public_api_entry_points: &'a FxHashSet<FileId>,
+    declared_deps: &'a FxHashSet<String>,
+    collect_usages: bool,
+}
+
+/// Build the iconify-augmented plugin result, derive plugin-backed slices and
+/// the user class-member set, then run the parallel dead-code detectors.
+/// Extracted from `find_dead_code_full` to keep that orchestrator's body as
+/// setup -> detect -> populate.
+fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults {
     let iconify_referenced =
-        iconify::collect_iconify_referenced_deps(modules, pkg.as_ref(), workspaces);
+        iconify::collect_iconify_referenced_deps(input.modules, input.pkg, input.workspaces);
     let augmented_plugin_result;
     let plugin_result = if iconify_referenced.is_empty() {
-        plugin_result
+        input.plugin_result
     } else {
-        let mut owned = plugin_result.cloned().unwrap_or_default();
+        let mut owned = input.plugin_result.cloned().unwrap_or_default();
         owned.referenced_dependencies.extend(iconify_referenced);
         augmented_plugin_result = owned;
         Some(&augmented_plugin_result)
     };
 
-    let mut user_class_members = config.used_class_members.clone();
+    let mut user_class_members = input.config.used_class_members.clone();
     if let Some(plugin_result) = plugin_result {
         user_class_members.extend(plugin_result.used_class_members.iter().cloned());
     }
 
-    let virtual_prefixes: Vec<&str> = plugin_result
+    let (virtual_prefixes, generated_patterns, generated_type_prefixes) =
+        derive_plugin_string_slices(plugin_result);
+
+    run_parallel_dead_code_detectors(DeadCodeDetectorInput {
+        graph: input.graph,
+        config: input.config,
+        resolved_modules: input.resolved_modules,
+        workspaces: input.workspaces,
+        modules: input.modules,
+        suppressions: input.suppressions,
+        line_offsets_by_file: input.line_offsets_by_file,
+        plugin_result,
+        pkg: input.pkg,
+        user_class_members: &user_class_members,
+        public_api_entry_points: input.public_api_entry_points,
+        virtual_prefixes: &virtual_prefixes,
+        generated_patterns: &generated_patterns,
+        generated_type_prefixes: &generated_type_prefixes,
+        declared_deps: input.declared_deps,
+        collect_usages: input.collect_usages,
+    })
+}
+
+/// Derive the borrowed plugin string slices (virtual module prefixes, generated
+/// import patterns, generated type-import prefixes) consumed by the detectors.
+fn derive_plugin_string_slices(
+    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
+) -> (Vec<&str>, Vec<&str>, Vec<&str>) {
+    let virtual_prefixes = plugin_result
         .map(|pr| {
             pr.virtual_module_prefixes
                 .iter()
@@ -658,7 +916,7 @@ pub fn find_dead_code_full(
                 .collect()
         })
         .unwrap_or_default();
-    let generated_patterns: Vec<&str> = plugin_result
+    let generated_patterns = plugin_result
         .map(|pr| {
             pr.generated_import_patterns
                 .iter()
@@ -666,7 +924,7 @@ pub fn find_dead_code_full(
                 .collect()
         })
         .unwrap_or_default();
-    let generated_type_prefixes: Vec<&str> = plugin_result
+    let generated_type_prefixes = plugin_result
         .map(|pr| {
             pr.generated_type_import_prefixes
                 .iter()
@@ -674,44 +932,59 @@ pub fn find_dead_code_full(
                 .collect()
         })
         .unwrap_or_default();
+    (
+        virtual_prefixes,
+        generated_patterns,
+        generated_type_prefixes,
+    )
+}
 
-    let declared_deps = collect_declared_dependency_names(config, pkg.as_ref(), workspaces);
+/// Shared context for the post-detector populate sequence in
+/// `find_dead_code_full`.
+struct PostDetectionInput<'a, 'm> {
+    graph: &'a ModuleGraph,
+    modules: &'a [ModuleInfo],
+    resolved_modules: &'a [ResolvedModule],
+    config: &'a ResolvedConfig,
+    workspaces: &'a [plow_config::WorkspaceInfo],
+    declared_deps: &'a FxHashSet<String>,
+    public_api_entry_points: &'a FxHashSet<FileId>,
+    suppressions: &'a SuppressionContext<'m>,
+    line_offsets_by_file: &'a LineOffsetsMap<'m>,
+    /// Whether the editor/LSP usages path is active; gates in-process-only
+    /// intel (`react_component_intel`) off the bare `plow` / `audit` hot path.
+    collect_usages: bool,
+    results: &'a mut AnalysisResults,
+}
 
-    let mut results = run_parallel_dead_code_detectors(DeadCodeDetectorInput {
-        graph,
-        config,
-        resolved_modules,
-        workspaces,
-        modules,
-        suppressions: &suppressions,
-        line_offsets_by_file: &line_offsets_by_file,
-        plugin_result,
-        pkg: pkg.as_ref(),
-        user_class_members: &user_class_members,
-        public_api_entry_points: &public_api_entry_points,
-        virtual_prefixes: &virtual_prefixes,
-        generated_patterns: &generated_patterns,
-        generated_type_prefixes: &generated_type_prefixes,
-        declared_deps: &declared_deps,
-        collect_usages,
-    });
-
-    filter_public_workspace_results(config, workspaces, &mut results);
+/// Run the post-detector populate/reclassify phases: server-action
+/// reclassification, security, catalog/override, framework-convention findings,
+/// and stale-suppression accounting. Extracted from `find_dead_code_full` so
+/// that orchestrator reads as setup -> detect -> populate.
+fn populate_post_detection_findings(input: &mut PostDetectionInput<'_, '_>) {
+    filter_public_workspace_results(input.config, input.workspaces, input.results);
 
     // Reclassify the server-action subset of unused exports BEFORE stale
     // detection so a `// plow-ignore-next-line unused-server-action` marker is
     // recorded as consumed. Gate-off keeps the findings as plain unused-exports.
-    if config.rules.unused_server_actions != Severity::Off {
+    if input.config.rules.unused_server_actions != Severity::Off {
         reclassify_unused_server_actions(
-            graph,
-            modules,
-            &declared_deps,
-            &suppressions,
-            &mut results,
+            input.graph,
+            input.modules,
+            input.declared_deps,
+            input.suppressions,
+            input.results,
         );
     }
 
-    let request_receivers = config
+    populate_configured_security_findings(input);
+    populate_package_and_framework_findings(input);
+    populate_stale_suppression_findings(input);
+}
+
+fn populate_configured_security_findings(input: &mut PostDetectionInput<'_, '_>) {
+    let request_receivers = input
+        .config
         .security
         .request_receivers
         .iter()
@@ -720,43 +993,58 @@ pub fn find_dead_code_full(
 
     populate_security_findings(
         &SecurityDetectionContext {
-            graph,
-            modules,
-            config,
-            suppressions: &suppressions,
-            line_offsets_by_file: &line_offsets_by_file,
-            declared_deps: &declared_deps,
+            graph: input.graph,
+            modules: input.modules,
+            config: input.config,
+            suppressions: input.suppressions,
+            line_offsets_by_file: input.line_offsets_by_file,
+            declared_deps: input.declared_deps,
             request_receivers: &request_receivers,
         },
-        &mut results,
+        input.results,
     );
+}
 
-    if config.rules.stale_suppressions != Severity::Off {
-        results
+fn populate_package_and_framework_findings(input: &mut PostDetectionInput<'_, '_>) {
+    // Framework-convention detectors run BEFORE stale-suppression detection so
+    // any inline suppression they consume (e.g. a `// plow-ignore-next-line
+    // unused-component-prop` honored by the prop/emit/component detectors) is
+    // recorded consumed and not falsely reported stale. These detectors gate on
+    // their own rule severity and dep presence, so they are no-ops when inactive.
+    populate_pnpm_catalog_findings(input.config, input.workspaces, input.results);
+    populate_pnpm_override_findings(input.config, input.workspaces, input.results);
+    populate_framework_specific_findings(&mut FrameworkSpecificFindingsInput {
+        graph: input.graph,
+        modules: input.modules,
+        resolved_modules: input.resolved_modules,
+        config: input.config,
+        workspaces: input.workspaces,
+        declared_deps: input.declared_deps,
+        public_api_entry_points: input.public_api_entry_points,
+        suppressions: input.suppressions,
+        line_offsets_by_file: input.line_offsets_by_file,
+        collect_usages: input.collect_usages,
+        results: input.results,
+    });
+}
+
+/// Append stale-suppression and missing-reason findings, then record the
+/// suppression accounting metadata onto the results.
+fn populate_stale_suppression_findings(input: &mut PostDetectionInput<'_, '_>) {
+    if input.config.rules.stale_suppressions != Severity::Off {
+        input
+            .results
             .stale_suppressions
-            .extend(suppressions.find_stale(graph, config));
+            .extend(input.suppressions.find_stale(input.graph, input.config));
     }
-    results.suppression_count = suppressions.used_count();
-    results.active_suppressions = suppressions.all_suppressions(graph);
-
-    populate_pnpm_catalog_findings(config, workspaces, &mut results);
-    populate_pnpm_override_findings(config, workspaces, &mut results);
-    populate_framework_specific_findings(
-        graph,
-        modules,
-        resolved_modules,
-        config,
-        workspaces,
-        &declared_deps,
-        &public_api_entry_points,
-        &suppressions,
-        &line_offsets_by_file,
-        &mut results,
-    );
-
-    results.sort();
-
-    results
+    if input.config.rules.require_suppression_reason != Severity::Off {
+        input
+            .results
+            .stale_suppressions
+            .extend(input.suppressions.find_missing_reasons(input.graph));
+    }
+    input.results.suppression_count = input.suppressions.used_count();
+    input.results.active_suppressions = input.suppressions.all_suppressions(input.graph);
 }
 
 /// Run the framework-convention detectors that share the resolved-graph and
@@ -764,118 +1052,176 @@ pub fn find_dead_code_full(
 /// the App Router route tree. Extracted from `find_dead_code_full` to keep that
 /// orchestrator under the unit-size ceiling; each callee is individually
 /// rule-gated.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threads the shared resolved-graph + dep-gate context to a fixed set of framework detectors"
-)]
-fn populate_framework_specific_findings(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    resolved_modules: &[ResolvedModule],
-    config: &ResolvedConfig,
-    workspaces: &[plow_config::WorkspaceInfo],
-    declared_deps: &FxHashSet<String>,
-    public_api_entry_points: &FxHashSet<FileId>,
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    results: &mut AnalysisResults,
-) {
-    populate_invalid_client_export_findings(
-        graph,
-        modules,
-        config,
-        declared_deps,
-        suppressions,
-        line_offsets_by_file,
-        results,
-    );
-    populate_mixed_client_server_barrel_findings(
-        graph,
-        modules,
-        resolved_modules,
-        config,
-        declared_deps,
-        suppressions,
-        line_offsets_by_file,
-        results,
-    );
-    populate_misplaced_directive_findings(
-        graph,
-        modules,
-        config,
-        declared_deps,
-        suppressions,
-        line_offsets_by_file,
-        results,
-    );
-    populate_unprovided_inject_findings(
-        graph,
-        modules,
-        resolved_modules,
-        config,
-        declared_deps,
-        public_api_entry_points,
-        suppressions,
-        line_offsets_by_file,
-        results,
-    );
-    populate_unrendered_component_findings(
-        graph,
-        modules,
-        resolved_modules,
-        config,
-        declared_deps,
-        public_api_entry_points,
-        suppressions,
-        results,
-    );
-    populate_unused_component_prop_findings(
-        graph,
-        modules,
-        config,
-        declared_deps,
-        line_offsets_by_file,
-        results,
-    );
+struct FrameworkSpecificFindingsInput<'a> {
+    graph: &'a ModuleGraph,
+    modules: &'a [ModuleInfo],
+    resolved_modules: &'a [ResolvedModule],
+    config: &'a ResolvedConfig,
+    workspaces: &'a [plow_config::WorkspaceInfo],
+    declared_deps: &'a FxHashSet<String>,
+    public_api_entry_points: &'a FxHashSet<FileId>,
+    suppressions: &'a SuppressionContext<'a>,
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+    /// Mirror of `PostDetectionInput::collect_usages`; gates the LSP-only
+    /// `react_component_intel` computation.
+    collect_usages: bool,
+    results: &'a mut AnalysisResults,
+}
+
+fn populate_framework_specific_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    populate_client_boundary_findings(input);
+    populate_component_contract_findings(input);
+    populate_react_health_findings(input);
+    populate_nextjs_findings(input);
+}
+
+fn populate_client_boundary_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    populate_invalid_client_export_findings(input);
+    populate_mixed_client_server_barrel_findings(input);
+    populate_misplaced_directive_findings(input);
+}
+
+fn populate_component_contract_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    populate_unprovided_inject_findings(input);
+    populate_unrendered_component_findings(input);
+    populate_unused_component_prop_findings(input);
     populate_unused_component_emit_findings(
-        graph,
-        modules,
-        config,
-        declared_deps,
-        line_offsets_by_file,
-        results,
+        input.graph,
+        input.modules,
+        input.config,
+        input.declared_deps,
+        input.line_offsets_by_file,
+        input.results,
     );
+    populate_unused_component_input_findings(
+        input.graph,
+        input.modules,
+        input.config,
+        input.declared_deps,
+        input.line_offsets_by_file,
+        input.results,
+    );
+    populate_unused_component_output_findings(
+        input.graph,
+        input.modules,
+        input.config,
+        input.declared_deps,
+        input.line_offsets_by_file,
+        input.results,
+    );
+    populate_unused_svelte_event_findings(
+        input.graph,
+        input.modules,
+        input.config,
+        input.declared_deps,
+        input.line_offsets_by_file,
+        input.results,
+    );
+    populate_unused_load_data_key_findings(input);
+}
+
+fn populate_react_health_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    populate_prop_drilling_findings(input);
+    populate_thin_wrapper_findings(input);
+    populate_render_fan_in(input);
+    populate_react_component_intel(input);
+    populate_duplicate_prop_shape_findings(input);
+}
+
+fn populate_nextjs_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
     populate_nextjs_route_tree_findings(
-        graph,
-        config,
-        workspaces,
-        declared_deps,
-        suppressions,
-        results,
+        input.graph,
+        input.config,
+        input.workspaces,
+        input.declared_deps,
+        input.suppressions,
+        input.results,
     );
+}
+
+/// Populate the descriptive component render fan-in metric (the component-graph
+/// analogue of module fan-in). UNLIKE the prop-drilling / thin-wrapper detectors
+/// this is NOT rule-gated: it is a descriptive blast-radius signal that runs
+/// whenever React is declared (the dep gate lives inside
+/// [`compute_render_fan_in`]). The field is `#[serde(skip)]` on
+/// [`AnalysisResults`], so it never serializes under bare `plow` / `audit`; it
+/// is read in-process by the health vital-signs computation only.
+fn populate_render_fan_in(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    input.results.render_fan_in = compute_render_fan_in(
+        input.graph,
+        input.modules,
+        input.resolved_modules,
+        input.declared_deps,
+        &input.config.root,
+    );
+}
+
+/// Populate the descriptive per-component React intelligence carrier (render
+/// sites, props, hooks). Like [`populate_render_fan_in`] this is NOT rule-gated:
+/// it is a descriptive ambient-editor signal computed whenever React is declared
+/// (the dep gate lives inside [`compute_react_component_intel`]). The field is
+/// `#[serde(skip)]` on [`AnalysisResults`], so it never serializes under bare
+/// `plow` / `audit`; it is read in-process by the LSP code-lens / hover layer
+/// only. Gated on `collect_usages` (the editor/LSP path) so bare `plow` /
+/// `audit` (the CI hot path) never pay for the render aggregation + prop-drilling
+/// chain traversal that nothing on those paths reads.
+fn populate_react_component_intel(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if !input.collect_usages {
+        return;
+    }
+    input.results.react_component_intel = compute_react_component_intel(
+        input.graph,
+        input.modules,
+        input.resolved_modules,
+        input.declared_deps,
+        &input.config.root,
+        input.line_offsets_by_file,
+    );
+}
+
+/// Populate `unused_load_data_keys` when the rule is enabled. Gated on the
+/// project declaring `@sveltejs/kit` inside the detector (see
+/// [`find_unused_load_data_keys`]). Runs as a sequential populate because it
+/// needs the run's `declared_deps` for the dep gate.
+fn populate_unused_load_data_key_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.unused_load_data_keys == Severity::Off {
+        return;
+    }
+    let result = find_unused_load_data_keys(
+        input.graph,
+        input.modules,
+        input.declared_deps,
+        input.suppressions,
+        input.line_offsets_by_file,
+        &input.config.root,
+    );
+    if result.global_abstain {
+        input.results.unused_load_data_keys_global_abstain = true;
+        tracing::debug!(
+            "unused-load-data-key: abstained project-wide (a whole-object use of \
+             page.data / $page.data was seen; any key could be read reflectively)"
+        );
+    }
+    input.results.unused_load_data_keys = result
+        .findings
+        .into_iter()
+        .map(UnusedLoadDataKeyFinding::with_actions)
+        .collect();
 }
 
 /// Populate `invalid_client_exports` when the rule is enabled. Gated on the
 /// project declaring `next` inside the detector (see
 /// [`find_invalid_client_exports`]).
-fn populate_invalid_client_export_findings(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    config: &ResolvedConfig,
-    declared_deps: &FxHashSet<String>,
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    results: &mut AnalysisResults,
-) {
-    if config.rules.invalid_client_export == Severity::Off {
+fn populate_invalid_client_export_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.invalid_client_export == Severity::Off {
         return;
     }
-    results.invalid_client_exports = find_invalid_client_exports(
-        graph,
-        modules,
-        declared_deps,
-        suppressions,
-        line_offsets_by_file,
+    input.results.invalid_client_exports = find_invalid_client_exports(
+        input.graph,
+        input.modules,
+        input.declared_deps,
+        input.suppressions,
+        input.line_offsets_by_file,
     )
     .into_iter()
     .map(InvalidClientExportFinding::with_actions)
@@ -885,30 +1231,17 @@ fn populate_invalid_client_export_findings(
 /// Populate `mixed_client_server_barrels` when the rule is enabled. Gated on the
 /// project declaring `next` inside the detector (see
 /// [`find_mixed_client_server_barrels`]).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "mirrors the invalid-client-export populate site; threading the resolved modules + gate context is intrinsic"
-)]
-fn populate_mixed_client_server_barrel_findings(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    resolved_modules: &[ResolvedModule],
-    config: &ResolvedConfig,
-    declared_deps: &FxHashSet<String>,
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    results: &mut AnalysisResults,
-) {
-    if config.rules.mixed_client_server_barrel == Severity::Off {
+fn populate_mixed_client_server_barrel_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.mixed_client_server_barrel == Severity::Off {
         return;
     }
-    results.mixed_client_server_barrels = find_mixed_client_server_barrels(
-        graph,
-        modules,
-        resolved_modules,
-        declared_deps,
-        suppressions,
-        line_offsets_by_file,
+    input.results.mixed_client_server_barrels = find_mixed_client_server_barrels(
+        input.graph,
+        input.modules,
+        input.resolved_modules,
+        input.declared_deps,
+        input.suppressions,
+        input.line_offsets_by_file,
     )
     .into_iter()
     .map(MixedClientServerBarrelFinding::with_actions)
@@ -918,24 +1251,16 @@ fn populate_mixed_client_server_barrel_findings(
 /// Populate `misplaced_directives` when the rule is enabled. Gated on the
 /// project declaring `next` inside the detector (see
 /// [`find_misplaced_directives`]).
-fn populate_misplaced_directive_findings(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    config: &ResolvedConfig,
-    declared_deps: &FxHashSet<String>,
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    results: &mut AnalysisResults,
-) {
-    if config.rules.misplaced_directive == Severity::Off {
+fn populate_misplaced_directive_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.misplaced_directive == Severity::Off {
         return;
     }
-    results.misplaced_directives = find_misplaced_directives(
-        graph,
-        modules,
-        declared_deps,
-        suppressions,
-        line_offsets_by_file,
+    input.results.misplaced_directives = find_misplaced_directives(
+        input.graph,
+        input.modules,
+        input.declared_deps,
+        input.suppressions,
+        input.line_offsets_by_file,
     )
     .into_iter()
     .map(MisplacedDirectiveFinding::with_actions)
@@ -945,33 +1270,19 @@ fn populate_misplaced_directive_findings(
 /// Populate `unprovided_injects` when the rule is enabled. Gated on the project
 /// declaring `vue` / `@vue/runtime-core` / `svelte` inside the detector (see
 /// [`find_unprovided_injects`]).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "mirrors the mixed-client-server-barrel populate site; threading resolved modules + the public-API entry-point set + the gate context is intrinsic"
-)]
-fn populate_unprovided_inject_findings(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    resolved_modules: &[ResolvedModule],
-    config: &ResolvedConfig,
-    declared_deps: &FxHashSet<String>,
-    public_api_entry_points: &FxHashSet<FileId>,
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    results: &mut AnalysisResults,
-) {
-    if config.rules.unprovided_injects == Severity::Off {
+fn populate_unprovided_inject_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.unprovided_injects == Severity::Off {
         return;
     }
-    results.unprovided_injects = find_unprovided_injects(
-        graph,
-        resolved_modules,
-        modules,
-        declared_deps,
-        public_api_entry_points,
-        suppressions,
-        line_offsets_by_file,
-    )
+    input.results.unprovided_injects = find_unprovided_injects(UnprovidedInjectInput {
+        graph: input.graph,
+        resolved_modules: input.resolved_modules,
+        modules: input.modules,
+        declared_deps: input.declared_deps,
+        public_api_entry_points: input.public_api_entry_points,
+        suppressions: input.suppressions,
+        line_offsets_by_file: input.line_offsets_by_file,
+    })
     .into_iter()
     .map(UnprovidedInjectFinding::with_actions)
     .collect();
@@ -980,55 +1291,131 @@ fn populate_unprovided_inject_findings(
 /// Populate `unrendered_components` when the rule is enabled. Gated on the
 /// project declaring `vue` / `svelte` inside the detector (see
 /// [`find_unrendered_components`]).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "mirrors the unprovided-inject populate site; threading resolved modules + the public-API entry-point set + the suppression context is intrinsic"
-)]
-fn populate_unrendered_component_findings(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    resolved_modules: &[ResolvedModule],
-    config: &ResolvedConfig,
-    declared_deps: &FxHashSet<String>,
-    public_api_entry_points: &FxHashSet<FileId>,
-    suppressions: &SuppressionContext<'_>,
-    results: &mut AnalysisResults,
-) {
-    if config.rules.unrendered_components == Severity::Off {
+fn populate_unrendered_component_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.unrendered_components == Severity::Off {
         return;
     }
-    results.unrendered_components = find_unrendered_components(
-        graph,
-        resolved_modules,
-        modules,
-        declared_deps,
-        public_api_entry_points,
-        suppressions,
+    input.results.unrendered_components = find_unrendered_components(
+        input.graph,
+        input.resolved_modules,
+        input.modules,
+        input.declared_deps,
+        input.public_api_entry_points,
+        input.suppressions,
     )
     .into_iter()
     .map(UnrenderedComponentFinding::with_actions)
     .collect();
+    // Angular arm: a separate detection arm (selector-based) producing the SAME
+    // finding kind / result type with `framework: "angular"`, appended to the
+    // same vector. Gated on `@angular/core` inside the detector. Mirrors how the
+    // Vue Options-API arm extends the existing rule (no new IssueKind).
+    input.results.unrendered_components.extend(
+        find_unrendered_angular_components(
+            input.graph,
+            input.modules,
+            input.declared_deps,
+            input.public_api_entry_points,
+            input.line_offsets_by_file,
+            input.suppressions,
+        )
+        .into_iter()
+        .map(UnrenderedComponentFinding::with_actions),
+    );
+    // Lit arm: a registered custom element (`@customElement` /
+    // `customElements.define`) rendered as a tag in no `html` template. SAME
+    // finding kind / result type with `framework: "lit"`, gated on a Lit
+    // dependency inside the detector. No new IssueKind.
+    input.results.unrendered_components.extend(
+        find_unrendered_lit_elements(&LitUnrenderedInput {
+            graph: input.graph,
+            modules: input.modules,
+            declared_deps: input.declared_deps,
+            public_api_entry_points: input.public_api_entry_points,
+            line_offsets_by_file: input.line_offsets_by_file,
+            suppressions: input.suppressions,
+            root: &input.config.root,
+        })
+        .into_iter()
+        .map(UnrenderedComponentFinding::with_actions),
+    );
 }
 
 /// Populate `unused_component_props` when the rule is enabled. Gated on the
-/// project declaring `vue` / `@vue/runtime-core` / `nuxt` inside the detector
-/// (see [`find_unused_component_props`]).
-fn populate_unused_component_prop_findings(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    config: &ResolvedConfig,
-    declared_deps: &FxHashSet<String>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    results: &mut AnalysisResults,
-) {
-    if config.rules.unused_component_props == Severity::Off {
+/// project declaring the matching framework dependency inside the detector (see
+/// [`find_unused_component_props`]).
+fn populate_unused_component_prop_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.unused_component_props == Severity::Off {
         return;
     }
-    results.unused_component_props =
-        find_unused_component_props(graph, modules, declared_deps, line_offsets_by_file)
+    // Vue/Svelte arm: one component per SFC, flagged from `component_props`.
+    let sfc = find_unused_component_props(
+        input.graph,
+        input.modules,
+        input.declared_deps,
+        input.line_offsets_by_file,
+        input.config.unused_component_props_ignore.as_ref(),
+    );
+    input.results.unused_component_props_exempted += sfc.exempted;
+    input.results.unused_component_props = sfc
+        .findings
+        .into_iter()
+        .map(UnusedComponentPropFinding::with_actions)
+        .collect();
+
+    append_react_unused_component_prop_findings(input);
+    retain_unsuppressed_unused_component_prop_findings(input);
+}
+
+fn append_react_unused_component_prop_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    // React/Preact arm: another producer of the SAME finding kind, emitting into
+    // the same vector. Gated on `react` / `react-dom` / `next` / `preact` inside
+    // the producer.
+    let react = find_unused_react_props(
+        input.graph,
+        input.modules,
+        input.declared_deps,
+        input.line_offsets_by_file,
+        input.config.unused_component_props_ignore.as_ref(),
+    );
+    input.results.unused_component_props_exempted += react.exempted;
+    if react.components_scanned > 0 {
+        // Observability: make a silent dep-gate or silent abstain visible (a
+        // scanned-but-zero-finding run is a clean bill, not a no-op). Surfaced at
+        // info level so `RUST_LOG=plow_core=info` shows it.
+        tracing::info!(
+            components_scanned = react.components_scanned,
+            unused_props = react.findings.len(),
+            "React detected, {} component(s) scanned for unused props",
+            react.components_scanned
+        );
+    }
+    input.results.unused_component_props.extend(
+        react
+            .findings
             .into_iter()
-            .map(UnusedComponentPropFinding::with_actions)
-            .collect();
+            .map(UnusedComponentPropFinding::with_actions),
+    );
+}
+
+fn retain_unsuppressed_unused_component_prop_findings(
+    input: &mut FrameworkSpecificFindingsInput<'_>,
+) {
+    // Inline-suppression filter over ALL arms: a `// plow-ignore-next-line
+    // unused-component-prop` above the prop (or a file-level
+    // `// plow-ignore-file unused-component-prop`) drops the finding. The
+    // finding's `path` is the absolute graph node path, so it maps directly to a
+    // FileId for the line-anchored suppression check.
+    let path_to_id = graph_file_ids_by_path(input.graph);
+    input.results.unused_component_props.retain(|finding| {
+        !path_line_is_suppressed(
+            &path_to_id,
+            input.suppressions,
+            finding.prop.path.as_path(),
+            finding.prop.line,
+            IssueKind::UnusedComponentProp,
+        )
+    });
 }
 
 /// Populate `unused_component_emits` when the rule is enabled. Gated on the
@@ -1049,6 +1436,264 @@ fn populate_unused_component_emit_findings(
         find_unused_component_emits(graph, modules, declared_deps, line_offsets_by_file)
             .into_iter()
             .map(UnusedComponentEmitFinding::with_actions)
+            .collect();
+}
+
+/// Populate `prop_drilling_chains` when the rule is enabled. The rule defaults to
+/// `off` (opt-in health signal), so this is dormant by default: the located
+/// per-chain records and the small capped health penalty appear only once the
+/// user sets `prop-drilling` to `warn`/`error`. Gated on the project declaring
+/// `react` / `react-dom` / `next` / `preact` inside the detector (see
+/// [`find_prop_drilling_chains`]).
+fn populate_prop_drilling_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.prop_drilling == Severity::Off {
+        return;
+    }
+    input.results.prop_drilling_chains = collect_prop_drilling_findings(input);
+
+    retain_unsuppressed_prop_drilling_findings(input);
+}
+
+fn collect_prop_drilling_findings(
+    input: &FrameworkSpecificFindingsInput<'_>,
+) -> Vec<PropDrillingChainFinding> {
+    let scan = find_prop_drilling_chains(
+        input.graph,
+        input.modules,
+        input.resolved_modules,
+        input.declared_deps,
+        input.line_offsets_by_file,
+    );
+    if scan.components_scanned > 0 {
+        // Observability: a scanned-but-zero run is a clean bill, not a no-op.
+        tracing::info!(
+            components_scanned = scan.components_scanned,
+            prop_drilling_chains = scan.chains.len(),
+            "React detected, {} component(s) scanned for prop drilling",
+            scan.components_scanned
+        );
+    }
+    scan.chains
+        .into_iter()
+        .map(PropDrillingChainFinding::with_actions)
+        .collect()
+}
+
+fn retain_unsuppressed_prop_drilling_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    // Inline-suppression filter: a `// plow-ignore-next-line prop-drilling`
+    // above the source prop declaration (or a file-level
+    // `// plow-ignore-file prop-drilling` on the source file) drops the chain.
+    // The source hop's `file` is the absolute graph node path, so it maps to a
+    // FileId for the line-anchored check.
+    let path_to_id = graph_file_ids_by_path(input.graph);
+    input.results.prop_drilling_chains.retain(|finding| {
+        let Some(source) = finding.chain.hops.first() else {
+            return true;
+        };
+        !path_line_is_suppressed(
+            &path_to_id,
+            input.suppressions,
+            source.file.as_path(),
+            source.line,
+            IssueKind::PropDrilling,
+        )
+    });
+}
+
+/// Populate `thin_wrappers` when the rule is enabled. The rule defaults to `off`
+/// (opt-in health signal), so this is dormant by default: the located
+/// per-wrapper records appear only once the user sets `thin-wrapper` to
+/// `warn`/`error`. Gated on the project declaring `react` / `react-dom` / `next`
+/// / `preact` inside the detector (see [`find_thin_wrappers`]).
+fn populate_thin_wrapper_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.thin_wrapper == Severity::Off {
+        return;
+    }
+    input.results.thin_wrappers = collect_thin_wrapper_findings(input);
+
+    retain_unsuppressed_thin_wrapper_findings(input);
+}
+
+fn collect_thin_wrapper_findings(
+    input: &FrameworkSpecificFindingsInput<'_>,
+) -> Vec<ThinWrapperFinding> {
+    let scan = find_thin_wrappers(
+        input.graph,
+        input.modules,
+        input.resolved_modules,
+        input.declared_deps,
+        input.line_offsets_by_file,
+    );
+    if scan.components_scanned > 0 {
+        // Observability: a scanned-but-zero run is a clean bill, not a no-op.
+        tracing::info!(
+            components_scanned = scan.components_scanned,
+            thin_wrappers = scan.wrappers.len(),
+            "React detected, {} component(s) scanned for thin wrappers",
+            scan.components_scanned
+        );
+    }
+    scan.wrappers
+        .into_iter()
+        .map(ThinWrapperFinding::with_actions)
+        .collect()
+}
+
+fn retain_unsuppressed_thin_wrapper_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    // Inline-suppression filter: a `// plow-ignore-next-line thin-wrapper`
+    // above the wrapper component definition (or a file-level
+    // `// plow-ignore-file thin-wrapper` on the wrapper's file) drops it. The
+    // wrapper's `file` is the absolute graph node path, so it maps to a FileId
+    // for the line-anchored check.
+    let path_to_id = graph_file_ids_by_path(input.graph);
+    input.results.thin_wrappers.retain(|finding| {
+        !path_line_is_suppressed(
+            &path_to_id,
+            input.suppressions,
+            finding.wrapper.file.as_path(),
+            finding.wrapper.line,
+            IssueKind::ThinWrapper,
+        )
+    });
+}
+
+/// Populate `duplicate_prop_shapes` when the rule is enabled. The rule defaults
+/// to `off` (opt-in structural-refactor health signal), so this is dormant by
+/// default: the located per-component records appear only once the user sets
+/// `duplicate-prop-shape` to `warn`/`error`. Gated on the project declaring
+/// `react` / `react-dom` / `next` / `preact` inside the detector (see
+/// [`find_duplicate_prop_shapes`]).
+///
+/// Multi-file suppress model (copied from route-collision): a per-member finding
+/// is dropped by a line-level (`// plow-ignore-next-line duplicate-prop-shape`
+/// at its component definition) or a file-level
+/// (`// plow-ignore-file duplicate-prop-shape`) suppress, but the suppressed
+/// member STILL appears in its siblings' `sharing_components`, because the
+/// `sharing_components` roster is built at emit time (before this filter) and
+/// the group is real regardless of suppression.
+fn populate_duplicate_prop_shape_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.duplicate_prop_shape == Severity::Off {
+        return;
+    }
+    let scan = find_duplicate_prop_shapes(
+        input.graph,
+        input.modules,
+        input.declared_deps,
+        input.line_offsets_by_file,
+    );
+    if scan.components_scanned > 0 {
+        // Observability: a scanned-but-zero run is a clean bill, not a no-op.
+        tracing::info!(
+            components_scanned = scan.components_scanned,
+            duplicate_prop_shapes = scan.groups.len(),
+            "React detected, {} component(s) scanned for duplicate prop shapes",
+            scan.components_scanned
+        );
+    }
+    input.results.duplicate_prop_shapes = scan
+        .groups
+        .into_iter()
+        .map(DuplicatePropShapeFinding::with_actions)
+        .collect();
+
+    // Inline-suppression filter: a line-level marker above the component
+    // definition or a file-level marker on the component's file drops THIS
+    // member; its slot in the siblings' `sharing_components` is unaffected (the
+    // roster was built at emit time).
+    let path_to_id = graph_file_ids_by_path(input.graph);
+    input.results.duplicate_prop_shapes.retain(|finding| {
+        !path_line_is_suppressed(
+            &path_to_id,
+            input.suppressions,
+            finding.shape.file.as_path(),
+            finding.shape.line,
+            IssueKind::DuplicatePropShape,
+        )
+    });
+}
+
+fn graph_file_ids_by_path(graph: &ModuleGraph) -> FxHashMap<&std::path::Path, FileId> {
+    graph
+        .modules
+        .iter()
+        .map(|node| (node.path.as_path(), node.file_id))
+        .collect()
+}
+
+fn path_line_is_suppressed(
+    path_to_id: &FxHashMap<&std::path::Path, FileId>,
+    suppressions: &SuppressionContext<'_>,
+    path: &std::path::Path,
+    line: u32,
+    kind: IssueKind,
+) -> bool {
+    let Some(&file_id) = path_to_id.get(path) else {
+        return false;
+    };
+    suppressions.is_suppressed(file_id, line, kind)
+        || suppressions.is_file_suppressed(file_id, kind)
+}
+
+/// Populate `unused_component_inputs` when the rule is enabled. Gated on the
+/// project declaring `@angular/core` inside the detector (see
+/// [`find_unused_component_inputs`]).
+fn populate_unused_component_input_findings(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    config: &ResolvedConfig,
+    declared_deps: &FxHashSet<String>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    results: &mut AnalysisResults,
+) {
+    if config.rules.unused_component_inputs == Severity::Off {
+        return;
+    }
+    results.unused_component_inputs =
+        find_unused_component_inputs(graph, modules, declared_deps, line_offsets_by_file)
+            .into_iter()
+            .map(UnusedComponentInputFinding::with_actions)
+            .collect();
+}
+
+/// Populate `unused_component_outputs` when the rule is enabled. Gated on the
+/// project declaring `@angular/core` inside the detector (see
+/// [`find_unused_component_outputs`]).
+fn populate_unused_component_output_findings(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    config: &ResolvedConfig,
+    declared_deps: &FxHashSet<String>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    results: &mut AnalysisResults,
+) {
+    if config.rules.unused_component_outputs == Severity::Off {
+        return;
+    }
+    results.unused_component_outputs =
+        find_unused_component_outputs(graph, modules, declared_deps, line_offsets_by_file)
+            .into_iter()
+            .map(UnusedComponentOutputFinding::with_actions)
+            .collect();
+}
+
+/// Populate `unused_svelte_events` when the rule is enabled. Gated on the
+/// project declaring `svelte` inside the detector (see
+/// [`find_unused_svelte_events`]).
+fn populate_unused_svelte_event_findings(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    config: &ResolvedConfig,
+    declared_deps: &FxHashSet<String>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    results: &mut AnalysisResults,
+) {
+    if config.rules.unused_svelte_events == Severity::Off {
+        return;
+    }
+    results.unused_svelte_events =
+        find_unused_svelte_events(graph, modules, declared_deps, line_offsets_by_file)
+            .into_iter()
+            .map(UnusedSvelteEventFinding::with_actions)
             .collect();
 }
 
@@ -1143,7 +1788,60 @@ struct DeadCodeDetectorInput<'a> {
     collect_usages: bool,
 }
 
+struct ParallelDeadCodeDetectorResults {
+    unused_files: Vec<UnusedFileFinding>,
+    export_results: AnalysisResults,
+    member_results: AnalysisResults,
+    dependency_results: AnalysisResults,
+    unresolved_imports: Vec<UnresolvedImportFinding>,
+    duplicate_exports: Vec<DuplicateExportFinding>,
+    boundary_violations: Vec<BoundaryViolationFinding>,
+    boundary_coverage_violations: Vec<BoundaryCoverageViolationFinding>,
+    boundary_call_violations: Vec<BoundaryCallViolationFinding>,
+    policy_violations: Vec<PolicyViolationFinding>,
+    circular_dependencies: Vec<CircularDependencyFinding>,
+    re_export_cycles: Vec<ReExportCycleFinding>,
+    export_usages: Vec<crate::results::ExportUsage>,
+}
+
+impl ParallelDeadCodeDetectorResults {
+    fn into_analysis_results(self) -> AnalysisResults {
+        AnalysisResults {
+            unused_files: self.unused_files,
+            unused_exports: self.export_results.unused_exports,
+            unused_types: self.export_results.unused_types,
+            private_type_leaks: self.export_results.private_type_leaks,
+            stale_suppressions: self.export_results.stale_suppressions,
+            unused_enum_members: self.member_results.unused_enum_members,
+            unused_class_members: self.member_results.unused_class_members,
+            unused_store_members: self.member_results.unused_store_members,
+            unused_dependencies: self.dependency_results.unused_dependencies,
+            unused_dev_dependencies: self.dependency_results.unused_dev_dependencies,
+            unused_optional_dependencies: self.dependency_results.unused_optional_dependencies,
+            unlisted_dependencies: self.dependency_results.unlisted_dependencies,
+            type_only_dependencies: self.dependency_results.type_only_dependencies,
+            test_only_dependencies: self.dependency_results.test_only_dependencies,
+            unresolved_imports: self.unresolved_imports,
+            duplicate_exports: self.duplicate_exports,
+            boundary_violations: self.boundary_violations,
+            boundary_coverage_violations: self.boundary_coverage_violations,
+            boundary_call_violations: self.boundary_call_violations,
+            policy_violations: self.policy_violations,
+            circular_dependencies: self.circular_dependencies,
+            re_export_cycles: self.re_export_cycles,
+            export_usages: self.export_usages,
+            ..AnalysisResults::default()
+        }
+    }
+}
+
 fn run_parallel_dead_code_detectors(input: DeadCodeDetectorInput<'_>) -> AnalysisResults {
+    collect_parallel_dead_code_detector_results(input).into_analysis_results()
+}
+
+fn collect_parallel_dead_code_detector_results(
+    input: DeadCodeDetectorInput<'_>,
+) -> ParallelDeadCodeDetectorResults {
     let (
         (unused_files, export_results),
         (
@@ -1177,21 +1875,11 @@ fn run_parallel_dead_code_detectors(input: DeadCodeDetectorInput<'_>) -> Analysi
         },
     );
 
-    AnalysisResults {
+    ParallelDeadCodeDetectorResults {
         unused_files,
-        unused_exports: export_results.unused_exports,
-        unused_types: export_results.unused_types,
-        private_type_leaks: export_results.private_type_leaks,
-        stale_suppressions: export_results.stale_suppressions,
-        unused_enum_members: member_results.unused_enum_members,
-        unused_class_members: member_results.unused_class_members,
-        unused_store_members: member_results.unused_store_members,
-        unused_dependencies: dependency_results.unused_dependencies,
-        unused_dev_dependencies: dependency_results.unused_dev_dependencies,
-        unused_optional_dependencies: dependency_results.unused_optional_dependencies,
-        unlisted_dependencies: dependency_results.unlisted_dependencies,
-        type_only_dependencies: dependency_results.type_only_dependencies,
-        test_only_dependencies: dependency_results.test_only_dependencies,
+        export_results,
+        member_results,
+        dependency_results,
         unresolved_imports,
         duplicate_exports,
         boundary_violations,
@@ -1201,7 +1889,6 @@ fn run_parallel_dead_code_detectors(input: DeadCodeDetectorInput<'_>) -> Analysi
         circular_dependencies,
         re_export_cycles,
         export_usages,
-        ..AnalysisResults::default()
     }
 }
 
@@ -1228,28 +1915,28 @@ fn run_member_and_dependency_detectors(
 ) -> (AnalysisResults, AnalysisResults) {
     rayon::join(
         || {
-            run_member_detectors(
-                input.graph,
-                input.resolved_modules,
-                input.modules,
-                input.config,
-                input.suppressions,
-                input.line_offsets_by_file,
-                input.user_class_members,
-                input.public_api_entry_points,
-                input.declared_deps,
-            )
+            run_member_detectors(MemberDetectorInput {
+                graph: input.graph,
+                resolved_modules: input.resolved_modules,
+                modules: input.modules,
+                config: input.config,
+                suppressions: input.suppressions,
+                line_offsets_by_file: input.line_offsets_by_file,
+                user_class_members: input.user_class_members,
+                public_api_entry_points: input.public_api_entry_points,
+                declared_deps: input.declared_deps,
+            })
         },
         || {
-            run_dependency_detectors(
-                input.graph,
-                input.pkg,
-                input.config,
-                input.plugin_result,
-                input.workspaces,
-                input.resolved_modules,
-                input.line_offsets_by_file,
-            )
+            run_dependency_detectors(DependencyDetectorInput {
+                graph: input.graph,
+                pkg: input.pkg,
+                config: input.config,
+                plugin_result: input.plugin_result,
+                workspaces: input.workspaces,
+                resolved_modules: input.resolved_modules,
+                line_offsets_by_file: input.line_offsets_by_file,
+            })
         },
     )
 }
@@ -1259,15 +1946,15 @@ fn run_import_and_duplicate_detectors(
 ) -> (Vec<UnresolvedImportFinding>, Vec<DuplicateExportFinding>) {
     rayon::join(
         || {
-            run_unresolved_import_detector(
-                input.resolved_modules,
-                input.config,
-                input.suppressions,
-                input.virtual_prefixes,
-                input.generated_patterns,
-                input.generated_type_prefixes,
-                input.line_offsets_by_file,
-            )
+            run_unresolved_import_detector(UnresolvedImportDetectorInput {
+                resolved_modules: input.resolved_modules,
+                config: input.config,
+                suppressions: input.suppressions,
+                virtual_prefixes: input.virtual_prefixes,
+                generated_patterns: input.generated_patterns,
+                generated_type_prefixes: input.generated_type_prefixes,
+                line_offsets_by_file: input.line_offsets_by_file,
+            })
         },
         || {
             run_duplicate_export_detector(
@@ -1302,54 +1989,60 @@ fn run_boundary_cycle_and_usage_detectors(
     input: DeadCodeDetectorInput<'_>,
 ) -> BoundaryCycleUsageResults {
     rayon::join(
+        || run_boundary_detectors(input),
+        || run_cycle_and_usage_detectors(input),
+    )
+}
+
+fn run_boundary_detectors(
+    input: DeadCodeDetectorInput<'_>,
+) -> (Vec<BoundaryViolationFinding>, BoundaryAuxResults) {
+    rayon::join(
         || {
-            rayon::join(
-                || {
-                    run_boundary_violation_detector(
-                        input.graph,
-                        input.config,
-                        input.suppressions,
-                        input.line_offsets_by_file,
-                    )
-                },
-                || {
-                    run_boundary_aux_detectors(
-                        input.graph,
-                        input.modules,
-                        input.config,
-                        input.suppressions,
-                        input.line_offsets_by_file,
-                    )
-                },
+            run_boundary_violation_detector(
+                input.graph,
+                input.config,
+                input.suppressions,
+                input.line_offsets_by_file,
+            )
+        },
+        || {
+            run_boundary_aux_detectors(
+                input.graph,
+                input.modules,
+                input.config,
+                input.declared_deps,
+                input.suppressions,
+                input.line_offsets_by_file,
+            )
+        },
+    )
+}
+
+fn run_cycle_and_usage_detectors(
+    input: DeadCodeDetectorInput<'_>,
+) -> (
+    Vec<CircularDependencyFinding>,
+    (Vec<ReExportCycleFinding>, Vec<crate::results::ExportUsage>),
+) {
+    rayon::join(
+        || {
+            run_circular_dep_detector(
+                input.graph,
+                input.config,
+                input.line_offsets_by_file,
+                input.suppressions,
+                input.workspaces,
             )
         },
         || {
             rayon::join(
+                || run_re_export_cycle_detector(input.graph, input.config, input.suppressions),
                 || {
-                    run_circular_dep_detector(
+                    run_export_usages_collector(
                         input.graph,
-                        input.config,
                         input.line_offsets_by_file,
-                        input.suppressions,
-                        input.workspaces,
-                    )
-                },
-                || {
-                    rayon::join(
-                        || {
-                            run_re_export_cycle_detector(
-                                input.graph,
-                                input.config,
-                                input.suppressions,
-                            )
-                        },
-                        || {
-                            run_export_usages_collector(
-                                input.graph,
-                                input.line_offsets_by_file,
-                                input.collect_usages,
-                            )
-                        },
+                        input.collect_usages,
                     )
                 },
             )
@@ -1594,12 +2287,14 @@ fn annotate_security_findings(
     );
     let boundary_crossings = boundary_crossings_by_file(&results.boundary_violations);
     security::rank_security_findings(
-        ctx.graph,
-        ctx.modules,
-        ctx.line_offsets_by_file,
-        ctx.declared_deps,
-        ctx.request_receivers,
-        &boundary_crossings,
+        &security::SecurityRankingInput {
+            graph: ctx.graph,
+            modules: ctx.modules,
+            line_offsets_by_file: ctx.line_offsets_by_file,
+            declared_deps: ctx.declared_deps,
+            request_receivers: ctx.request_receivers,
+            boundary_crossings: &boundary_crossings,
+        },
         &mut results.security_findings,
     );
 }
@@ -1662,10 +2357,7 @@ fn run_export_detectors(
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> AnalysisResults {
     let mut results = AnalysisResults::default();
-    if config.rules.unused_exports == Severity::Off
-        && config.rules.unused_types == Severity::Off
-        && config.rules.private_type_leaks == Severity::Off
-    {
+    if export_rules_are_disabled(config) {
         return results;
     }
 
@@ -1677,193 +2369,364 @@ fn run_export_detectors(
         suppressions,
         line_offsets_by_file,
     );
-    if config.rules.unused_exports != Severity::Off {
-        results.unused_exports = exports
-            .into_iter()
-            .map(UnusedExportFinding::with_actions)
-            .collect();
-    }
-    if config.rules.unused_types != Severity::Off {
-        let mut typed = types;
-        suppress_signature_backing_types(&mut typed, graph, modules);
-        results.unused_types = typed
-            .into_iter()
-            .map(UnusedTypeFinding::with_actions)
-            .collect();
-    }
-    if config.rules.private_type_leaks != Severity::Off {
-        results.private_type_leaks =
-            find_private_type_leaks(graph, modules, config, suppressions, line_offsets_by_file)
-                .into_iter()
-                .map(PrivateTypeLeakFinding::with_actions)
-                .collect();
-    }
-    if config.rules.stale_suppressions != Severity::Off {
-        results.stale_suppressions.extend(stale_expected);
-    }
+    populate_unused_export_findings(&mut results, config, exports);
+    populate_unused_type_findings(&mut results, config, graph, modules, types);
+    populate_private_type_leak_findings(
+        &mut results,
+        graph,
+        modules,
+        config,
+        suppressions,
+        line_offsets_by_file,
+    );
+    populate_expected_stale_suppressions(&mut results, config, stale_expected);
     results
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "member detection needs graph context plus public API and allowlist filters"
-)]
-fn run_member_detectors(
+fn export_rules_are_disabled(config: &ResolvedConfig) -> bool {
+    config.rules.unused_exports == Severity::Off
+        && config.rules.unused_types == Severity::Off
+        && config.rules.private_type_leaks == Severity::Off
+}
+
+fn populate_unused_export_findings(
+    results: &mut AnalysisResults,
+    config: &ResolvedConfig,
+    exports: Vec<UnusedExport>,
+) {
+    if config.rules.unused_exports == Severity::Off {
+        return;
+    }
+    results.unused_exports = exports
+        .into_iter()
+        .map(UnusedExportFinding::with_actions)
+        .collect();
+}
+
+fn populate_unused_type_findings(
+    results: &mut AnalysisResults,
+    config: &ResolvedConfig,
     graph: &ModuleGraph,
-    resolved_modules: &[ResolvedModule],
+    modules: &[ModuleInfo],
+    types: Vec<UnusedExport>,
+) {
+    if config.rules.unused_types == Severity::Off {
+        return;
+    }
+    let mut typed = types;
+    suppress_signature_backing_types(&mut typed, graph, modules);
+    results.unused_types = typed
+        .into_iter()
+        .map(UnusedTypeFinding::with_actions)
+        .collect();
+}
+
+fn populate_private_type_leak_findings(
+    results: &mut AnalysisResults,
+    graph: &ModuleGraph,
     modules: &[ModuleInfo],
     config: &ResolvedConfig,
     suppressions: &crate::suppress::SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
-    user_class_members: &[plow_config::UsedClassMemberRule],
-    public_api_entry_points: &FxHashSet<FileId>,
-    declared_deps: &FxHashSet<String>,
-) -> AnalysisResults {
+) {
+    if config.rules.private_type_leaks == Severity::Off {
+        return;
+    }
+    results.private_type_leaks =
+        find_private_type_leaks(graph, modules, config, suppressions, line_offsets_by_file)
+            .into_iter()
+            .map(PrivateTypeLeakFinding::with_actions)
+            .collect();
+}
+
+fn populate_expected_stale_suppressions(
+    results: &mut AnalysisResults,
+    config: &ResolvedConfig,
+    stale_expected: Vec<StaleSuppression>,
+) {
+    if config.rules.stale_suppressions != Severity::Off {
+        results.stale_suppressions.extend(stale_expected);
+    } else if config.rules.require_suppression_reason != Severity::Off {
+        results
+            .stale_suppressions
+            .extend(stale_expected.into_iter().filter(|s| s.missing_reason));
+    }
+}
+
+#[derive(Clone, Copy)]
+struct MemberDetectorInput<'a> {
+    graph: &'a ModuleGraph,
+    resolved_modules: &'a [ResolvedModule],
+    modules: &'a [ModuleInfo],
+    config: &'a ResolvedConfig,
+    suppressions: &'a crate::suppress::SuppressionContext<'a>,
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+    user_class_members: &'a [plow_config::UsedClassMemberRule],
+    public_api_entry_points: &'a FxHashSet<FileId>,
+    declared_deps: &'a FxHashSet<String>,
+}
+
+fn run_member_detectors(input: MemberDetectorInput<'_>) -> AnalysisResults {
     let mut results = AnalysisResults::default();
+    let store_members_active = store_member_rule_is_active(input.config, input.declared_deps);
+    if member_rules_are_disabled(input.config, store_members_active) {
+        return results;
+    }
+
+    let member_results = find_unused_members_with_public_api_entry_points(UnusedMemberScanInput {
+        graph: input.graph,
+        resolved_modules: input.resolved_modules,
+        modules: input.modules,
+        suppressions: input.suppressions,
+        line_offsets_by_file: input.line_offsets_by_file,
+        user_class_member_allowlist: input.user_class_members,
+        ignore_decorators: &input.config.ignore_decorators,
+        public_api_entry_points: input.public_api_entry_points,
+        lit_active: input.declared_deps.contains("lit")
+            || input.declared_deps.contains("lit-element")
+            || input.declared_deps.contains("@lit/reactive-element"),
+    });
+    populate_unused_enum_member_findings(&mut results, input.config, member_results.enum_members);
+    populate_unused_class_member_findings(&mut results, input.config, member_results.class_members);
+    populate_unused_store_member_findings(
+        &mut results,
+        store_members_active,
+        member_results.store_members,
+    );
+    results
+}
+
+fn member_rules_are_disabled(config: &ResolvedConfig, store_members_active: bool) -> bool {
+    config.rules.unused_enum_members == Severity::Off
+        && config.rules.unused_class_members == Severity::Off
+        && !store_members_active
+}
+
+fn store_member_rule_is_active(config: &ResolvedConfig, declared_deps: &FxHashSet<String>) -> bool {
     // Store-member detection activates only when Pinia is a declared dependency,
     // so an unrelated user `defineStore`-named helper in a non-Pinia project
     // never fires. The harvest is intentionally loose at extraction time; this
     // is the activation boundary.
-    let store_members_active = config.rules.unused_store_members != Severity::Off
-        && (declared_deps.contains("pinia") || declared_deps.contains("@pinia/nuxt"));
-    if config.rules.unused_enum_members == Severity::Off
-        && config.rules.unused_class_members == Severity::Off
-        && !store_members_active
-    {
-        return results;
-    }
-
-    let member_results = find_unused_members_with_public_api_entry_points(
-        graph,
-        resolved_modules,
-        modules,
-        suppressions,
-        line_offsets_by_file,
-        user_class_members,
-        &config.ignore_decorators,
-        public_api_entry_points,
-    );
-    if config.rules.unused_enum_members != Severity::Off {
-        results.unused_enum_members = member_results
-            .enum_members
-            .into_iter()
-            .map(UnusedEnumMemberFinding::with_actions)
-            .collect();
-    }
-    if config.rules.unused_class_members != Severity::Off {
-        results.unused_class_members = member_results
-            .class_members
-            .into_iter()
-            .map(UnusedClassMemberFinding::with_actions)
-            .collect();
-    }
-    if store_members_active {
-        results.unused_store_members = member_results
-            .store_members
-            .into_iter()
-            .map(UnusedStoreMemberFinding::with_actions)
-            .collect();
-    }
-    results
+    config.rules.unused_store_members != Severity::Off
+        && (declared_deps.contains("pinia") || declared_deps.contains("@pinia/nuxt"))
 }
 
-#[expect(
-    deprecated,
-    reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
-)]
-fn run_dependency_detectors(
-    graph: &ModuleGraph,
-    pkg: Option<&PackageJson>,
+fn populate_unused_enum_member_findings(
+    results: &mut AnalysisResults,
     config: &ResolvedConfig,
-    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
-    workspaces: &[plow_config::WorkspaceInfo],
-    resolved_modules: &[ResolvedModule],
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-) -> AnalysisResults {
+    enum_members: Vec<UnusedMember>,
+) {
+    if config.rules.unused_enum_members == Severity::Off {
+        return;
+    }
+    results.unused_enum_members = enum_members
+        .into_iter()
+        .map(UnusedEnumMemberFinding::with_actions)
+        .collect();
+}
+
+fn populate_unused_class_member_findings(
+    results: &mut AnalysisResults,
+    config: &ResolvedConfig,
+    class_members: Vec<UnusedMember>,
+) {
+    if config.rules.unused_class_members == Severity::Off {
+        return;
+    }
+    results.unused_class_members = class_members
+        .into_iter()
+        .map(UnusedClassMemberFinding::with_actions)
+        .collect();
+}
+
+fn populate_unused_store_member_findings(
+    results: &mut AnalysisResults,
+    store_members_active: bool,
+    store_members: Vec<UnusedMember>,
+) {
+    if !store_members_active {
+        return;
+    }
+    results.unused_store_members = store_members
+        .into_iter()
+        .map(UnusedStoreMemberFinding::with_actions)
+        .collect();
+}
+
+#[derive(Clone, Copy)]
+struct DependencyDetectorInput<'a> {
+    graph: &'a ModuleGraph,
+    pkg: Option<&'a PackageJson>,
+    config: &'a ResolvedConfig,
+    plugin_result: Option<&'a crate::plugins::AggregatedPluginResult>,
+    workspaces: &'a [plow_config::WorkspaceInfo],
+    resolved_modules: &'a [ResolvedModule],
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+}
+
+fn run_dependency_detectors(input: DependencyDetectorInput<'_>) -> AnalysisResults {
     let mut results = AnalysisResults::default();
-    let Some(pkg) = pkg else {
+    let Some(pkg) = input.pkg else {
         return results;
     };
 
-    if config.rules.unused_dependencies != Severity::Off
-        || config.rules.unused_dev_dependencies != Severity::Off
-        || config.rules.unused_optional_dependencies != Severity::Off
-    {
-        let (deps, dev_deps, optional_deps) =
-            find_unused_dependencies(graph, pkg, config, plugin_result, workspaces);
-        if config.rules.unused_dependencies != Severity::Off {
-            results.unused_dependencies = deps
-                .into_iter()
-                .map(UnusedDependencyFinding::with_actions)
-                .collect();
-        }
-        if config.rules.unused_dev_dependencies != Severity::Off {
-            results.unused_dev_dependencies = dev_deps
-                .into_iter()
-                .map(UnusedDevDependencyFinding::with_actions)
-                .collect();
-        }
-        if config.rules.unused_optional_dependencies != Severity::Off {
-            results.unused_optional_dependencies = optional_deps
-                .into_iter()
-                .map(UnusedOptionalDependencyFinding::with_actions)
-                .collect();
-        }
-    }
+    populate_unused_dependency_findings(input, pkg, &mut results);
+    populate_unlisted_dependency_findings(input, pkg, &mut results);
+    populate_type_only_dependency_findings(input, pkg, &mut results);
+    populate_test_only_dependency_findings(input, pkg, &mut results);
+    results
+}
 
-    if config.rules.unlisted_dependencies != Severity::Off {
-        results.unlisted_dependencies = find_unlisted_dependencies(
-            graph,
+fn populate_unlisted_dependency_findings(
+    input: DependencyDetectorInput<'_>,
+    pkg: &PackageJson,
+    results: &mut AnalysisResults,
+) {
+    if input.config.rules.unlisted_dependencies != Severity::Off {
+        results.unlisted_dependencies = find_unlisted_dependencies(UnlistedDependencyInput {
+            graph: input.graph,
             pkg,
-            config,
-            workspaces,
-            plugin_result,
-            resolved_modules,
-            line_offsets_by_file,
-        )
+            config: input.config,
+            workspaces: input.workspaces,
+            plugin_result: input.plugin_result,
+            resolved_modules: input.resolved_modules,
+            line_offsets_by_file: input.line_offsets_by_file,
+        })
         .into_iter()
         .map(UnlistedDependencyFinding::with_actions)
         .collect();
     }
+}
 
-    if config.production {
+fn populate_type_only_dependency_findings(
+    input: DependencyDetectorInput<'_>,
+    pkg: &PackageJson,
+    results: &mut AnalysisResults,
+) {
+    if input.config.production {
         results.type_only_dependencies =
-            find_type_only_dependencies(graph, pkg, config, workspaces)
+            find_type_only_dependencies(input.graph, pkg, input.config, input.workspaces)
                 .into_iter()
                 .map(TypeOnlyDependencyFinding::with_actions)
                 .collect();
     }
+}
 
-    if !config.production && config.rules.test_only_dependencies != Severity::Off {
+fn populate_test_only_dependency_findings(
+    input: DependencyDetectorInput<'_>,
+    pkg: &PackageJson,
+    results: &mut AnalysisResults,
+) {
+    if !input.config.production && input.config.rules.test_only_dependencies != Severity::Off {
         results.test_only_dependencies =
-            find_test_only_dependencies(graph, pkg, config, workspaces)
+            find_test_only_dependencies(input.graph, pkg, input.config, input.workspaces)
                 .into_iter()
                 .map(TestOnlyDependencyFinding::with_actions)
                 .collect();
     }
-    results
+}
+
+/// Populate the unused-dependency family (prod / dev / optional) on `results`,
+/// each gated on its own rule severity. The three collections share one
+/// `find_unused_dependencies` computation, so they are populated together.
+#[expect(
+    deprecated,
+    reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
+)]
+fn populate_unused_dependency_findings(
+    input: DependencyDetectorInput<'_>,
+    pkg: &PackageJson,
+    results: &mut AnalysisResults,
+) {
+    if unused_dependency_rules_are_disabled(input.config) {
+        return;
+    }
+
+    let (deps, dev_deps, optional_deps) = find_unused_dependencies(
+        input.graph,
+        pkg,
+        input.config,
+        input.plugin_result,
+        input.workspaces,
+    );
+    populate_unused_prod_dependency_findings(results, input.config, deps);
+    populate_unused_dev_dependency_findings(results, input.config, dev_deps);
+    populate_unused_optional_dependency_findings(results, input.config, optional_deps);
+}
+
+fn unused_dependency_rules_are_disabled(config: &ResolvedConfig) -> bool {
+    config.rules.unused_dependencies == Severity::Off
+        && config.rules.unused_dev_dependencies == Severity::Off
+        && config.rules.unused_optional_dependencies == Severity::Off
+}
+
+fn populate_unused_prod_dependency_findings(
+    results: &mut AnalysisResults,
+    config: &ResolvedConfig,
+    deps: Vec<UnusedDependency>,
+) {
+    if config.rules.unused_dependencies == Severity::Off {
+        return;
+    }
+    results.unused_dependencies = deps
+        .into_iter()
+        .map(UnusedDependencyFinding::with_actions)
+        .collect();
+}
+
+fn populate_unused_dev_dependency_findings(
+    results: &mut AnalysisResults,
+    config: &ResolvedConfig,
+    dev_deps: Vec<UnusedDependency>,
+) {
+    if config.rules.unused_dev_dependencies == Severity::Off {
+        return;
+    }
+    results.unused_dev_dependencies = dev_deps
+        .into_iter()
+        .map(UnusedDevDependencyFinding::with_actions)
+        .collect();
+}
+
+fn populate_unused_optional_dependency_findings(
+    results: &mut AnalysisResults,
+    config: &ResolvedConfig,
+    optional_deps: Vec<UnusedDependency>,
+) {
+    if config.rules.unused_optional_dependencies == Severity::Off {
+        return;
+    }
+    results.unused_optional_dependencies = optional_deps
+        .into_iter()
+        .map(UnusedOptionalDependencyFinding::with_actions)
+        .collect();
+}
+
+#[derive(Clone, Copy)]
+struct UnresolvedImportDetectorInput<'a> {
+    resolved_modules: &'a [ResolvedModule],
+    config: &'a ResolvedConfig,
+    suppressions: &'a crate::suppress::SuppressionContext<'a>,
+    virtual_prefixes: &'a [&'a str],
+    generated_patterns: &'a [&'a str],
+    generated_type_prefixes: &'a [&'a str],
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
 }
 
 fn run_unresolved_import_detector(
-    resolved_modules: &[ResolvedModule],
-    config: &ResolvedConfig,
-    suppressions: &crate::suppress::SuppressionContext<'_>,
-    virtual_prefixes: &[&str],
-    generated_patterns: &[&str],
-    generated_type_prefixes: &[&str],
-    line_offsets_by_file: &LineOffsetsMap<'_>,
+    input: UnresolvedImportDetectorInput<'_>,
 ) -> Vec<UnresolvedImportFinding> {
-    if config.rules.unresolved_imports == Severity::Off || resolved_modules.is_empty() {
+    if input.config.rules.unresolved_imports == Severity::Off || input.resolved_modules.is_empty() {
         return Vec::new();
     }
     find_unresolved_imports(
-        resolved_modules,
-        config,
-        suppressions,
-        virtual_prefixes,
-        generated_patterns,
-        generated_type_prefixes,
-        line_offsets_by_file,
+        input.resolved_modules,
+        input.config,
+        input.suppressions,
+        input.virtual_prefixes,
+        input.generated_patterns,
+        input.generated_type_prefixes,
+        input.line_offsets_by_file,
     )
     .into_iter()
     .map(UnresolvedImportFinding::with_actions)
@@ -1881,6 +2744,66 @@ mod tests {
     fn line_col(source: &str, byte_offset: u32) -> (u32, u32) {
         let offsets = compute_line_offsets(source);
         byte_offset_to_line_col(&offsets, byte_offset)
+    }
+
+    // Exercises the public-API entry-point fallback (`resolve_entry_via_scoped_canonical`)
+    // for the intra-project-symlink case it exists to handle: a module whose
+    // discovered (raw) path goes through a symlinked directory, so its raw path
+    // differs from the canonicalized entry-point path. The common no-symlink path
+    // is covered by the byte-identical integration corpus; this pins the residual
+    // branch that the raw-map lookup cannot reach.
+    #[cfg(unix)]
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn scoped_canonical_matches_module_reached_through_symlink() {
+        use plow_types::discover::FileId;
+
+        let dir = tempfile::tempdir().unwrap();
+        let real_dir = dir.path().join("real");
+        std::fs::create_dir(&real_dir).unwrap();
+        let real_file = real_dir.join("mod.ts");
+        std::fs::write(&real_file, "export const x = 1;\n").unwrap();
+        // `link/` resolves to `real/`, so the module discovered at `link/mod.ts`
+        // canonicalizes to `real/mod.ts`.
+        let link_dir = dir.path().join("link");
+        std::os::unix::fs::symlink(&real_dir, &link_dir).unwrap();
+
+        let module_raw_path = link_dir.join("mod.ts");
+        let canonical_entry = dunce::canonicalize(&real_file).unwrap();
+        let package_root = dir.path();
+
+        // The symlinked module under the package is found by canonical match.
+        let candidates = [(module_raw_path.as_path(), FileId(7))];
+        assert_eq!(
+            super::match_canonical_entry_under_package(
+                candidates.iter().copied(),
+                package_root,
+                &canonical_entry,
+            ),
+            Some(FileId(7)),
+        );
+
+        // A candidate outside the package_root is filtered out, even on a match.
+        let outside_root = dir.path().join("other-package");
+        assert_eq!(
+            super::match_canonical_entry_under_package(
+                candidates.iter().copied(),
+                &outside_root,
+                &canonical_entry,
+            ),
+            None,
+        );
+
+        // A non-matching canonical target yields no entry point.
+        let unrelated = dunce::canonicalize(dir.path()).unwrap().join("nope.ts");
+        assert_eq!(
+            super::match_canonical_entry_under_package(
+                candidates.iter().copied(),
+                package_root,
+                &unrelated,
+            ),
+            None,
+        );
     }
 
     #[test]
@@ -2025,13 +2948,15 @@ mod tests {
                 resolved_dynamic_imports: vec![],
                 resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
-                whole_object_uses: vec![],
+                semantic_facts: Box::default(),
+                whole_object_uses: Box::default(),
                 has_cjs_exports: false,
                 has_angular_component_template_url: false,
                 unused_import_bindings: FxHashSet::default(),
                 type_referenced_import_bindings: vec![],
                 value_referenced_import_bindings: vec![],
                 namespace_object_aliases: vec![],
+                exported_factory_returns: Box::default(),
             }];
             let graph = ModuleGraph::build(&resolved, &entry_points, &files);
 
@@ -2050,7 +2975,14 @@ mod tests {
                 unrendered_components: Severity::Off,
                 unused_component_props: Severity::Off,
                 unused_component_emits: Severity::Off,
+                unused_component_inputs: Severity::Off,
+                unused_component_outputs: Severity::Off,
+                unused_svelte_events: Severity::Off,
                 unused_server_actions: Severity::Off,
+                unused_load_data_keys: Severity::Off,
+                prop_drilling: Severity::Off,
+                thin_wrapper: Severity::Off,
+                duplicate_prop_shape: Severity::Off,
                 unresolved_imports: Severity::Off,
                 unlisted_dependencies: Severity::Off,
                 duplicate_exports: Severity::Off,
@@ -2062,6 +2994,7 @@ mod tests {
                 coverage_gaps: Severity::Off,
                 feature_flags: Severity::Off,
                 stale_suppressions: Severity::Off,
+                require_suppression_reason: Severity::Off,
                 unused_catalog_entries: Severity::Off,
                 empty_catalog_groups: Severity::Off,
                 unresolved_catalog_references: Severity::Off,
@@ -2121,13 +3054,15 @@ mod tests {
                 resolved_dynamic_imports: vec![],
                 resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
-                whole_object_uses: vec![],
+                semantic_facts: Box::default(),
+                whole_object_uses: Box::default(),
                 has_cjs_exports: false,
                 has_angular_component_template_url: false,
                 unused_import_bindings: FxHashSet::default(),
                 type_referenced_import_bindings: vec![],
                 value_referenced_import_bindings: vec![],
                 namespace_object_aliases: vec![],
+                exported_factory_returns: Box::default(),
             }];
             let mut graph = ModuleGraph::build(&resolved, &entry_points, &files);
             graph.modules[0].exports = vec![ExportSymbol {
@@ -2135,6 +3070,7 @@ mod tests {
                 is_type_only: false,
                 is_side_effect_used: false,
                 visibility: VisibilityTag::None,
+                expected_unused_reason: None,
                 span: Span::new(10, 30),
                 references: vec![],
                 members: vec![],
@@ -2201,13 +3137,15 @@ mod tests {
                 resolved_dynamic_imports: vec![],
                 resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
-                whole_object_uses: vec![],
+                semantic_facts: Box::default(),
+                whole_object_uses: Box::default(),
                 has_cjs_exports: false,
                 has_angular_component_template_url: false,
                 unused_import_bindings: FxHashSet::default(),
                 type_referenced_import_bindings: vec![],
                 value_referenced_import_bindings: vec![],
                 namespace_object_aliases: vec![],
+                exported_factory_returns: Box::default(),
             }];
             let graph = ModuleGraph::build(&resolved, &entry_points, &files);
             let config = make_config_with_rules(RulesConfig::default());
@@ -2217,6 +3155,10 @@ mod tests {
         }
 
         #[test]
+        #[expect(
+            clippy::too_many_lines,
+            reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+        )]
         fn suppressions_built_from_modules() {
             use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
             use crate::extract::ModuleInfo;
@@ -2252,13 +3194,15 @@ mod tests {
                     resolved_dynamic_imports: vec![],
                     resolved_dynamic_patterns: vec![],
                     member_accesses: vec![],
-                    whole_object_uses: vec![],
+                    semantic_facts: Box::default(),
+                    whole_object_uses: Box::default(),
                     has_cjs_exports: false,
                     has_angular_component_template_url: false,
                     unused_import_bindings: FxHashSet::default(),
                     type_referenced_import_bindings: vec![],
                     value_referenced_import_bindings: vec![],
                     namespace_object_aliases: vec![],
+                    exported_factory_returns: Box::default(),
                 })
                 .collect::<Vec<_>>();
             let graph = ModuleGraph::build(&resolved, &entry_points, &files);
@@ -2271,9 +3215,10 @@ mod tests {
                 dynamic_imports: vec![],
                 dynamic_import_patterns: vec![],
                 require_calls: vec![],
-                package_path_references: vec![],
+                package_path_references: Box::default(),
                 member_accesses: vec![],
-                whole_object_uses: vec![],
+                semantic_facts: Box::default(),
+                whole_object_uses: Box::default(),
                 has_cjs_exports: false,
                 has_angular_component_template_url: false,
                 content_hash: 0,
@@ -2286,6 +3231,7 @@ mod tests {
                 complexity: vec![],
                 flag_uses: vec![],
                 class_heritage: vec![],
+                exported_factory_returns: Box::default(),
                 injection_tokens: vec![],
                 local_type_declarations: Vec::new(),
                 public_signature_type_references: Vec::new(),
@@ -2303,6 +3249,7 @@ mod tests {
                 security_control_sites: Vec::new(),
                 callee_uses: Vec::new(),
                 misplaced_directives: Vec::new(),
+                inline_server_action_exports: Vec::new(),
                 di_key_sites: Vec::new(),
                 has_dynamic_provide: false,
                 referenced_import_bindings: Vec::new(),
@@ -2312,9 +3259,28 @@ mod tests {
                 has_define_model: false,
                 has_unharvestable_props: false,
                 component_emits: Vec::new(),
+                angular_inputs: Vec::new(),
+                angular_outputs: Vec::new(),
                 has_unharvestable_emits: false,
                 has_dynamic_emit: false,
                 has_emit_whole_object_use: false,
+                load_return_keys: Vec::new(),
+                has_unharvestable_load: false,
+                has_load_data_whole_use: false,
+                has_page_data_store_whole_use: false,
+                component_functions: Vec::new(),
+                react_props: Vec::new(),
+                hook_uses: Vec::new(),
+                render_edges: Vec::new(),
+                svelte_dispatched_events: Vec::new(),
+                svelte_listened_events: Vec::new(),
+                angular_component_selectors: Vec::new(),
+                registered_custom_elements: Vec::new(),
+                used_custom_element_tags: Vec::new(),
+                angular_used_selectors: Vec::new(),
+                angular_entry_component_refs: Vec::new(),
+                has_dynamic_component_render: false,
+                has_dynamic_dispatch: false,
             }];
 
             let rules = RulesConfig {

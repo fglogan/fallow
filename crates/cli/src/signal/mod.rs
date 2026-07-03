@@ -123,8 +123,8 @@ fn platform_install() -> std::io::Result<()> {
 /// consumers in graceful mode (`plow watch`).
 ///
 /// Graceful mode MUST still drain children: watch's `analyze_and_
-/// report` spawns git subprocesses (via `plow_core::changed_files`
-/// and `plow_core::churn`) that need reaping mid-analysis. Without
+/// report` spawns git subprocesses (via `plow_engine::changed_files`
+/// and `plow_engine::churn`) that need reaping mid-analysis. Without
 /// drain, a Ctrl+C during analysis would let the parent return from
 /// the inner pass only after every git child completed naturally,
 /// defeating the entire "Ctrl+C reaps in-flight git work" contract.

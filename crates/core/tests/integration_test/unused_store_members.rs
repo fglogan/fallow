@@ -59,6 +59,10 @@ fn flags_unused_option_and_setup_store_members() {
         names.contains(&"deadFn"),
         "deadFn should be flagged: {members:?}"
     );
+    assert!(
+        names.contains(&"deadInlinePermission"),
+        "deadInlinePermission should be flagged: {members:?}"
+    );
 }
 
 #[test]
@@ -72,12 +76,48 @@ fn credits_consumed_store_members() {
         .collect();
 
     // `count` (store.count), `increment` (store.increment()), `double`
-    // (storeToRefs destructure + return), `name` (u.name), `login` (u.login())
-    // are all consumed and must NOT be flagged.
-    for credited in ["count", "increment", "double", "name", "login"] {
+    // (storeToRefs destructure + return), `name` (u.name), `login` (u.login()),
+    // and inline refs-helper members are all consumed and must NOT be flagged.
+    for credited in [
+        "count",
+        "increment",
+        "double",
+        "name",
+        "login",
+        "canCreateEvents",
+        "canEditFloorPlans",
+        "canSeeAnalytics",
+    ] {
         assert!(
             !names.contains(&credited.to_string()),
             "{credited} is consumed and should be credited, not flagged: {names:?}"
+        );
+    }
+}
+
+#[test]
+fn credits_inline_store_call_members_and_flags_dead_ones() {
+    // Issue #1489 case 1: a member consumed only through an inline
+    // `useCounterStore().member` (no bound local) must be credited, while a
+    // genuinely unaccessed member on the same store still flags.
+    let root = fixture_path("pinia-inline-store-member");
+    let config = create_config(root.clone());
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
+    let names: Vec<String> = store_members(&results, &root)
+        .into_iter()
+        .map(|(_, m)| m)
+        .collect();
+
+    for credited in ["count", "increment"] {
+        assert!(
+            !names.contains(&credited.to_string()),
+            "{credited} consumed via inline useCounterStore().{credited} must be credited: {names:?}"
+        );
+    }
+    for dead in ["deadState", "deadAction"] {
+        assert!(
+            names.contains(&dead.to_string()),
+            "{dead} is never accessed and should still flag: {names:?}"
         );
     }
 }
@@ -139,5 +179,31 @@ fn dep_gate_suppresses_without_pinia() {
     assert!(
         members.is_empty(),
         "store-member detection must be gated on a declared pinia dependency: {members:?}"
+    );
+}
+
+#[test]
+fn credits_typed_param_store_members_and_flags_dead_ones() {
+    // Issue #1489 case 2: a store reaches the access through a param typed
+    // `ReturnType<typeof useCounterStore>` (object-wrapped `props.store.member`
+    // and `const { m } = props.store`). Both must be credited, while a genuinely
+    // unused member on the same store still flags (non-vacuous control).
+    let root = fixture_path("pinia-typed-param-store-member");
+    let config = create_config(root.clone());
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
+    let names: Vec<String> = store_members(&results, &root)
+        .into_iter()
+        .map(|(_, m)| m)
+        .collect();
+
+    for credited in ["viaTypedParam", "viaParamDestructure"] {
+        assert!(
+            !names.contains(&credited.to_string()),
+            "{credited} consumed through a typed store param must be credited: {names:?}"
+        );
+    }
+    assert!(
+        names.contains(&"deadMember".to_string()),
+        "deadMember is never accessed and must still flag: {names:?}"
     );
 }

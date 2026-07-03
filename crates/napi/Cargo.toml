@@ -19,10 +19,18 @@ crate-type = ["cdylib"]
 doctest = false
 
 [dependencies]
-plow-cli = { workspace = true }
+plow-api = { workspace = true }
 napi = { version = "3", features = ["serde-json", "tokio_rt"] }
 napi-derive = "3"
 serde_json = { workspace = true }
 
 [build-dependencies]
 napi-build = "2"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = [
+  "napi-build", # used from build.rs to emit NAPI build metadata; cargo-machete can miss build-script-only deps
+]

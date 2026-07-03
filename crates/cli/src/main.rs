@@ -12,38 +12,47 @@
     )
 )]
 
-use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 
 mod api;
 mod audit;
+mod audit_brief;
+mod audit_decision_surface;
+mod audit_focus;
+mod audit_walkthrough;
 mod base_worktree;
-mod baseline;
+mod walkthrough_state;
+use plow_engine::baseline;
 mod cache_notice;
 mod check;
 mod ci;
 mod ci_template;
-mod codeowners;
+mod cli_format;
+mod cli_hooks;
+mod cli_impact;
+mod cli_production;
+mod cli_startup;
+use plow_engine::codeowners;
 mod combined;
 mod config;
 mod coverage;
 mod dupes;
-mod error;
 mod explain;
 mod fix;
 mod flags;
 mod health;
-mod health_types;
 mod impact;
 mod init;
+mod inspect;
 mod license;
 mod list;
 mod migrate;
-mod output_dupes;
+#[cfg(test)]
 mod output_envelope;
+mod output_runtime;
 mod path_util;
 mod rayon_pool;
 mod regression;
@@ -51,44 +60,53 @@ mod report;
 mod runtime_support;
 mod schema;
 mod security;
+mod security_help;
 mod setup_hooks;
 mod signal;
 mod task_matrix;
 mod telemetry;
+mod trace_chain;
 mod update_check;
-mod validate;
-mod vital_signs;
+use plow_engine::validate;
+use plow_engine::vital_signs;
+mod cli_telemetry;
 mod watch;
 
 use check::{CheckOptions, IssueFilters, TraceOptions};
+mod error {
+    pub use plow_engine::emit_error;
+}
+#[cfg(test)]
+use cli_format::parse_format_arg;
+use cli_format::{Format, FormatConfig, apply_ci_defaults};
+use cli_hooks::{HooksCli, run_hooks_command};
+use cli_impact::{ImpactCli, ImpactCrossRepoOpts, ImpactSortCli, dispatch_impact};
+use cli_production::{ProductionModes, resolve_production_modes};
+#[cfg(test)]
+use cli_startup::build_tracing_filter;
+use cli_startup::{
+    bare_coverage_subcommand_error_message, cli_has_bare_coverage_input, parse_cli_args,
+    run_pre_dispatch_checks, setup_tracing, validate_inputs,
+};
+#[cfg(test)]
+use cli_telemetry::TelemetryRun;
+#[cfg(test)]
+use cli_telemetry::{fallback_failure_reason_for, telemetry_workflow_for_command};
+use cli_telemetry::{record_run_epilogue, start_telemetry_run};
 use dupes::{DupesMode, DupesOptions};
 use error::emit_error;
 use health::{HealthOptions, SortBy};
 use list::ListOptions;
 pub use runtime_support::{AnalysisKind, GroupBy};
-pub(crate) use runtime_support::{build_ownership_resolver, load_config, load_config_for_analysis};
+pub(crate) use runtime_support::{
+    ConfigLoadOptions, LoadConfigArgs, build_ownership_resolver, load_config,
+    load_config_for_analysis,
+};
+#[cfg(test)]
+use security_help::{SECURITY_UNSUPPORTED_GLOBAL_LONGS, SecurityHelpTarget};
+use security_help::{render_security_help, security_help_target};
 
-const SECURITY_UNSUPPORTED_GLOBAL_LONGS: &[&str] = &[
-    "baseline",
-    "save-baseline",
-    "production",
-    "no-production",
-    "group-by",
-    "performance",
-    "explain-skipped",
-    "fail-on-regression",
-    "regression-baseline",
-    "save-regression-baseline",
-    "dupes-mode",
-    "dupes-threshold",
-    "dupes-min-tokens",
-    "dupes-min-lines",
-    "dupes-min-occurrences",
-    "dupes-skip-local",
-    "dupes-cross-language",
-    "dupes-ignore-imports",
-    "include-entry-exports",
-];
+const DEFAULT_MIN_INVOCATIONS_HOT: u64 = 100;
 
 const TOP_LEVEL_HELP_TEMPLATE: &str =
     "{about-with-newline}\n{usage-heading} {usage}{after-help}\n\nOptions:\n{options}";
@@ -108,6 +126,7 @@ Workflow:
 
 Project inspection:
   list           List discovered files, entry points, plugins, boundaries, and workspaces
+  inspect        Inspect one file or exported symbol as a bundled evidence query
   workspaces     Show monorepo workspace discovery diagnostics
   explain        Explain one issue type without running analysis
   impact         Show what plow has done for you (opt-in, local-only)
@@ -148,6 +167,7 @@ When the agent is about to...
   consolidate duplication                  plow dupes --trace dup:<fingerprint>
   find feature flags                       plow flags
   surface security candidates              plow security
+  inspect a target before editing          plow inspect --file <path>
   understand a finding                     plow explain <issue-type>
   scope a monorepo                         --workspace <glob> / --changed-workspaces <ref>";
 
@@ -301,10 +321,6 @@ struct Cli {
     #[arg(long, global = true)]
     explain: bool,
 
-    /// Emit legacy JSON root envelopes without the top-level `kind` discriminator.
-    #[arg(long, global = true)]
-    legacy_envelope: bool,
-
     /// Show a per-pattern breakdown for default duplicate ignores.
     #[arg(long, global = true)]
     explain_skipped: bool,
@@ -387,13 +403,13 @@ struct Cli {
     #[arg(long = "dupes-cross-language", global = true)]
     dupes_cross_language: bool,
 
-    /// Exclude import declarations from duplicate detection in combined mode
-    /// (default). Pass `--dupes-no-ignore-imports` to count them again.
+    /// Exclude module wiring from duplicate detection in combined mode
+    /// (default). Pass `--dupes-no-ignore-imports` to count it again.
     #[arg(long = "dupes-ignore-imports", global = true)]
     dupes_ignore_imports: bool,
 
-    /// Count import declarations as clone candidates in combined mode (opt out
-    /// of the default import exclusion).
+    /// Count module wiring as clone candidates in combined mode (opt out of the
+    /// default exclusion).
     #[arg(
         long = "dupes-no-ignore-imports",
         global = true,
@@ -486,9 +502,25 @@ enum Command {
         #[arg(long)]
         unused_component_emits: bool,
 
+        /// Only report unused component inputs
+        #[arg(long)]
+        unused_component_inputs: bool,
+
+        /// Only report unused component outputs
+        #[arg(long)]
+        unused_component_outputs: bool,
+
+        /// Only report unused Svelte dispatched events
+        #[arg(long)]
+        unused_svelte_events: bool,
+
         /// Only report unused server actions
         #[arg(long)]
         unused_server_actions: bool,
+
+        /// Only report unused SvelteKit load() data keys
+        #[arg(long)]
+        unused_load_data_keys: bool,
 
         /// Only report unresolved imports
         #[arg(long)]
@@ -558,6 +590,12 @@ enum Command {
         #[arg(long, value_name = "PACKAGE")]
         trace_dependency: Option<String>,
 
+        /// Compute the impact closure for a file (the transitive
+        /// affected-but-not-in-diff set + coordination gap). Walks reverse-deps
+        /// and re-export chains; powers the `inspect_target` MCP tool.
+        #[arg(long, value_name = "PATH")]
+        impact_closure: Option<String>,
+
         /// Show only the top N items per category
         #[arg(long)]
         top: Option<usize>,
@@ -574,6 +612,58 @@ enum Command {
         /// Don't clear the screen between re-analyses
         #[arg(long)]
         no_clear: bool,
+    },
+
+    /// Inspect one file or exported symbol as a bundled evidence query
+    Inspect {
+        /// File to inspect.
+        #[arg(
+            long,
+            value_name = "PATH",
+            conflicts_with = "symbol",
+            required_unless_present = "symbol"
+        )]
+        file: Option<String>,
+
+        /// Exported symbol to inspect, formatted as FILE:EXPORT.
+        #[arg(long, value_name = "FILE:EXPORT", conflicts_with = "file")]
+        symbol: Option<String>,
+
+        /// OPT-IN: also attach the best-effort symbol-level call chain
+        /// (`plow trace`) as the `symbol_chain` evidence section. Only
+        /// meaningful for a `--symbol` target. Default off (best-effort,
+        /// syntactic, OFF the ranked path).
+        #[arg(long)]
+        symbol_chain: bool,
+    },
+
+    /// Trace a symbol's call chain (best-effort, syntactic; OFF the ranked path)
+    ///
+    /// Walks callers UP (modules that import the symbol) and callees DOWN
+    /// (import-symbol edges + intra-module call sites) via the module graph,
+    /// bounded by `--depth`. Symbol-level chains are labeled best-effort per
+    /// ADR-001: resolved-vs-unresolved callees are reported honestly, never
+    /// silently dropped. The result is its OWN surface, NOT folded into the
+    /// ranked brief and NEVER an input to the focus map / ranking.
+    Trace {
+        /// Target symbol, formatted as FILE:SYMBOL (e.g. src/utils.ts:formatDate).
+        #[arg(value_name = "FILE:SYMBOL")]
+        symbol: String,
+
+        /// Walk UP to callers (modules that import the symbol). When neither
+        /// `--callers` nor `--callees` is set, both directions are walked.
+        #[arg(long)]
+        callers: bool,
+
+        /// Walk DOWN to callees (the symbol's module's import-symbol edges plus
+        /// unresolved call sites). When neither flag is set, both are walked.
+        #[arg(long)]
+        callees: bool,
+
+        /// Chain depth bound for both directions (default 2). Symbol-level is
+        /// best-effort, so a shallow bound keeps the trace legible.
+        #[arg(long, value_name = "N")]
+        depth: Option<u32>,
     },
 
     /// Auto-fix issues: remove unused exports, dependencies, and enum
@@ -759,14 +849,14 @@ enum Command {
         #[arg(long)]
         cross_language: bool,
 
-        /// Exclude import declarations from clone detection (default; reduces
-        /// noise from sorted import blocks). Pass `--no-ignore-imports` to
-        /// count them again.
+        /// Exclude module wiring from clone detection (default; covers imports,
+        /// re-exports, and top-level static require bindings). Pass
+        /// `--no-ignore-imports` to count it again.
         #[arg(long)]
         ignore_imports: bool,
 
-        /// Count import declarations as clone candidates (opt out of the
-        /// default import exclusion).
+        /// Count module wiring as clone candidates (opt out of the default
+        /// exclusion).
         #[arg(long, conflicts_with = "ignore_imports")]
         no_ignore_imports: bool,
 
@@ -857,6 +947,13 @@ enum Command {
         #[arg(long)]
         targets: bool,
 
+        /// Add structural CSS analytics: specificity hotspots, !important density,
+        /// over-complex selectors, deep nesting, and conservative cleanup
+        /// candidates. Standard CSS is parsed structurally; preprocessor sources
+        /// are scanned only where plow can avoid expanding Sass/Less semantics.
+        #[arg(long)]
+        css: bool,
+
         /// Filter refactoring targets by effort level (low, medium, high).
         /// Implies --targets.
         #[arg(long, value_enum)]
@@ -882,7 +979,7 @@ enum Command {
         /// Use --min-severity critical to ignore moderate/high findings in CI.
         /// Composes with --min-score (the run fails if either gate trips).
         #[arg(long, value_name = "LEVEL", value_enum)]
-        min_severity: Option<crate::health_types::FindingSeverity>,
+        min_severity: Option<HealthSeverityCli>,
 
         /// Print the score and findings but never fail CI (always exit 0).
         /// Advisory mode for surfacing health in logs without blocking.
@@ -988,6 +1085,12 @@ enum Command {
     /// Purpose-built for reviewing AI-generated code and PR quality gates.
     /// Combines dead-code + complexity + duplication scoped to changed files
     /// and returns a verdict (pass/warn/fail).
+    ///
+    /// `plow audit` answers "will CI block this?": it gates (exit 1 on a
+    /// fail verdict). The `review` alias plus `--brief` answer "where do I
+    /// look?": the same analysis rendered as a deterministic orientation brief
+    /// that ALWAYS exits 0, so a reviewer or agent can read it regardless of
+    /// the verdict. `--format` is orthogonal to `--brief`.
     /// When `--changed-since`/`--base` is unset, the base is the git merge-base
     /// against the branch's upstream or the remote default (`origin/HEAD`,
     /// `origin/main`, `origin/master`); set `PLOW_AUDIT_BASE` to pin it.
@@ -1001,6 +1104,7 @@ enum Command {
     /// Use --dead-code-baseline, --health-baseline, and --dupes-baseline
     /// (or their config equivalents) because each sub-analysis uses a
     /// different baseline format.
+    #[command(visible_alias = "review")]
     Audit {
         /// Run dead-code analysis in production mode for this audit.
         #[arg(long = "production-dead-code")]
@@ -1076,6 +1180,97 @@ enum Command {
         /// verdict, exit code, or output.
         #[arg(long, value_name = "MARKER", hide = true)]
         gate_marker: Option<String>,
+
+        /// Render the deterministic review brief instead of the gating audit
+        /// report. The brief answers "where do I look?" rather than "will CI
+        /// block this?", runs the same analysis, and ALWAYS exits 0 (the
+        /// verdict is carried informationally). Implied by `plow review`.
+        /// Orthogonal to `--format`.
+        #[arg(long)]
+        brief: bool,
+
+        /// Cap on the number of consequential structural decisions surfaced in
+        /// the review brief's decision surface (the working-memory limit).
+        /// Default 4; clamped to the 3-5 band (4 plus or minus 1). Only
+        /// consulted on the brief path.
+        #[arg(
+            long,
+            value_name = "N",
+            default_value_t = audit_decision_surface::DEFAULT_DECISION_CAP
+        )]
+        max_decisions: usize,
+
+        /// Emit the agent-contract WALKTHROUGH GUIDE: the current digest
+        /// (brief + decision surface), the review direction, the JSON schema the
+        /// agent must return, and a deterministic graph-snapshot hash pinned into
+        /// the digest. The digest is built from the graph only (PR prose is never
+        /// folded in, so it is injection-resistant). Implies the brief; always
+        /// exits 0. A thin agent skill calls this to fetch the current guide,
+        /// produces judgment JSON, then reopens with `--walkthrough-file`.
+        #[arg(long, conflicts_with_all = ["walkthrough_file", "walkthrough"])]
+        walkthrough_guide: bool,
+
+        /// Ingest an agent's judgment JSON and POST-VALIDATE it against the
+        /// LIVE graph. Rejects any judgment whose `signal_id` plow did not emit
+        /// (anti-hallucination); refuses the whole payload as stale when the
+        /// echoed graph-snapshot hash no longer matches (the tree moved). The
+        /// verifier is the graph, not a second model. Implies the brief; always
+        /// exits 0. The agent's free-text framing is fenced as non-deterministic
+        /// and never gates or auto-posts.
+        #[arg(long, value_name = "PATH")]
+        walkthrough_file: Option<PathBuf>,
+
+        /// Render the existing walkthrough guide as a staged HUMAN terminal tour
+        /// (Stage 1 load-bearing / Stage 2 mechanical), or markdown with
+        /// `--format markdown`. Implies the brief; always exits 0.
+        /// `--format json --walkthrough` emits the same agent-contract JSON as
+        /// `--walkthrough-guide`.
+        #[arg(long, conflicts_with_all = ["walkthrough_guide", "walkthrough_file"])]
+        walkthrough: bool,
+
+        /// Record one or more changed files as VIEWED in the local walkthrough
+        /// viewed-state ledger (`.plow/walkthrough-state.json`), then render the
+        /// tour. Files already viewed (and still current) collapse into the
+        /// Cleared panel. Repeatable. Stale marks (the tree moved) are ignored on
+        /// render but never deleted. Only consulted on the `--walkthrough` path.
+        #[arg(long, value_name = "PATH")]
+        mark_viewed: Vec<PathBuf>,
+
+        /// Expand the Cleared panel in the human/markdown walkthrough tour: list
+        /// each de-prioritized and already-viewed file instead of the collapsed
+        /// one-line summary. Only consulted on the `--walkthrough` path.
+        #[arg(long)]
+        show_cleared: bool,
+
+        /// Expand the de-prioritized units in the review brief's weighted
+        /// focus map ("show me what you de-prioritized"). The `deprioritized`
+        /// escape-hatch list is ALWAYS present in `--format json` regardless; this
+        /// flag only re-expands the collapse-by-default human focus render. Only
+        /// consulted on the brief path.
+        #[arg(long)]
+        show_deprioritized: bool,
+    },
+
+    /// Surface the consequential structural DECISIONS a change embeds (the apex
+    /// of the review brief), each framed as a judgment question with the routed
+    /// expert to ask.
+    ///
+    /// The product's decision surface: a ranked, capped (4 plus or minus 1),
+    /// signal_id-anchored set of the SOLID-3 decisions (coupling/boundary,
+    /// exports-aware public-API/contract, dependency). Runs the same changed-code
+    /// analysis as `plow review` but emits ONLY the decisions, separable and
+    /// cheap. Every decision is suppressible with `// plow-ignore`. Always
+    /// exits 0 (advisory, never a gate). Use `--base` / `--changed-since` to pick
+    /// the comparison point, exactly like `plow audit`.
+    DecisionSurface {
+        /// Cap on the number of surfaced decisions (the working-memory limit).
+        /// Default 4; clamped to the 3-5 band (4 plus or minus 1).
+        #[arg(
+            long,
+            value_name = "N",
+            default_value_t = audit_decision_surface::DEFAULT_DECISION_CAP
+        )]
+        max_decisions: usize,
     },
 
     /// Show what plow has done for you: how many issues it is surfacing, the
@@ -1135,6 +1330,8 @@ enum Command {
     /// `--diff-stdin`, `--workspace`, `--changed-workspaces`, `--ci`,
     /// `--fail-on-issues`, `--sarif-file`, `--summary`, `--explain`, and `--surface`.
     Security {
+        #[command(subcommand)]
+        subcommand: Option<SecuritySubcommand>,
         /// Paid runtime-coverage sidecar input. Accepts a V8 directory, a
         /// single V8 JSON file, or an Istanbul coverage map JSON. When set,
         /// `plow security` annotates tainted-sink candidates with production
@@ -1156,7 +1353,7 @@ enum Command {
         /// `--diff-file <path>`, or `--diff-stdin`. There is deliberately no `all`
         /// mode (gating on the full backlog is the anti-feature this gate avoids).
         #[arg(long, value_name = "MODE")]
-        gate: Option<security::SecurityGateMode>,
+        gate: Option<security::SecurityGateArg>,
         /// Include the agent-facing attack-surface inventory in JSON output.
         #[arg(long)]
         surface: bool,
@@ -1278,71 +1475,26 @@ enum Command {
     },
 }
 
-#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
-enum HooksTargetArg {
-    /// Shell-level Git pre-commit hook under .git/hooks/ or .husky/.
-    Git,
-    /// Agent-level Claude Code / Codex gate.
-    Agent,
-}
-
-#[derive(clap::Subcommand)]
-enum HooksCli {
-    /// Show installed hook state for Git, Claude, and Codex surfaces.
-    Status,
-
-    /// Install a plow-managed hook.
-    Install {
-        /// Hook surface to install.
-        #[arg(long, value_enum)]
-        target: HooksTargetArg,
-
-        /// Fallback base branch/ref for Git pre-commit hooks when no upstream is set.
+#[derive(Subcommand)]
+enum SecuritySubcommand {
+    /// Render verifier-retained survivor candidates from plow output plus verifier verdicts.
+    Survivors {
+        /// Raw `plow security --format json` candidate output.
+        #[arg(long, value_name = "PATH")]
+        candidates: PathBuf,
+        /// Verifier verdict JSON file.
+        #[arg(long, value_name = "PATH")]
+        verdicts: PathBuf,
+        /// Fail when any candidate has no matching verdict.
         #[arg(long)]
-        branch: Option<String>,
-
-        /// Target a specific agent surface when --target agent is used.
-        #[arg(long, value_enum)]
-        agent: Option<setup_hooks::HookAgentArg>,
-
-        /// Print what would be written without touching the filesystem.
-        #[arg(long)]
-        dry_run: bool,
-
-        /// Overwrite an existing managed or user-edited hook.
-        #[arg(long)]
-        force: bool,
-
-        /// Write agent hooks to the user's home directory instead of the project root.
-        #[arg(long)]
-        user: bool,
-
-        /// Append `.claude/` to the project's `.gitignore` for Claude agent hooks.
-        #[arg(long)]
-        gitignore_claude: bool,
+        require_verdict_for_each_candidate: bool,
     },
-
-    /// Remove a plow-managed hook.
-    Uninstall {
-        /// Hook surface to remove.
-        #[arg(long, value_enum)]
-        target: HooksTargetArg,
-
-        /// Target a specific agent surface when --target agent is used.
-        #[arg(long, value_enum)]
-        agent: Option<setup_hooks::HookAgentArg>,
-
-        /// Print what would be removed without touching the filesystem.
-        #[arg(long)]
-        dry_run: bool,
-
-        /// Remove a user-edited hook script or Git hook instead of preserving it.
-        #[arg(long)]
-        force: bool,
-
-        /// Remove agent hooks from the user's home directory instead of the project root.
-        #[arg(long)]
-        user: bool,
+    /// Group unresolved security callees into actionable blind-spot output.
+    #[command(name = "blind-spots")]
+    BlindSpots {
+        /// Scope diagnostics to selected files.
+        #[arg(long, value_name = "PATH")]
+        file: Vec<PathBuf>,
     },
 }
 
@@ -1400,60 +1552,6 @@ enum TelemetryCli {
         #[arg(long)]
         example: bool,
     },
-}
-
-#[derive(Clone, Copy, clap::Subcommand)]
-enum ImpactCli {
-    /// Enable local Impact tracking for this project.
-    Enable,
-    /// Disable Impact tracking (existing history is retained).
-    Disable,
-    /// Set the user-global default for new projects (on or off). A per-project
-    /// `enable`/`disable` always wins over this default.
-    Default {
-        /// `on` to record in every project by default, `off` to require an
-        /// explicit per-project `enable`.
-        #[arg(value_enum)]
-        state: ToggleState,
-    },
-    /// Delete this project's stored history (or all projects with `--all`).
-    Reset {
-        /// Delete every project's Impact history, not just this one.
-        #[arg(long)]
-        all: bool,
-    },
-    /// Show whether Impact tracking is enabled and how much history exists.
-    Status,
-}
-
-#[derive(Clone, Copy, clap::ValueEnum)]
-enum ToggleState {
-    On,
-    Off,
-}
-
-/// Row ordering for `plow impact --all`.
-#[derive(Clone, Copy, clap::ValueEnum)]
-enum ImpactSortCli {
-    /// Most recently recorded project first (default).
-    Recent,
-    /// Most findings resolved first.
-    Resolved,
-    /// Most commits contained first.
-    Contained,
-    /// Alphabetical by project label.
-    Name,
-}
-
-impl ImpactSortCli {
-    const fn to_impact(self) -> impact::CrossRepoSort {
-        match self {
-            Self::Recent => impact::CrossRepoSort::Recent,
-            Self::Resolved => impact::CrossRepoSort::Resolved,
-            Self::Contained => impact::CrossRepoSort::Contained,
-            Self::Name => impact::CrossRepoSort::Name,
-        }
-    }
 }
 
 #[derive(clap::Subcommand)]
@@ -1638,6 +1736,14 @@ enum CoverageCli {
         #[arg(long)]
         dry_run: bool,
 
+        /// Also upload importer edges (which files import each function) so the
+        /// cloud can show change-time blast radius. Opt-in: this builds the
+        /// import graph by running the full static analysis, whereas the default
+        /// upload is a fast per-file walk. The graph is cached, so a CI step that
+        /// already ran analysis pays little extra.
+        #[arg(long)]
+        with_callers: bool,
+
         /// Treat transient upload failures as warnings instead of errors
         /// (exit 0). Validation and auth errors still fail hard; this only
         /// downgrades transport and server errors.
@@ -1767,30 +1873,6 @@ enum CoverageCli {
     },
 }
 
-#[derive(Clone, Copy, clap::ValueEnum)]
-enum Format {
-    Human,
-    Json,
-    Sarif,
-    Compact,
-    Markdown,
-    #[value(
-        name = "codeclimate",
-        alias = "gitlab-codequality",
-        alias = "gitlab-code-quality"
-    )]
-    CodeClimate,
-    #[value(name = "pr-comment-github")]
-    PrCommentGithub,
-    #[value(name = "pr-comment-gitlab")]
-    PrCommentGitlab,
-    #[value(name = "review-github")]
-    ReviewGithub,
-    #[value(name = "review-gitlab")]
-    ReviewGitlab,
-    Badge,
-}
-
 #[derive(Subcommand)]
 enum CiCli {
     /// Validate a rendered review envelope and compute a stable reconcile plan.
@@ -1835,24 +1917,6 @@ enum CiProviderArg {
     Gitlab,
 }
 
-impl From<Format> for plow_config::OutputFormat {
-    fn from(f: Format) -> Self {
-        match f {
-            Format::Human => Self::Human,
-            Format::Json => Self::Json,
-            Format::Sarif => Self::Sarif,
-            Format::Compact => Self::Compact,
-            Format::Markdown => Self::Markdown,
-            Format::CodeClimate => Self::CodeClimate,
-            Format::PrCommentGithub => Self::PrCommentGithub,
-            Format::PrCommentGitlab => Self::PrCommentGitlab,
-            Format::ReviewGithub => Self::ReviewGithub,
-            Format::ReviewGitlab => Self::ReviewGitlab,
-            Format::Badge => Self::Badge,
-        }
-    }
-}
-
 /// Filter refactoring targets by effort level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum EffortFilter {
@@ -1863,11 +1927,30 @@ pub enum EffortFilter {
 
 impl EffortFilter {
     /// Convert to the corresponding `EffortEstimate` for comparison.
-    const fn to_estimate(self) -> health_types::EffortEstimate {
+    const fn to_estimate(self) -> plow_output::EffortEstimate {
         match self {
-            Self::Low => health_types::EffortEstimate::Low,
-            Self::Medium => health_types::EffortEstimate::Medium,
-            Self::High => health_types::EffortEstimate::High,
+            Self::Low => plow_output::EffortEstimate::Low,
+            Self::Medium => plow_output::EffortEstimate::Medium,
+            Self::High => plow_output::EffortEstimate::High,
+        }
+    }
+}
+
+/// CLI parser for the health severity gate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum HealthSeverityCli {
+    Moderate,
+    High,
+    Critical,
+}
+
+impl HealthSeverityCli {
+    /// Convert to the typed health output severity.
+    const fn to_health_severity(self) -> plow_output::FindingSeverity {
+        match self {
+            Self::Moderate => plow_output::FindingSeverity::Moderate,
+            Self::High => plow_output::FindingSeverity::High,
+            Self::Critical => plow_output::FindingSeverity::Critical,
         }
     }
 }
@@ -1935,39 +2018,6 @@ fn parse_min_occurrences(s: &str) -> Result<usize, String> {
     Ok(value)
 }
 
-/// Read `PLOW_FORMAT` env var and parse it into a Format value.
-fn format_from_env() -> Option<Format> {
-    let val = std::env::var("PLOW_FORMAT").ok()?;
-    match val.to_lowercase().as_str() {
-        "json" => Some(Format::Json),
-        "human" => Some(Format::Human),
-        "sarif" => Some(Format::Sarif),
-        "compact" => Some(Format::Compact),
-        "markdown" | "md" => Some(Format::Markdown),
-        "codeclimate" | "gitlab-codequality" | "gitlab-code-quality" => Some(Format::CodeClimate),
-        "pr-comment-github" => Some(Format::PrCommentGithub),
-        "pr-comment-gitlab" => Some(Format::PrCommentGitlab),
-        "review-github" => Some(Format::ReviewGithub),
-        "review-gitlab" => Some(Format::ReviewGitlab),
-        "badge" => Some(Format::Badge),
-        _ => None,
-    }
-}
-
-/// Read `PLOW_QUIET` env var: "1" or "true" (case-insensitive) means quiet.
-fn quiet_from_env() -> bool {
-    std::env::var("PLOW_QUIET").is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-}
-
-fn bool_from_env(name: &str) -> Option<bool> {
-    let value = std::env::var(name).ok()?;
-    match value.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Some(true),
-        "0" | "false" | "no" | "off" => Some(false),
-        _ => None,
-    }
-}
-
 /// Resolve an audit baseline path using CLI > config precedence.
 ///
 /// Both sources resolve relative paths against the project root. This keeps
@@ -1993,189 +2043,6 @@ fn resolve_audit_baseline_path(
     } else {
         Some(root.join(path))
     }
-}
-
-struct FormatConfig {
-    output: plow_config::OutputFormat,
-    quiet: bool,
-    cli_format_was_explicit: bool,
-}
-
-fn resolve_format(cli: &Cli) -> FormatConfig {
-    let cli_format_was_explicit = std::env::args()
-        .any(|a| a == "--format" || a == "--output" || a.starts_with("--format=") || a == "-f");
-    let format: Format = if cli_format_was_explicit {
-        cli.format
-    } else {
-        format_from_env().unwrap_or(cli.format)
-    };
-
-    let quiet = cli.quiet || quiet_from_env();
-
-    FormatConfig {
-        output: format.into(),
-        quiet,
-        cli_format_was_explicit,
-    }
-}
-
-/// Build the tracing filter for the CLI.
-///
-/// Human output should stay clean by default, even when stderr is redirected to a
-/// file or captured by an agent. Internal INFO-level tracing is therefore opt-in
-/// via `RUST_LOG`, while warnings remain visible. An explicitly empty `RUST_LOG`
-/// disables tracing entirely, which keeps the test harness deterministic.
-fn build_tracing_filter(rust_log: Option<&str>) -> tracing_subscriber::EnvFilter {
-    use tracing_subscriber::filter::LevelFilter;
-
-    let builder = tracing_subscriber::EnvFilter::builder();
-    match rust_log.map(str::trim) {
-        Some("") => builder
-            .with_default_directive(LevelFilter::OFF.into())
-            .parse_lossy("off"),
-        Some(value) => builder
-            .with_default_directive(LevelFilter::OFF.into())
-            .parse_lossy(value),
-        None => builder
-            .with_default_directive(LevelFilter::WARN.into())
-            .parse_lossy(""),
-    }
-}
-
-/// Set up tracing for the CLI.
-fn setup_tracing() {
-    let rust_log = std::env::var("RUST_LOG").ok();
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_env_filter(build_tracing_filter(rust_log.as_deref()))
-        .with_target(false)
-        .with_timer(tracing_subscriber::fmt::time::uptime())
-        .init();
-}
-
-fn validate_inputs(
-    cli: &Cli,
-    output: plow_config::OutputFormat,
-) -> Result<(PathBuf, usize), ExitCode> {
-    if matches!(&cli.command, Some(Command::Security { .. }))
-        && let Some(flag) = unsupported_security_global(cli)
-    {
-        return Err(emit_known_failure(
-            &format!("{flag} is not valid with `plow security`."),
-            2,
-            output,
-            telemetry::FailureReason::Validation,
-        ));
-    }
-
-    if let Some(ref config_path) = cli.config
-        && let Some(s) = config_path.to_str()
-        && let Err(e) = validate::validate_no_control_chars(s, "--config")
-    {
-        return Err(emit_known_failure(
-            &e,
-            2,
-            output,
-            telemetry::FailureReason::Validation,
-        ));
-    }
-    if let Some(ref ws_patterns) = cli.workspace {
-        for ws in ws_patterns {
-            if let Err(e) = validate::validate_no_control_chars(ws, "--workspace") {
-                return Err(emit_known_failure(
-                    &e,
-                    2,
-                    output,
-                    telemetry::FailureReason::Validation,
-                ));
-            }
-        }
-    }
-    if let Some(ref git_ref) = cli.changed_since
-        && let Err(e) = validate::validate_no_control_chars(git_ref, "--changed-since")
-    {
-        return Err(emit_known_failure(
-            &e,
-            2,
-            output,
-            telemetry::FailureReason::Validation,
-        ));
-    }
-    if let Some(ref git_ref) = cli.changed_workspaces
-        && let Err(e) = validate::validate_no_control_chars(git_ref, "--changed-workspaces")
-    {
-        return Err(emit_known_failure(
-            &e,
-            2,
-            output,
-            telemetry::FailureReason::Validation,
-        ));
-    }
-
-    if cli.workspace.is_some() && cli.changed_workspaces.is_some() {
-        return Err(emit_known_failure(
-            "--workspace and --changed-workspaces are mutually exclusive. \
-             Pick one: --workspace for explicit package names/globs, \
-             --changed-workspaces for git-derived monorepo CI scoping.",
-            2,
-            output,
-            telemetry::FailureReason::Validation,
-        ));
-    }
-
-    let raw_root = if let Some(root) = cli.root.clone() {
-        root
-    } else {
-        std::env::current_dir().map_err(|err| {
-            emit_known_failure(
-                &format!("Failed to get current directory: {err}"),
-                2,
-                output,
-                telemetry::FailureReason::Config,
-            )
-        })?
-    };
-    let root = match validate::validate_root(&raw_root) {
-        Ok(r) => r,
-        Err(e) => {
-            return Err(emit_known_failure(
-                &e,
-                2,
-                output,
-                telemetry::FailureReason::Config,
-            ));
-        }
-    };
-
-    if let Some(ref git_ref) = cli.changed_since
-        && let Err(e) = validate::validate_git_ref(git_ref)
-    {
-        return Err(emit_known_failure(
-            &format!("invalid --changed-since: {e}"),
-            2,
-            output,
-            telemetry::FailureReason::Validation,
-        ));
-    }
-
-    if let Some(ref git_ref) = cli.changed_workspaces
-        && let Err(e) = validate::validate_git_ref(git_ref)
-    {
-        return Err(emit_known_failure(
-            &format!("invalid --changed-workspaces: {e}"),
-            2,
-            output,
-            telemetry::FailureReason::Validation,
-        ));
-    }
-
-    let threads = cli
-        .threads
-        .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, std::num::NonZero::get));
-
-    rayon_pool::configure_global_pool(threads);
-
-    Ok((root, threads))
 }
 
 fn emit_known_failure(
@@ -2231,28 +2098,6 @@ fn unsupported_security_global(cli: &Cli) -> Option<&'static str> {
         Some("--include-entry-exports")
     } else {
         None
-    }
-}
-
-/// Apply CI defaults: if `--ci` is set, override format to SARIF (unless explicit),
-/// enable fail-on-issues, and set quiet. Returns (output, quiet, `fail_on_issues`).
-fn apply_ci_defaults(
-    ci: bool,
-    mut fail_on_issues: bool,
-    output: plow_config::OutputFormat,
-    quiet: bool,
-    cli_format_was_explicit: bool,
-) -> (plow_config::OutputFormat, bool, bool) {
-    if ci {
-        let ci_output = if !cli_format_was_explicit && format_from_env().is_none() {
-            plow_config::OutputFormat::Sarif
-        } else {
-            output
-        };
-        fail_on_issues = true;
-        (ci_output, true, fail_on_issues)
-    } else {
-        (output, quiet, fail_on_issues)
     }
 }
 
@@ -2312,93 +2157,6 @@ impl DispatchContext<'_> {
     }
 }
 
-#[derive(Clone, Copy)]
-struct ProductionModes {
-    dead_code: bool,
-    health: bool,
-    dupes: bool,
-}
-
-impl ProductionModes {
-    const fn for_analysis(self, analysis: plow_config::ProductionAnalysis) -> bool {
-        match analysis {
-            plow_config::ProductionAnalysis::DeadCode => self.dead_code,
-            plow_config::ProductionAnalysis::Health => self.health,
-            plow_config::ProductionAnalysis::Dupes => self.dupes,
-        }
-    }
-}
-
-fn load_config_production(
-    root: &std::path::Path,
-    config_path: Option<&PathBuf>,
-    output: plow_config::OutputFormat,
-) -> Result<plow_config::ProductionConfig, ExitCode> {
-    let loaded = if let Some(path) = config_path {
-        plow_config::PlowConfig::load(path).map(Some).map_err(|e| {
-            emit_error(
-                &format!("failed to load config '{}': {e}", path.display()),
-                2,
-                output,
-            )
-        })?
-    } else {
-        plow_config::PlowConfig::find_and_load(root)
-            .map(|found| found.map(|(config, _)| config))
-            .map_err(|e| emit_error(&e, 2, output))?
-    };
-
-    Ok(match loaded {
-        Some(config) => config.production,
-        None => plow_config::ProductionConfig::default(),
-    })
-}
-
-fn resolve_production_modes(
-    cli: &Cli,
-    root: &std::path::Path,
-    output: plow_config::OutputFormat,
-    production_dead_code: bool,
-    production_health: bool,
-    production_dupes: bool,
-) -> Result<ProductionModes, ExitCode> {
-    let config = load_config_production(root, cli.config.as_ref(), output)?;
-    let env_global = bool_from_env("PLOW_PRODUCTION");
-
-    let resolve_one =
-        |analysis: plow_config::ProductionAnalysis, cli_specific: bool, env_name: &str| {
-            if cli.production || cli_specific {
-                true
-            } else if cli.no_production {
-                false
-            } else if let Some(value) = bool_from_env(env_name) {
-                value
-            } else if let Some(value) = env_global {
-                value
-            } else {
-                config.for_analysis(analysis)
-            }
-        };
-
-    Ok(ProductionModes {
-        dead_code: resolve_one(
-            plow_config::ProductionAnalysis::DeadCode,
-            production_dead_code,
-            "PLOW_PRODUCTION_DEAD_CODE",
-        ),
-        health: resolve_one(
-            plow_config::ProductionAnalysis::Health,
-            production_health,
-            "PLOW_PRODUCTION_HEALTH",
-        ),
-        dupes: resolve_one(
-            plow_config::ProductionAnalysis::Dupes,
-            production_dupes,
-            "PLOW_PRODUCTION_DUPES",
-        ),
-    })
-}
-
 /// Test-only helper invoked when `PLOW_TEST_SIGNAL_HELPER=1` is set.
 /// Spawns `sleep 30` via the `ScopedChild` registry so the child is
 /// tracked by the signal handler, prints the child PID to stdout, then
@@ -2451,8 +2209,8 @@ fn signal_test_helper() -> ExitCode {
 }
 
 fn install_spawn_hooks() {
-    plow_core::churn::set_spawn_hook(signal::scoped_child::output);
-    plow_core::changed_files::set_spawn_hook(signal::scoped_child::output);
+    plow_engine::set_churn_spawn_hook(signal::scoped_child::output);
+    plow_engine::set_spawn_hook(signal::scoped_child::output);
 }
 
 fn install_signal_handlers() {
@@ -2461,77 +2219,6 @@ fn install_signal_handlers() {
         let stderr = std::io::stderr();
         let mut lock = stderr.lock();
         let _ = writeln!(lock, "plow: failed to install signal handlers: {err}");
-    }
-}
-
-fn args_use_legacy_check_alias<I>(args: I) -> bool
-where
-    I: IntoIterator<Item = String>,
-{
-    let value_options = [
-        "-r",
-        "--root",
-        "-c",
-        "--config",
-        "-f",
-        "--format",
-        "--output",
-        "--threads",
-        "--changed-since",
-        "--base",
-        "--diff-file",
-        "--baseline",
-        "--parent-run",
-        "--save-baseline",
-        "-w",
-        "--workspace",
-        "--changed-workspaces",
-        "--group-by",
-        "--file",
-        "--sarif-file",
-        "--only",
-        "--skip",
-        "--dupes-mode",
-        "--dupes-threshold",
-        "--dupes-min-tokens",
-        "--dupes-min-lines",
-        "--dupes-min-occurrences",
-        "--dupes-skip-local",
-        "--dupes-cross-language",
-        "--dupes-ignore-imports",
-        "--save-snapshot",
-        "--regression-baseline",
-        "--tolerance",
-        "--save-regression-baseline",
-    ];
-    let mut skip_next = false;
-    for arg in args.into_iter().skip(1) {
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
-        if arg == "--" {
-            break;
-        }
-        if arg.starts_with('-') {
-            let option_name = arg.split_once('=').map_or(arg.as_str(), |(name, _)| name);
-            if !arg.contains('=') && value_options.contains(&option_name) {
-                skip_next = true;
-            }
-            continue;
-        }
-        return arg == "check";
-    }
-    false
-}
-
-fn raw_args_use_legacy_check_alias() -> bool {
-    args_use_legacy_check_alias(std::env::args())
-}
-
-fn warn_legacy_check_alias_if_needed(used_legacy_check_alias: bool, quiet: bool) {
-    if used_legacy_check_alias && !quiet {
-        eprintln!("plow: `check` is deprecated; use `dead-code` instead.");
     }
 }
 
@@ -2601,26 +2288,15 @@ fn main() -> ExitCode {
         return signal_test_helper();
     }
 
-    let used_legacy_check_alias = raw_args_use_legacy_check_alias();
-    let mut cli = match Cli::try_parse() {
-        Ok(cli) => cli,
-        Err(err) => return handle_cli_parse_error(&err),
+    let (mut cli, fmt) = match parse_cli_args() {
+        Ok(parsed) => parsed,
+        Err(code) => return code,
     };
-    warn_legacy_check_alias_if_needed(used_legacy_check_alias, cli.quiet);
-    output_envelope::set_legacy_envelope(cli.legacy_envelope);
-    runtime_support::set_max_file_size_override(cli.max_file_size);
-
-    if let Some(workspaces) = cli.workspace.as_ref()
-        && !workspaces.is_empty()
-    {
-        report::ci::pr_comment::set_workspace_marker_from_list(workspaces);
-    }
 
     if let Some(code) = run_schema_command_if_requested(&cli) {
         return code;
     }
 
-    let fmt = resolve_format(&cli);
     if let Some(code) = run_telemetry_command_if_requested(&mut cli, fmt.output) {
         return code;
     }
@@ -2639,64 +2315,12 @@ fn main() -> ExitCode {
         cli_format_was_explicit,
     } = fmt;
 
-    if let Err(code) = init_cli_diff_filter(&cli, &root, output, quiet) {
-        return record_run_epilogue(
-            telemetry_run,
-            code,
-            Some(telemetry::FailureReason::Diff),
-            cli.parent_run.as_deref(),
-        );
-    }
-
-    if (cli.ci || cli.fail_on_issues || cli.sarif_file.is_some() || cli.output_file.is_some())
-        && command_rejects_output_gate(cli.command.as_ref())
-    {
-        let code = emit_known_failure(
-            "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, dupes, health, security, or bare invocation",
-            2,
-            output,
-            telemetry::FailureReason::Validation,
-        );
-        return record_run_epilogue(
-            telemetry_run,
-            code,
-            Some(telemetry::FailureReason::Validation),
-            cli.parent_run.as_deref(),
-        );
-    }
-
-    if let Some(message) = global_filter_error(&cli) {
-        let code = emit_known_failure(message, 2, output, telemetry::FailureReason::Validation);
-        return record_run_epilogue(
-            telemetry_run,
-            code,
-            Some(telemetry::FailureReason::Validation),
-            cli.parent_run.as_deref(),
-        );
-    }
-
-    let tolerance = match parse_cli_tolerance(&cli, output) {
+    let tolerance = match run_pre_dispatch_checks(&cli, &root, output, quiet, telemetry_run) {
         Ok(tolerance) => tolerance,
-        Err(code) => {
-            return record_run_epilogue(
-                telemetry_run,
-                code,
-                Some(telemetry::FailureReason::Validation),
-                cli.parent_run.as_deref(),
-            );
-        }
+        Err(code) => return code,
     };
 
     let (save_regression_file, save_to_config) = regression_save_targets(&cli);
-
-    // Redirect the rendered report to a file (ambient sink read by the report
-    // layer's `outln!`). Set up before dispatch so rendering lands in the file;
-    // progress and the confirmation stay on stderr.
-    if let Some(path) = cli.output_file.as_deref()
-        && let Err(code) = redirect_report_to_file(path, output)
-    {
-        return code;
-    }
 
     let command = cli.command.take();
     let dispatch = DispatchContext {
@@ -2710,257 +2334,47 @@ fn main() -> ExitCode {
         save_regression_file: save_regression_file.as_ref(),
         save_to_config,
     };
-    let exit_code = if command.is_some() && cli_has_bare_coverage_input(&cli) {
-        emit_error(bare_coverage_subcommand_error_message(), 2, output)
-    } else {
-        match command {
-            None => dispatch_bare_command(&dispatch),
-            Some(cmd) => dispatch_subcommand(cmd, &dispatch),
-        }
+    let exit_code = match dispatch_and_finalize(&dispatch, command) {
+        Ok(code) => code,
+        Err(code) => return code,
     };
-    if let Some(path) = cli.output_file.as_deref()
-        && let Err(code) = finalize_report_file(path, quiet, output)
-    {
-        return code;
-    }
     record_run_epilogue(telemetry_run, exit_code, None, cli.parent_run.as_deref())
 }
 
-#[derive(Clone, Copy)]
-struct TelemetryRun {
-    workflow: telemetry::Workflow,
-    output: plow_config::OutputFormat,
-    quiet: bool,
-    start: std::time::Instant,
-    context: telemetry::WorkflowContext,
-}
+/// Redirect the rendered report to `--output-file` (ambient sink), dispatch the
+/// command, then flush+close the report file. Returns the dispatch exit code, or
+/// `Err` carrying a redirect/finalize failure code for `main` to return directly.
+fn dispatch_and_finalize(
+    dispatch: &DispatchContext<'_>,
+    command: Option<Command>,
+) -> Result<ExitCode, ExitCode> {
+    let cli = dispatch.cli;
+    let output = dispatch.output;
+    let quiet = dispatch.quiet;
 
-fn record_run_epilogue(
-    run: TelemetryRun,
-    exit_code: ExitCode,
-    failure_reason: Option<telemetry::FailureReason>,
-    parent_run: Option<&str>,
-) -> ExitCode {
-    let cache_notice_printed = cache_notice::maybe_print_created_notice();
-    telemetry::record_workflow(&telemetry::WorkflowRecord {
-        workflow: run.workflow,
-        output: run.output,
-        quiet: run.quiet,
-        elapsed: run.start.elapsed(),
-        exit_code,
-        failure_reason,
-        parent_run,
-        context: run.context,
-    });
-    if exit_code == ExitCode::SUCCESS {
-        let note_printed = telemetry::maybe_print_opt_in_note(run.output, run.quiet);
-        update_check::maybe_nudge(run.output, run.quiet, note_printed || cache_notice_printed);
-    }
-    exit_code
-}
-
-fn start_telemetry_run(cli: &Cli, fmt: &FormatConfig) -> TelemetryRun {
-    setup_tracing();
-    let run = TelemetryRun {
-        workflow: telemetry_workflow_for_command(cli.command.as_ref(), fmt.output),
-        output: fmt.output,
-        quiet: fmt.quiet,
-        start: std::time::Instant::now(),
-        context: telemetry_context_for_command(cli, cli.command.as_ref(), fmt.output),
-    };
-    output_envelope::set_telemetry_analysis_run_id(
-        matches!(fmt.output, plow_config::OutputFormat::Json).then(telemetry::new_analysis_run_id),
-    );
-    telemetry::flush_spool_in_background();
-    run
-}
-
-fn telemetry_context_for_command(
-    cli: &Cli,
-    command: Option<&Command>,
-    output: plow_config::OutputFormat,
-) -> telemetry::WorkflowContext {
-    telemetry::WorkflowContext {
-        run_scope: telemetry_run_scope_for_command(cli, command),
-        config_shape: telemetry_config_shape_for_cli(cli),
-        output_destination: telemetry_output_destination_for_command(cli, command, output),
-        analysis_mode: telemetry_analysis_mode_for_command(command),
-    }
-}
-
-fn telemetry_run_scope_for_command(cli: &Cli, command: Option<&Command>) -> telemetry::RunScope {
-    if command_is_file_scoped(command) {
-        return telemetry::RunScope::FileScoped;
-    }
-    if cli
-        .workspace
-        .as_ref()
-        .is_some_and(|workspaces| !workspaces.is_empty())
-        || cli.changed_workspaces.is_some()
+    // Set up the report-file sink before dispatch so rendering lands in the file;
+    // progress and the confirmation stay on stderr.
+    if let Some(path) = cli.output_file.as_deref()
+        && let Err(code) = redirect_report_to_file(path, output)
     {
-        return telemetry::RunScope::WorkspaceScoped;
+        return Err(code);
     }
-    if cli.changed_since.is_some()
-        || cli.diff_file.is_some()
-        || cli.diff_stdin
-        || matches!(command, Some(Command::Audit { .. }))
-    {
-        return telemetry::RunScope::ChangedOnly;
-    }
-    if command_runs_full_project_analysis(command) {
-        return telemetry::RunScope::FullProject;
-    }
-    telemetry::RunScope::Unknown
-}
 
-fn command_is_file_scoped(command: Option<&Command>) -> bool {
-    matches!(
-        command,
-        Some(Command::Check { file, .. } | Command::Security { file, .. }) if !file.is_empty()
-    )
-}
-
-fn command_runs_full_project_analysis(command: Option<&Command>) -> bool {
-    matches!(
-        command,
-        None | Some(
-            Command::Check { .. }
-                | Command::Dupes { .. }
-                | Command::Health { .. }
-                | Command::Flags { .. }
-                | Command::Security { .. }
-                | Command::Fix { .. }
-                | Command::Watch { .. },
-        )
-    )
-}
-
-fn telemetry_config_shape_for_cli(cli: &Cli) -> telemetry::ConfigShape {
-    if cli.config.is_some() {
-        telemetry::ConfigShape::CustomConfig
+    let exit_code = if command.is_some() && cli_has_bare_coverage_input(cli) {
+        emit_error(bare_coverage_subcommand_error_message(), 2, output)
     } else {
-        telemetry::ConfigShape::Unknown
-    }
-}
+        match command {
+            None => dispatch_bare_command(dispatch),
+            Some(cmd) => dispatch_subcommand(cmd, dispatch),
+        }
+    };
 
-fn telemetry_output_destination_for_command(
-    cli: &Cli,
-    command: Option<&Command>,
-    output: plow_config::OutputFormat,
-) -> telemetry::OutputDestination {
-    if matches!(command, Some(Command::Ci { .. }))
-        || matches!(
-            output,
-            plow_config::OutputFormat::PrCommentGithub
-                | plow_config::OutputFormat::PrCommentGitlab
-                | plow_config::OutputFormat::ReviewGithub
-                | plow_config::OutputFormat::CodeClimate
-        )
+    if let Some(path) = cli.output_file.as_deref()
+        && let Err(code) = finalize_report_file(path, quiet, output)
     {
-        return telemetry::OutputDestination::CiComment;
+        return Err(code);
     }
-    if cli.output_file.is_some() || cli.sarif_file.is_some() {
-        return telemetry::OutputDestination::File;
-    }
-    telemetry::OutputDestination::Stdout
-}
-
-fn telemetry_analysis_mode_for_command(command: Option<&Command>) -> telemetry::AnalysisMode {
-    match command {
-        Some(Command::Security { .. }) => telemetry::AnalysisMode::Security,
-        Some(Command::Fix { .. }) => telemetry::AnalysisMode::Fix,
-        Some(Command::Health {
-            runtime_coverage: Some(_),
-            ..
-        })
-        | Some(Command::Audit {
-            runtime_coverage: Some(_),
-            ..
-        })
-        | Some(Command::Coverage { .. }) => telemetry::AnalysisMode::ProductionCoverage,
-        Some(Command::Health {
-            coverage: Some(_), ..
-        })
-        | Some(Command::Audit {
-            coverage: Some(_), ..
-        }) => telemetry::AnalysisMode::RuntimeCoverage,
-        None
-        | Some(
-            Command::Check { .. }
-            | Command::Dupes { .. }
-            | Command::Health { .. }
-            | Command::Audit { .. }
-            | Command::Flags { .. }
-            | Command::Watch { .. },
-        ) => telemetry::AnalysisMode::Static,
-        _ => telemetry::AnalysisMode::Unknown,
-    }
-}
-
-fn handle_cli_parse_error(err: &clap::Error) -> ExitCode {
-    if err.kind() == clap::error::ErrorKind::DisplayHelp
-        && args_request_security_help(std::env::args_os().skip(1))
-    {
-        print!("{}", render_security_help());
-        return ExitCode::SUCCESS;
-    }
-
-    let exit_code = err.exit_code();
-    let _ = err.print();
-    ExitCode::from(u8::try_from(exit_code).unwrap_or(2))
-}
-
-fn args_request_security_help<I, S>(args: I) -> bool
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
-    let args: Vec<String> = args
-        .into_iter()
-        .map(|arg| arg.as_ref().to_string_lossy().into_owned())
-        .collect();
-
-    if args.first().is_some_and(|arg| arg == "help") {
-        return args.get(1).is_some_and(|arg| arg == "security");
-    }
-
-    let mut saw_security = false;
-    for arg in args {
-        if arg == "security" {
-            saw_security = true;
-            continue;
-        }
-        if saw_security && matches!(arg.as_str(), "--help" | "-h") {
-            return true;
-        }
-    }
-    false
-}
-
-fn render_security_help() -> String {
-    let mut root = Cli::command().mut_args(|arg| {
-        if arg.get_long().is_some_and(security_unsupported_global_long) {
-            arg.hide(true)
-        } else {
-            arg
-        }
-    });
-    match root.try_get_matches_from_mut(["plow", "security", "--help"]) {
-        Ok(_) => String::new(),
-        Err(err) => err.to_string(),
-    }
-}
-
-fn security_unsupported_global_long(long: &str) -> bool {
-    SECURITY_UNSUPPORTED_GLOBAL_LONGS.contains(&long)
-}
-
-fn cli_has_bare_coverage_input(cli: &Cli) -> bool {
-    cli.coverage.is_some() || cli.coverage_root.is_some()
-}
-
-fn bare_coverage_subcommand_error_message() -> &'static str {
-    "`--coverage` and `--coverage-root` are bare combined-mode flags. Use `plow health --coverage <coverage-final.json>` for standalone health analysis, or omit the subcommand to run combined mode."
+    Ok(exit_code)
 }
 
 fn run_telemetry_command_if_requested(
@@ -2985,61 +2399,6 @@ fn run_schema_command_if_requested(cli: &Cli) -> Option<ExitCode> {
     }
 }
 
-fn command_rejects_output_gate(command: Option<&Command>) -> bool {
-    matches!(
-        command,
-        Some(
-            Command::Init { .. }
-                | Command::ConfigSchema
-                | Command::PluginSchema
-                | Command::RulePackSchema
-                | Command::Schema
-                | Command::Explain { .. }
-                | Command::CiTemplate { .. }
-                | Command::Config { .. }
-                | Command::Ci { .. }
-                | Command::List { .. }
-                | Command::Flags { .. }
-                | Command::Migrate { .. }
-                | Command::License { .. }
-                | Command::Coverage { .. }
-                | Command::Hooks { .. }
-                | Command::SetupHooks { .. }
-        )
-    )
-}
-
-fn global_filter_error(cli: &Cli) -> Option<&'static str> {
-    if (!cli.only.is_empty() || !cli.skip.is_empty()) && cli.command.is_some() {
-        return Some("--only and --skip can only be used without a subcommand");
-    }
-    if (cli.production_dead_code || cli.production_health || cli.production_dupes)
-        && cli.command.is_some()
-    {
-        return Some(
-            "--production-dead-code, --production-health, and --production-dupes can only be used without a subcommand. For audit, pass them after `audit`",
-        );
-    }
-    if !cli.only.is_empty() && !cli.skip.is_empty() {
-        return Some("--only and --skip are mutually exclusive");
-    }
-    None
-}
-
-fn parse_cli_tolerance(
-    cli: &Cli,
-    output: plow_config::OutputFormat,
-) -> Result<regression::Tolerance, ExitCode> {
-    regression::Tolerance::parse(&cli.tolerance).map_err(|e| {
-        emit_known_failure(
-            &format!("invalid --tolerance: {e}"),
-            2,
-            output,
-            telemetry::FailureReason::Validation,
-        )
-    })
-}
-
 fn regression_save_targets(cli: &Cli) -> (Option<std::path::PathBuf>, bool) {
     let save_file = cli.save_regression_baseline.as_ref().and_then(|opt| {
         opt.as_ref()
@@ -3050,37 +2409,8 @@ fn regression_save_targets(cli: &Cli) -> (Option<std::path::PathBuf>, bool) {
     (save_file, save_to_config)
 }
 
-fn init_cli_diff_filter(
-    cli: &Cli,
-    root: &std::path::Path,
-    output: plow_config::OutputFormat,
-    quiet: bool,
-) -> Result<(), ExitCode> {
-    let diff_source = report::ci::diff_filter::resolve_diff_source(
-        cli.diff_file.as_deref(),
-        cli.diff_stdin,
-        root,
-    )
-    .map_err(|msg| emit_known_failure(&msg, 2, output, telemetry::FailureReason::Diff))?;
-    if diff_source.is_some() && cli.changed_since.is_some() && !quiet {
-        eprintln!(
-            "plow: --diff-file precedes --changed-since for line-level \
-             filtering; --changed-since still scopes file discovery. Drop \
-             one of them to disable this combination."
-        );
-    }
-    let suppress_warnings = quiet
-        && matches!(
-            diff_source,
-            Some(report::ci::diff_filter::DiffSource::EnvVar(_)) | None
-        );
-    let _ = report::ci::diff_filter::init_shared_diff(diff_source.as_ref(), suppress_warnings);
-    Ok(())
-}
-
 fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
     let cli = dispatch.cli;
-    let (output, quiet, fail_on_issues) = dispatch.ci_defaults();
     let (run_check, run_dupes, run_health) = combined::resolve_analyses(&cli.only, &cli.skip);
     let production = match dispatch.production_modes(
         cli.production_dead_code,
@@ -3098,6 +2428,36 @@ fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
         Ok(inputs) => inputs,
         Err(code) => return code,
     };
+    run_bare_combined(
+        dispatch,
+        production,
+        &coverage_inputs,
+        BareAnalyses {
+            run_check,
+            run_dupes,
+            run_health,
+        },
+    )
+}
+
+/// Which analyses the bare `plow` run executes (resolved from `--only`/`--skip`).
+#[derive(Clone, Copy)]
+struct BareAnalyses {
+    run_check: bool,
+    run_dupes: bool,
+    run_health: bool,
+}
+
+/// Build `CombinedOptions` for a bare `plow` invocation and run the combined
+/// pipeline.
+fn run_bare_combined(
+    dispatch: &DispatchContext<'_>,
+    production: ProductionModes,
+    coverage_inputs: &ResolvedHealthCoverageInputs,
+    analyses: BareAnalyses,
+) -> ExitCode {
+    let cli = dispatch.cli;
+    let (output, quiet, fail_on_issues) = dispatch.ci_defaults();
     combined::run_combined(&combined::CombinedOptions {
         root: dispatch.root,
         config_path: &cli.config,
@@ -3122,9 +2482,9 @@ fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
         explain_skipped: cli.explain_skipped,
         performance: cli.performance,
         summary: cli.summary,
-        run_check,
-        run_dupes,
-        run_health,
+        run_check: analyses.run_check,
+        run_dupes: analyses.run_dupes,
+        run_health: analyses.run_health,
         dupes_mode: cli.dupes_mode,
         dupes_threshold: cli.dupes_threshold,
         dupes_min_tokens: cli.dupes_min_tokens,
@@ -3156,99 +2516,19 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
     let output = dispatch.output;
     let quiet = dispatch.quiet;
     match command {
-        Command::Check {
-            unused_files,
-            unused_exports,
-            unused_deps,
-            unused_types,
-            private_type_leaks,
-            unused_enum_members,
-            unused_class_members,
-            unused_store_members,
-            unprovided_injects,
-            unrendered_components,
-            unused_component_props,
-            unused_component_emits,
-            unused_server_actions,
-            unresolved_imports,
-            unlisted_deps,
-            duplicate_exports,
-            circular_deps,
-            re_export_cycles,
-            boundary_violations,
-            policy_violations,
-            stale_suppressions,
-            unused_catalog_entries,
-            empty_catalog_groups,
-            unresolved_catalog_references,
-            unused_dependency_overrides,
-            misconfigured_dependency_overrides,
-            include_dupes,
-            trace,
-            trace_file,
-            trace_dependency,
-            top,
-            file,
-        } => dispatch_check(
-            dispatch,
-            &CheckDispatchArgs {
-                filters: IssueFilters {
-                    unused_files,
-                    unused_exports,
-                    unused_deps,
-                    unused_types,
-                    private_type_leaks,
-                    unused_enum_members,
-                    unused_class_members,
-                    unused_store_members,
-                    unprovided_injects,
-                    unrendered_components,
-                    unused_component_props,
-                    unused_component_emits,
-                    unused_server_actions,
-                    unresolved_imports,
-                    unlisted_deps,
-                    duplicate_exports,
-                    circular_deps,
-                    re_export_cycles,
-                    boundary_violations,
-                    policy_violations,
-                    stale_suppressions,
-                    unused_catalog_entries,
-                    empty_catalog_groups,
-                    unresolved_catalog_references,
-                    unused_dependency_overrides,
-                    misconfigured_dependency_overrides,
-                    // No dedicated `--invalid-client-exports` filter flag yet; the
-                    // field exists so an unrelated active filter clears this rule
-                    // for parity. The rule still runs and reports by default.
-                    invalid_client_exports: false,
-                    // No dedicated `--mixed-client-server-barrels` filter flag yet;
-                    // the field exists for the same parity reason. The rule still
-                    // runs and reports by default.
-                    mixed_client_server_barrels: false,
-                    // No dedicated `--misplaced-directives` filter flag yet; the
-                    // field exists for the same parity reason. The rule still runs
-                    // and reports by default.
-                    misplaced_directives: false,
-                    // No dedicated `--route-collisions` / `--dynamic-segment-name
-                    // -conflicts` filter flags yet; the fields exist for the same
-                    // parity reason. The rules still run and report by default.
-                    route_collisions: false,
-                    dynamic_segment_name_conflicts: false,
-                },
-                trace_opts: TraceOptions {
-                    trace_export: trace,
-                    trace_file,
-                    trace_dependency,
-                    performance: cli.performance,
-                },
-                include_dupes,
-                top,
-                file,
-            },
-        ),
+        check @ Command::Check { .. } => dispatch_check_command(check, dispatch),
         Command::Watch { no_clear } => dispatch_watch(dispatch, no_clear),
+        Command::Inspect {
+            file,
+            symbol,
+            symbol_chain,
+        } => dispatch_inspect_command(dispatch, file, symbol, symbol_chain),
+        Command::Trace {
+            symbol,
+            callers,
+            callees,
+            depth,
+        } => dispatch_trace_command(dispatch, symbol, callers, callees, depth),
         fix @ Command::Fix { .. } => dispatch_fix_command(&fix, dispatch),
         init @ Command::Init { .. } => dispatch_init_command(init, root, quiet),
         Command::Hooks { subcommand } => run_hooks_command(root, subcommand, output),
@@ -3266,12 +2546,21 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         Command::Flags { top } => dispatch_flags_command(dispatch, top),
         Command::Explain { issue_type } => explain::run_explain(&issue_type.join(" "), output),
         audit @ Command::Audit { .. } => dispatch_audit_command(audit, dispatch),
+        Command::DecisionSurface { max_decisions } => {
+            dispatch_decision_surface(dispatch, max_decisions)
+        }
         Command::Impact {
             subcommand,
             all,
             sort,
             limit,
-        } => dispatch_impact(root, quiet, output, subcommand, all, sort, limit),
+        } => dispatch_impact(
+            root,
+            quiet,
+            output,
+            subcommand,
+            ImpactCrossRepoOpts { all, sort, limit },
+        ),
         security @ Command::Security { .. } => dispatch_security_command(security, dispatch),
         Command::Schema => unreachable!("handled above"),
         migrate @ Command::Migrate { .. } => dispatch_migrate_command(migrate, root),
@@ -3284,8 +2573,216 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
     }
 }
 
+/// Destructure the `Command::Check` arm and forward to `dispatch_check`.
+fn dispatch_check_command(command: Command, dispatch: &DispatchContext<'_>) -> ExitCode {
+    let filters = check_issue_filters(&command);
+    let Command::Check {
+        include_dupes,
+        trace,
+        trace_file,
+        trace_dependency,
+        impact_closure,
+        top,
+        file,
+        ..
+    } = command
+    else {
+        unreachable!("check dispatcher only handles check commands");
+    };
+
+    dispatch_check(
+        dispatch,
+        &CheckDispatchArgs {
+            filters,
+            trace_opts: TraceOptions {
+                trace_export: trace,
+                trace_file,
+                trace_dependency,
+                impact_closure,
+                performance: dispatch.cli.performance,
+            },
+            include_dupes,
+            top,
+            file,
+        },
+    )
+}
+
+/// Map the `Command::Check` filter flags onto `IssueFilters`. Reads the flags by
+/// reference (all `Copy` bools) so the caller can still move the non-filter
+/// fields out of the same `Command` value afterwards. Split into two halves to
+/// keep each builder within the unit-size limit.
+fn check_issue_filters(command: &Command) -> IssueFilters {
+    check_issue_filters_framework(command, &check_issue_filters_core(command))
+}
+
+/// First half of the `IssueFilters` mapping: core/general filter flags over a
+/// `Default` base. The framework/catalog half layers on top via struct update.
+fn check_issue_filters_core(command: &Command) -> IssueFilters {
+    let Command::Check {
+        unused_files,
+        unused_exports,
+        unused_deps,
+        unused_types,
+        private_type_leaks,
+        unused_enum_members,
+        unused_class_members,
+        unresolved_imports,
+        unlisted_deps,
+        duplicate_exports,
+        circular_deps,
+        re_export_cycles,
+        boundary_violations,
+        policy_violations,
+        stale_suppressions,
+        ..
+    } = command
+    else {
+        unreachable!("check filter builder only handles check commands");
+    };
+
+    IssueFilters {
+        unused_files: *unused_files,
+        unused_exports: *unused_exports,
+        unused_deps: *unused_deps,
+        unused_types: *unused_types,
+        private_type_leaks: *private_type_leaks,
+        unused_enum_members: *unused_enum_members,
+        unused_class_members: *unused_class_members,
+        unresolved_imports: *unresolved_imports,
+        unlisted_deps: *unlisted_deps,
+        duplicate_exports: *duplicate_exports,
+        circular_deps: *circular_deps,
+        re_export_cycles: *re_export_cycles,
+        boundary_violations: *boundary_violations,
+        policy_violations: *policy_violations,
+        stale_suppressions: *stale_suppressions,
+        // The framework/component, catalog, dependency-override, and the
+        // flag-less parity fields are layered on by `check_issue_filters_framework`
+        // (parity fields default to false there).
+        ..IssueFilters::default()
+    }
+}
+
+/// Second half of the `IssueFilters` mapping: framework/component, store, svelte,
+/// catalog, and dependency-override flags, layered onto the core `base`.
+fn check_issue_filters_framework(command: &Command, base: &IssueFilters) -> IssueFilters {
+    let Command::Check {
+        unused_store_members,
+        unprovided_injects,
+        unrendered_components,
+        unused_component_props,
+        unused_component_emits,
+        unused_component_inputs,
+        unused_component_outputs,
+        unused_svelte_events,
+        unused_server_actions,
+        unused_load_data_keys,
+        unused_catalog_entries,
+        empty_catalog_groups,
+        unresolved_catalog_references,
+        unused_dependency_overrides,
+        misconfigured_dependency_overrides,
+        ..
+    } = command
+    else {
+        unreachable!("check filter builder only handles check commands");
+    };
+
+    IssueFilters {
+        unused_store_members: *unused_store_members,
+        unprovided_injects: *unprovided_injects,
+        unrendered_components: *unrendered_components,
+        unused_component_props: *unused_component_props,
+        unused_component_emits: *unused_component_emits,
+        unused_component_inputs: *unused_component_inputs,
+        unused_component_outputs: *unused_component_outputs,
+        unused_svelte_events: *unused_svelte_events,
+        unused_server_actions: *unused_server_actions,
+        unused_load_data_keys: *unused_load_data_keys,
+        unused_catalog_entries: *unused_catalog_entries,
+        empty_catalog_groups: *empty_catalog_groups,
+        unresolved_catalog_references: *unresolved_catalog_references,
+        unused_dependency_overrides: *unused_dependency_overrides,
+        misconfigured_dependency_overrides: *misconfigured_dependency_overrides,
+        ..base.clone()
+    }
+}
+
+fn dispatch_inspect_command(
+    dispatch: &DispatchContext<'_>,
+    file: Option<String>,
+    symbol: Option<String>,
+    symbol_chain: bool,
+) -> ExitCode {
+    let target = match (file, symbol) {
+        (Some(file), None) => inspect::InspectTarget::File { file },
+        (None, Some(symbol)) => match symbol.rsplit_once(':') {
+            Some((file, export_name))
+                if !file.trim().is_empty() && !export_name.trim().is_empty() =>
+            {
+                inspect::InspectTarget::Symbol {
+                    file: file.to_string(),
+                    export_name: export_name.to_string(),
+                }
+            }
+            _ => {
+                return emit_error(
+                    "--symbol must be formatted as FILE:EXPORT",
+                    2,
+                    dispatch.output,
+                );
+            }
+        },
+        _ => {
+            return emit_error(
+                "inspect requires exactly one of --file or --symbol",
+                2,
+                dispatch.output,
+            );
+        }
+    };
+
+    inspect::run_inspect(&inspect::InspectOptions {
+        root: dispatch.root,
+        config_path: dispatch.cli.config.as_ref(),
+        output: dispatch.output,
+        no_cache: dispatch.cli.no_cache,
+        no_production: dispatch.cli.no_production,
+        max_file_size: dispatch.cli.max_file_size,
+        threads: dispatch.threads,
+        quiet: dispatch.quiet,
+        production: dispatch.cli.production,
+        workspace: dispatch.cli.workspace.as_ref(),
+        target,
+        symbol_chain,
+    })
+}
+
+fn dispatch_trace_command(
+    dispatch: &DispatchContext<'_>,
+    symbol: String,
+    callers: bool,
+    callees: bool,
+    depth: Option<u32>,
+) -> ExitCode {
+    trace_chain::run_trace(&trace_chain::TraceChainOptions {
+        root: dispatch.root,
+        config_path: &dispatch.cli.config,
+        output: dispatch.output,
+        no_cache: dispatch.cli.no_cache,
+        threads: dispatch.threads,
+        quiet: dispatch.quiet,
+        target: symbol,
+        callers,
+        callees,
+        depth: depth.unwrap_or(plow_types::trace_chain::DEFAULT_TRACE_DEPTH),
+    })
+}
+
 fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -> ExitCode {
     let Command::Security {
+        subcommand,
         runtime_coverage,
         min_invocations_hot,
         file,
@@ -3296,16 +2793,66 @@ fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -
         unreachable!("security dispatcher only handles security commands");
     };
 
+    let gate = gate.map(security::SecurityGateArg::into_mode);
     let cli = dispatch.cli;
-    let root = dispatch.root;
-    let threads = dispatch.threads;
+    let (output, _quiet, fail_on_issues) = dispatch.ci_defaults();
+    let derived_flags = SecurityDerivedFlagState {
+        output,
+        ci: cli.ci,
+        fail_on_issues,
+        sarif_file: cli.sarif_file.as_deref(),
+        summary: cli.summary,
+        explain: cli.explain,
+        runtime_coverage: runtime_coverage.as_deref(),
+        min_invocations_hot,
+        file: file.as_slice(),
+        gate,
+        surface,
+    };
+    if let Some(code) = try_run_security_survivors(subcommand.as_ref(), &derived_flags) {
+        return code;
+    }
+
+    let scoped_files = scoped_security_files(&file, subcommand.as_ref());
+    run_security_blind_spots_or_default(
+        dispatch,
+        &SecurityRunInputs {
+            scoped_files: &scoped_files,
+            subcommand: &subcommand,
+            runtime_coverage: runtime_coverage.as_deref(),
+            min_invocations_hot,
+            gate,
+            surface,
+        },
+        &derived_flags,
+    )
+}
+
+/// Inputs threaded from the security dispatcher into the run step. Borrows the
+/// scoped file list and subcommand so they outlive the `SecurityOptions`.
+struct SecurityRunInputs<'a> {
+    scoped_files: &'a [PathBuf],
+    subcommand: &'a Option<SecuritySubcommand>,
+    runtime_coverage: Option<&'a Path>,
+    min_invocations_hot: u64,
+    gate: Option<security::SecurityGateMode>,
+    surface: bool,
+}
+
+/// Build `SecurityOptions` and run either the blind-spots or default analysis.
+fn run_security_blind_spots_or_default(
+    dispatch: &DispatchContext<'_>,
+    inputs: &SecurityRunInputs<'_>,
+    derived_flags: &SecurityDerivedFlagState<'_>,
+) -> ExitCode {
+    let cli = dispatch.cli;
     let (output, quiet, fail_on_issues) = dispatch.ci_defaults();
-    security::run(&security::SecurityOptions {
-        root,
+    let opts = security::SecurityOptions {
+        root: dispatch.root,
         config_path: &cli.config,
         output,
         no_cache: cli.no_cache,
-        threads,
+        threads: dispatch.threads,
         quiet,
         fail_on_issues,
         sarif_file: cli.sarif_file.as_deref(),
@@ -3314,13 +2861,140 @@ fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -
         use_shared_diff_index: true,
         workspace: cli.workspace.as_deref(),
         changed_workspaces: cli.changed_workspaces.as_deref(),
-        file: file.as_slice(),
-        surface,
-        gate,
-        runtime_coverage: runtime_coverage.as_deref(),
-        min_invocations_hot,
+        file: inputs.scoped_files,
+        surface: inputs.surface,
+        gate: inputs.gate,
+        runtime_coverage: inputs.runtime_coverage,
+        min_invocations_hot: inputs.min_invocations_hot,
         explain: cli.explain,
-    })
+    };
+    if matches!(
+        inputs.subcommand,
+        Some(SecuritySubcommand::BlindSpots { .. })
+    ) {
+        if let Some(code) = validate_security_blind_spots_flags(derived_flags) {
+            return code;
+        }
+        security::run_blind_spots(&opts)
+    } else {
+        security::run(&opts)
+    }
+}
+
+/// Handle `plow security survivors` as an early return. Returns `Some(code)`
+/// when the subcommand is `survivors` (validated then run); `None` otherwise.
+fn try_run_security_survivors(
+    subcommand: Option<&SecuritySubcommand>,
+    flags: &SecurityDerivedFlagState<'_>,
+) -> Option<ExitCode> {
+    let Some(SecuritySubcommand::Survivors {
+        candidates,
+        verdicts,
+        require_verdict_for_each_candidate,
+    }) = subcommand
+    else {
+        return None;
+    };
+    if let Some(code) = validate_security_survivors_flags(flags) {
+        return Some(code);
+    }
+    Some(security::run_survivors(
+        &security::SecuritySurvivorsOptions {
+            output: flags.output,
+            candidates,
+            verdicts,
+            require_verdict_for_each_candidate: *require_verdict_for_each_candidate,
+        },
+    ))
+}
+
+/// Build the scoped file list, folding in `blind-spots` extra `--file` values.
+fn scoped_security_files(
+    file: &[PathBuf],
+    subcommand: Option<&SecuritySubcommand>,
+) -> Vec<PathBuf> {
+    let mut scoped_files = file.to_vec();
+    if let Some(SecuritySubcommand::BlindSpots {
+        file: blind_spot_files,
+    }) = subcommand
+    {
+        scoped_files.extend(blind_spot_files.iter().cloned());
+    }
+    scoped_files
+}
+
+struct SecurityDerivedFlagState<'a> {
+    output: plow_config::OutputFormat,
+    ci: bool,
+    fail_on_issues: bool,
+    sarif_file: Option<&'a Path>,
+    summary: bool,
+    explain: bool,
+    runtime_coverage: Option<&'a Path>,
+    min_invocations_hot: u64,
+    file: &'a [PathBuf],
+    gate: Option<security::SecurityGateMode>,
+    surface: bool,
+}
+
+fn validate_security_survivors_flags(flags: &SecurityDerivedFlagState<'_>) -> Option<ExitCode> {
+    let flag = if flags.ci {
+        Some("--ci")
+    } else if flags.fail_on_issues {
+        Some("--fail-on-issues")
+    } else if flags.sarif_file.is_some() {
+        Some("--sarif-file")
+    } else if flags.summary {
+        Some("--summary")
+    } else if flags.explain {
+        Some("--explain")
+    } else if flags.runtime_coverage.is_some() {
+        Some("--runtime-coverage")
+    } else if flags.min_invocations_hot != DEFAULT_MIN_INVOCATIONS_HOT {
+        Some("--min-invocations-hot")
+    } else if !flags.file.is_empty() {
+        Some("--file")
+    } else if flags.gate.is_some() {
+        Some("--gate")
+    } else if flags.surface {
+        Some("--surface")
+    } else {
+        None
+    }?;
+    Some(emit_error(
+        &format!("{flag} is not valid with `plow security survivors`."),
+        2,
+        flags.output,
+    ))
+}
+
+fn validate_security_blind_spots_flags(flags: &SecurityDerivedFlagState<'_>) -> Option<ExitCode> {
+    let flag = if flags.ci {
+        Some("--ci")
+    } else if flags.fail_on_issues {
+        Some("--fail-on-issues")
+    } else if flags.sarif_file.is_some() {
+        Some("--sarif-file")
+    } else if flags.summary {
+        Some("--summary")
+    } else if flags.explain {
+        Some("--explain")
+    } else if flags.runtime_coverage.is_some() {
+        Some("--runtime-coverage")
+    } else if flags.min_invocations_hot != DEFAULT_MIN_INVOCATIONS_HOT {
+        Some("--min-invocations-hot")
+    } else if flags.gate.is_some() {
+        Some("--gate")
+    } else if flags.surface {
+        Some("--surface")
+    } else {
+        None
+    }?;
+    Some(emit_error(
+        &format!("{flag} is not valid with `plow security blind-spots`."),
+        2,
+        flags.output,
+    ))
 }
 
 fn dispatch_dupes_command(command: Command, dispatch: &DispatchContext<'_>) -> ExitCode {
@@ -3485,6 +3159,7 @@ fn dispatch_health_command(command: Command, dispatch: &DispatchContext<'_>) -> 
         ownership,
         ownership_emails,
         targets,
+        css,
         effort,
         score,
         min_score,
@@ -3507,39 +3182,38 @@ fn dispatch_health_command(command: Command, dispatch: &DispatchContext<'_>) -> 
 
     let ownership = ownership || ownership_emails.is_some();
     let hotspots = hotspots || ownership;
-    dispatch_health(
-        dispatch,
-        HealthDispatchArgs {
-            max_cyclomatic,
-            max_cognitive,
-            max_crap,
-            top,
-            sort,
-            complexity,
-            complexity_breakdown,
-            file_scores,
-            coverage_gaps,
-            hotspots,
-            ownership,
-            ownership_emails: ownership_emails.map(EmailModeArg::to_config),
-            targets,
-            effort,
-            score,
-            min_score,
-            min_severity,
-            report_only,
-            since: since.as_deref(),
-            min_commits,
-            save_snapshot: save_snapshot.as_ref(),
-            trend,
-            coverage: coverage.as_deref(),
-            coverage_root: coverage_root.as_deref(),
-            runtime_coverage: runtime_coverage.as_deref(),
-            min_invocations_hot,
-            min_observation_volume,
-            low_traffic_threshold,
-        },
-    )
+    let args = HealthDispatchArgs {
+        max_cyclomatic,
+        max_cognitive,
+        max_crap,
+        top,
+        sort,
+        complexity,
+        complexity_breakdown,
+        file_scores,
+        coverage_gaps,
+        hotspots,
+        ownership,
+        ownership_emails: ownership_emails.map(EmailModeArg::to_config),
+        targets,
+        css,
+        effort,
+        score,
+        min_score,
+        min_severity: min_severity.map(HealthSeverityCli::to_health_severity),
+        report_only,
+        since: since.as_deref(),
+        min_commits,
+        save_snapshot: save_snapshot.as_ref(),
+        trend,
+        coverage: coverage.as_deref(),
+        coverage_root: coverage_root.as_deref(),
+        runtime_coverage: runtime_coverage.as_deref(),
+        min_invocations_hot,
+        min_observation_volume,
+        low_traffic_threshold,
+    };
+    dispatch_health(dispatch, &args)
 }
 
 fn dispatch_setup_hooks_command(command: &Command, dispatch: &DispatchContext<'_>) -> ExitCode {
@@ -3581,10 +3255,22 @@ fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> E
         runtime_coverage,
         min_invocations_hot,
         gate_marker,
+        brief,
+        max_decisions,
+        walkthrough_guide,
+        walkthrough_file,
+        walkthrough,
+        mark_viewed,
+        show_cleared,
+        show_deprioritized,
     } = command
     else {
         unreachable!("audit dispatcher only handles audit commands");
     };
+
+    // The walkthrough flags imply the brief path (the guide digest + the
+    // graph-snapshot pin are brief-path data).
+    let brief = brief || walkthrough_guide || walkthrough || walkthrough_file.is_some();
 
     dispatch_audit(
         dispatch,
@@ -3602,6 +3288,14 @@ fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> E
             runtime_coverage,
             min_invocations_hot,
             gate_marker,
+            brief,
+            max_decisions,
+            walkthrough_guide,
+            walkthrough_file,
+            walkthrough,
+            mark_viewed,
+            show_cleared,
+            show_deprioritized,
         },
     )
 }
@@ -3630,339 +3324,6 @@ fn dispatch_flags_command(dispatch: &DispatchContext<'_>, top: Option<usize>) ->
         explain: cli.explain,
         top,
     })
-}
-
-fn dispatch_impact(
-    root: &std::path::Path,
-    quiet: bool,
-    output: plow_config::OutputFormat,
-    subcommand: Option<ImpactCli>,
-    all: bool,
-    sort: ImpactSortCli,
-    limit: Option<usize>,
-) -> ExitCode {
-    if all {
-        if subcommand.is_some() {
-            return emit_known_failure(
-                "`plow impact --all` is a read-only cross-repo view and cannot be combined \
-                 with a subcommand (enable/disable/default/reset)",
-                2,
-                output,
-                telemetry::FailureReason::Validation,
-            );
-        }
-        return render_impact_all(quiet, output, sort, limit);
-    }
-    match subcommand {
-        Some(ImpactCli::Enable) => {
-            let newly = impact::enable(root);
-            if !quiet {
-                if newly {
-                    println!(
-                        "Plow Impact enabled for this project. Each `plow audit` / pre-commit \
-                         gate run is recorded in your user config dir (never written into the \
-                         repo, never uploaded)."
-                    );
-                    println!(
-                        "Tip: run `plow init --hooks` (or add `--gate-marker pre-commit` to \
-                         your existing hook's `plow audit` line) so blocked-then-fixed \
-                         commits are recorded as contained."
-                    );
-                } else {
-                    println!("Plow Impact is already enabled.");
-                }
-            }
-            ExitCode::SUCCESS
-        }
-        Some(ImpactCli::Disable) => {
-            let was_enabled = impact::disable(root);
-            if !quiet {
-                println!(
-                    "{}",
-                    if was_enabled {
-                        "Plow Impact disabled. Existing history is retained."
-                    } else {
-                        "Plow Impact was already disabled."
-                    }
-                );
-            }
-            ExitCode::SUCCESS
-        }
-        Some(ImpactCli::Default { state }) => {
-            let on = matches!(state, ToggleState::On);
-            let changed = impact::set_global_default(on);
-            if !quiet {
-                let verb = if on { "on" } else { "off" };
-                let body = if on {
-                    "New projects now record Impact by default. A per-project `plow impact \
-                     disable` still opts that repo out."
-                } else {
-                    "New projects no longer record by default; run `plow impact enable` per \
-                     project to opt in."
-                };
-                if changed {
-                    println!("Plow Impact default set to {verb}. {body}");
-                } else {
-                    println!("Plow Impact default was already {verb}.");
-                }
-            }
-            ExitCode::SUCCESS
-        }
-        Some(ImpactCli::Reset { all }) => {
-            if all {
-                let removed = impact::reset_all();
-                if !quiet {
-                    println!(
-                        "{}",
-                        if removed {
-                            "Removed all Plow Impact history."
-                        } else {
-                            "No Plow Impact history to remove."
-                        }
-                    );
-                }
-            } else {
-                let removed = impact::reset(root);
-                if !quiet {
-                    println!(
-                        "{}",
-                        if removed {
-                            "Removed this project's Plow Impact history."
-                        } else {
-                            "No Plow Impact history for this project."
-                        }
-                    );
-                }
-            }
-            ExitCode::SUCCESS
-        }
-        Some(ImpactCli::Status) | None => render_impact_status(root, quiet, output),
-    }
-}
-
-fn render_impact_status(
-    root: &std::path::Path,
-    quiet: bool,
-    output: plow_config::OutputFormat,
-) -> ExitCode {
-    let store = impact::load(root);
-    let report = impact::build_report(&store);
-    let is_human = matches!(output, plow_config::OutputFormat::Human);
-    let rendered = match output {
-        plow_config::OutputFormat::Json => impact::render_json(&report),
-        plow_config::OutputFormat::Markdown => impact::render_markdown(&report),
-        plow_config::OutputFormat::Human => impact::render_human(&report),
-        plow_config::OutputFormat::Sarif
-        | plow_config::OutputFormat::Compact
-        | plow_config::OutputFormat::CodeClimate
-        | plow_config::OutputFormat::PrCommentGithub
-        | plow_config::OutputFormat::PrCommentGitlab
-        | plow_config::OutputFormat::ReviewGithub
-        | plow_config::OutputFormat::ReviewGitlab
-        | plow_config::OutputFormat::Badge => {
-            return emit_known_failure(
-                "impact supports human, json, and markdown output",
-                2,
-                output,
-                telemetry::FailureReason::UnsupportedFormat,
-            );
-        }
-    };
-    println!("{rendered}");
-    // Human-only footer so a user can find / inspect / reset the store and see
-    // which key this project resolved to (the JSON shape stays clean and never
-    // leaks the absolute user-config path).
-    if is_human && !quiet {
-        println!("  Store key: {}", impact::resolved_project_key(root));
-        match impact::resolved_store_path(root) {
-            Some(path) => println!("  Store file: {}", path.display()),
-            None => println!("  Store file: (no user config dir resolved; not persisted)"),
-        }
-    }
-    ExitCode::SUCCESS
-}
-
-/// Render the cross-repo `plow impact --all` roll-up. Reads the user config
-/// dir; never reads `--root`. Human output adds ONE store-dir discoverability
-/// line gated on `is_human && !quiet`; JSON/markdown stay path-free.
-fn render_impact_all(
-    quiet: bool,
-    output: plow_config::OutputFormat,
-    sort: ImpactSortCli,
-    limit: Option<usize>,
-) -> ExitCode {
-    let report = impact::aggregate(sort.to_impact());
-    let is_human = matches!(output, plow_config::OutputFormat::Human);
-    let rendered = match output {
-        plow_config::OutputFormat::Json => impact::render_cross_repo_json(&report),
-        plow_config::OutputFormat::Markdown => impact::render_cross_repo_markdown(&report),
-        plow_config::OutputFormat::Human => impact::render_cross_repo_human(&report, limit),
-        plow_config::OutputFormat::Sarif
-        | plow_config::OutputFormat::Compact
-        | plow_config::OutputFormat::CodeClimate
-        | plow_config::OutputFormat::PrCommentGithub
-        | plow_config::OutputFormat::PrCommentGitlab
-        | plow_config::OutputFormat::ReviewGithub
-        | plow_config::OutputFormat::ReviewGitlab
-        | plow_config::OutputFormat::Badge => {
-            return emit_known_failure(
-                "impact --all supports human, json, and markdown output",
-                2,
-                output,
-                telemetry::FailureReason::UnsupportedFormat,
-            );
-        }
-    };
-    println!("{rendered}");
-    if is_human
-        && !quiet
-        && let Some(dir) = impact::store_dir()
-    {
-        println!("  Stores: {}", dir.display());
-    }
-    ExitCode::SUCCESS
-}
-
-fn telemetry_workflow_for_command(
-    command: Option<&Command>,
-    output: plow_config::OutputFormat,
-) -> telemetry::Workflow {
-    match command {
-        None | Some(Command::Flags { .. } | Command::Watch { .. }) => {
-            telemetry::Workflow::CodeQualityReview
-        }
-        Some(Command::Check { .. }) => telemetry::Workflow::DeadCode,
-        Some(Command::Dupes { .. }) => telemetry::Workflow::Dupes,
-        Some(Command::Health { .. }) => telemetry::Workflow::Health,
-        Some(Command::Audit { .. }) => telemetry::Workflow::Audit,
-        Some(Command::Ci { .. }) => match output {
-            plow_config::OutputFormat::ReviewGitlab
-            | plow_config::OutputFormat::PrCommentGitlab
-            | plow_config::OutputFormat::CodeClimate => telemetry::Workflow::GitlabCi,
-            _ => telemetry::Workflow::GithubAction,
-        },
-        Some(Command::Coverage { .. }) => telemetry::Workflow::RuntimeCoverageSetup,
-        Some(Command::Impact { .. }) => telemetry::Workflow::Impact,
-        Some(Command::Security { .. }) => telemetry::Workflow::Security,
-        Some(Command::Fix { .. }) => telemetry::Workflow::Fix,
-        Some(Command::Explain { .. }) => telemetry::Workflow::Explain,
-        Some(Command::List { .. } | Command::Workspaces | Command::Schema) => {
-            telemetry::Workflow::ProjectInventory
-        }
-        Some(Command::License { .. }) => telemetry::Workflow::License,
-        Some(
-            Command::Init { .. }
-            | Command::Hooks { .. }
-            | Command::ConfigSchema
-            | Command::PluginSchema
-            | Command::RulePackSchema
-            | Command::Config { .. }
-            | Command::CiTemplate { .. }
-            | Command::Migrate { .. }
-            | Command::Telemetry { .. }
-            | Command::SetupHooks { .. },
-        ) => telemetry::Workflow::Setup,
-    }
-}
-
-fn run_hooks_command(
-    root: &std::path::Path,
-    subcommand: HooksCli,
-    output: plow_config::OutputFormat,
-) -> ExitCode {
-    match subcommand {
-        HooksCli::Status => setup_hooks::run_hooks_status(root, output),
-        HooksCli::Install {
-            target: HooksTargetArg::Git,
-            branch,
-            agent,
-            dry_run,
-            force,
-            user,
-            gitignore_claude,
-        } => {
-            if agent.is_some() || user || gitignore_claude {
-                return emit_error(
-                    "--agent, --user, and --gitignore-claude are only valid with `plow hooks install --target agent`",
-                    2,
-                    output,
-                );
-            }
-            init::run_git_hooks_install(&init::GitHooksInstallOptions {
-                root,
-                branch: branch.as_deref(),
-                dry_run,
-                force,
-            })
-        }
-        HooksCli::Install {
-            target: HooksTargetArg::Agent,
-            branch,
-            agent,
-            dry_run,
-            force,
-            user,
-            gitignore_claude,
-        } => {
-            if branch.is_some() {
-                return emit_error(
-                    "--branch is only valid with `plow hooks install --target git`",
-                    2,
-                    output,
-                );
-            }
-            setup_hooks::run_setup_hooks_with_label(
-                &setup_hooks::SetupHooksOptions {
-                    root,
-                    agent,
-                    dry_run,
-                    force,
-                    user,
-                    gitignore_claude,
-                    uninstall: false,
-                },
-                "plow hooks install --target agent",
-            )
-        }
-        HooksCli::Uninstall {
-            target: HooksTargetArg::Git,
-            agent,
-            dry_run,
-            force,
-            user,
-        } => {
-            if agent.is_some() || user {
-                return emit_error(
-                    "--agent and --user are only valid with `plow hooks uninstall --target agent`",
-                    2,
-                    output,
-                );
-            }
-            init::run_git_hooks_uninstall(&init::GitHooksUninstallOptions {
-                root,
-                dry_run,
-                force,
-            })
-        }
-        HooksCli::Uninstall {
-            target: HooksTargetArg::Agent,
-            agent,
-            dry_run,
-            force,
-            user,
-        } => setup_hooks::run_setup_hooks_with_label(
-            &setup_hooks::SetupHooksOptions {
-                root,
-                agent,
-                dry_run,
-                force,
-                user,
-                gitignore_claude: false,
-                uninstall: true,
-            },
-            "plow hooks uninstall --target agent",
-        ),
-    }
 }
 
 fn map_license_subcommand(sub: LicenseCli) -> license::LicenseSubcommand {
@@ -4101,6 +3462,7 @@ fn map_coverage_upload_inventory(sub: &CoverageCli) -> coverage::CoverageSubcomm
         exclude_paths,
         path_prefix,
         dry_run,
+        with_callers,
         ignore_upload_errors,
     } = sub
     else {
@@ -4115,6 +3477,7 @@ fn map_coverage_upload_inventory(sub: &CoverageCli) -> coverage::CoverageSubcomm
         exclude_paths: exclude_paths.clone(),
         path_prefix: path_prefix.clone(),
         dry_run: *dry_run,
+        with_callers: *with_callers,
         ignore_upload_errors: *ignore_upload_errors,
     })
 }
@@ -4400,6 +3763,21 @@ struct AuditDispatchArgs {
     runtime_coverage: Option<PathBuf>,
     min_invocations_hot: u64,
     gate_marker: Option<String>,
+    brief: bool,
+    max_decisions: usize,
+    /// Emit the agent-contract walkthrough guide instead of the brief body.
+    walkthrough_guide: bool,
+    /// Post-validate an agent's judgment JSON from this path against the
+    /// live graph.
+    walkthrough_file: Option<PathBuf>,
+    /// Render the existing walkthrough guide as a staged human/markdown tour.
+    walkthrough: bool,
+    /// Changed files to record as VIEWED before rendering the tour.
+    mark_viewed: Vec<PathBuf>,
+    /// Expand the Cleared panel (de-prioritized + viewed) in the tour.
+    show_cleared: bool,
+    /// Expand the de-prioritized units in the human focus map.
+    show_deprioritized: bool,
 }
 
 struct ResolvedAuditInputs {
@@ -4442,11 +3820,13 @@ fn resolve_audit_inputs(
     let config = load_config(
         root,
         &cli.config,
-        output,
-        cli.no_cache,
-        dispatch.threads,
-        cli.production,
-        dispatch.quiet,
+        LoadConfigArgs {
+            output,
+            no_cache: cli.no_cache,
+            threads: dispatch.threads,
+            production: cli.production,
+            quiet: dispatch.quiet,
+        },
     )?;
     let cache_dir = config.cache_dir.clone();
     let audit_cfg = config.audit;
@@ -4525,9 +3905,91 @@ fn run_resolved_audit(
             include_entry_exports: cli.include_entry_exports,
             runtime_coverage: args.runtime_coverage.as_deref(),
             min_invocations_hot: args.min_invocations_hot,
+            brief: args.brief,
+            max_decisions: args.max_decisions,
+            walkthrough_guide: args.walkthrough_guide,
+            walkthrough: args.walkthrough,
+            mark_viewed: &args.mark_viewed,
+            show_cleared: args.show_cleared,
+            walkthrough_file: args.walkthrough_file.as_deref(),
+            show_deprioritized: args.show_deprioritized,
         },
         args.gate_marker.as_deref(),
     )
+}
+
+/// Dispatch `plow decision-surface`: the separable apex. Reuses the audit
+/// input resolution in brief mode (changed-code scope) with all gating /
+/// coverage / baseline knobs defaulted, then renders ONLY the decision surface.
+fn dispatch_decision_surface(dispatch: &DispatchContext<'_>, max_decisions: usize) -> ExitCode {
+    let cli = dispatch.cli;
+    // A defaulted audit-args bag: the decision surface takes only the global
+    // diff-scope flags (`--base`/`--changed-since`/`--workspace`) plus the cap.
+    let args = AuditDispatchArgs {
+        production_dead_code: false,
+        production_health: false,
+        production_dupes: false,
+        dead_code_baseline: None,
+        health_baseline: None,
+        dupes_baseline: None,
+        max_crap: None,
+        coverage: None,
+        coverage_root: None,
+        gate: None,
+        runtime_coverage: None,
+        min_invocations_hot: 0,
+        gate_marker: None,
+        brief: true,
+        max_decisions,
+        walkthrough_guide: false,
+        walkthrough_file: None,
+        walkthrough: false,
+        mark_viewed: Vec::new(),
+        show_cleared: false,
+        show_deprioritized: false,
+    };
+    let inputs = match resolve_audit_inputs(dispatch, &args) {
+        Ok(inputs) => inputs,
+        Err(code) => return code,
+    };
+    audit::run_decision_surface(&audit::AuditOptions {
+        root: dispatch.root,
+        config_path: &cli.config,
+        cache_dir: &inputs.cache_dir,
+        output: dispatch.output,
+        no_cache: cli.no_cache,
+        threads: dispatch.threads,
+        quiet: dispatch.quiet,
+        changed_since: cli.changed_since.as_deref(),
+        production: cli.production,
+        production_dead_code: Some(inputs.production.dead_code),
+        production_health: Some(inputs.production.health),
+        production_dupes: Some(inputs.production.dupes),
+        workspace: cli.workspace.as_deref(),
+        changed_workspaces: cli.changed_workspaces.as_deref(),
+        explain: cli.explain,
+        explain_skipped: cli.explain_skipped,
+        performance: cli.performance,
+        group_by: cli.group_by,
+        dead_code_baseline: inputs.dead_code_baseline.as_deref(),
+        health_baseline: inputs.health_baseline.as_deref(),
+        dupes_baseline: inputs.dupes_baseline.as_deref(),
+        max_crap: None,
+        coverage: None,
+        coverage_root: None,
+        gate: inputs.audit_cfg.gate,
+        include_entry_exports: cli.include_entry_exports,
+        runtime_coverage: None,
+        min_invocations_hot: 0,
+        brief: true,
+        max_decisions,
+        walkthrough_guide: false,
+        walkthrough: false,
+        mark_viewed: &[],
+        show_cleared: false,
+        walkthrough_file: None,
+        show_deprioritized: false,
+    })
 }
 
 struct HealthDispatchArgs<'a> {
@@ -4544,10 +4006,11 @@ struct HealthDispatchArgs<'a> {
     ownership: bool,
     ownership_emails: Option<plow_config::EmailMode>,
     targets: bool,
+    css: bool,
     effort: Option<EffortFilter>,
     score: bool,
     min_score: Option<f64>,
-    min_severity: Option<health_types::FindingSeverity>,
+    min_severity: Option<plow_output::FindingSeverity>,
     report_only: bool,
     since: Option<&'a str>,
     min_commits: Option<u32>,
@@ -4580,11 +4043,13 @@ fn resolve_health_coverage_inputs(
             load_config(
                 dispatch.root,
                 &dispatch.cli.config,
-                dispatch.output,
-                dispatch.cli.no_cache,
-                dispatch.threads,
-                dispatch.cli.production,
-                dispatch.quiet,
+                LoadConfigArgs {
+                    output: dispatch.output,
+                    no_cache: dispatch.cli.no_cache,
+                    threads: dispatch.threads,
+                    production: dispatch.cli.production,
+                    quiet: dispatch.quiet,
+                },
             )?
             .health,
         )
@@ -4618,97 +4083,144 @@ fn path_from_env(name: &str) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>) -> ExitCode {
-    let cli = dispatch.cli;
-    let root = dispatch.root;
-    let threads = dispatch.threads;
-    let (output, quiet, _fail_on_issues) = dispatch.ci_defaults();
-    let HealthDispatchArgs {
-        max_cyclomatic,
-        max_cognitive,
-        max_crap,
-        top,
-        sort,
-        complexity,
-        complexity_breakdown,
-        file_scores,
-        coverage_gaps,
-        hotspots,
-        ownership,
-        ownership_emails,
-        targets,
-        effort,
-        score,
-        min_score,
-        min_severity,
-        report_only,
-        since,
-        min_commits,
-        save_snapshot,
-        trend,
-        coverage,
-        coverage_root,
-        runtime_coverage,
-        min_invocations_hot,
-        min_observation_volume,
-        low_traffic_threshold,
-    } = args;
+fn validate_health_report_only_gate(
+    report_only: bool,
+    min_score: Option<f64>,
+    min_severity: Option<plow_output::FindingSeverity>,
+    output: plow_config::OutputFormat,
+) -> Result<(), ExitCode> {
     if report_only && (min_score.is_some() || min_severity.is_some()) {
-        return emit_error(
+        return Err(emit_error(
             "--report-only cannot be combined with --min-score or --min-severity. \
              --report-only always exits 0; drop it to gate on score/severity, or \
              drop the gate flags to stay advisory.",
             2,
             output,
-        );
+        ));
     }
-    let targets = targets || effort.is_some();
-    let sections = effective_health_sections(&EffectiveHealthSectionInput {
+
+    Ok(())
+}
+
+fn resolve_runtime_coverage_options(
+    runtime_coverage: Option<&std::path::Path>,
+    min_invocations_hot: u64,
+    min_observation_volume: Option<u32>,
+    low_traffic_threshold: Option<f64>,
+    output: plow_config::OutputFormat,
+) -> Result<Option<plow_engine::RuntimeCoverageOptions>, ExitCode> {
+    let Some(path) = runtime_coverage else {
+        return Ok(None);
+    };
+
+    health::coverage::prepare_options(
+        path,
+        min_invocations_hot,
+        min_observation_volume,
+        low_traffic_threshold,
         output,
-        complexity,
-        file_scores,
-        coverage_gaps,
-        hotspots,
-        targets,
-        score,
-        min_score,
-        save_snapshot,
-        trend,
-    });
-    let runtime_coverage = if let Some(path) = runtime_coverage {
-        match health::coverage::prepare_options(
-            path,
-            min_invocations_hot,
-            min_observation_volume,
-            low_traffic_threshold,
-            output,
-        ) {
-            Ok(options) => Some(options),
-            Err(code) => return code,
-        }
-    } else {
-        None
+    )
+    .map(Some)
+}
+
+fn dispatch_health(dispatch: &DispatchContext<'_>, args: &HealthDispatchArgs<'_>) -> ExitCode {
+    let cli = dispatch.cli;
+    let root = dispatch.root;
+    let (output, _quiet, _fail_on_issues) = dispatch.ci_defaults();
+    if let Err(code) = validate_health_report_only_gate(
+        args.report_only,
+        args.min_score,
+        args.min_severity,
+        output,
+    ) {
+        return code;
+    }
+    let runtime_coverage = match resolve_runtime_coverage_options(
+        args.runtime_coverage,
+        args.min_invocations_hot,
+        args.min_observation_volume,
+        args.low_traffic_threshold,
+        output,
+    ) {
+        Ok(options) => options,
+        Err(code) => return code,
     };
     let production = match resolve_production_modes(cli, root, output, false, false, false) {
         Ok(modes) => modes.for_analysis(plow_config::ProductionAnalysis::Health),
         Err(code) => return code,
     };
-    let coverage_inputs = match resolve_health_coverage_inputs(dispatch, coverage, coverage_root) {
-        Ok(inputs) => inputs,
-        Err(code) => return code,
-    };
+    let coverage_inputs =
+        match resolve_health_coverage_inputs(dispatch, args.coverage, args.coverage_root) {
+            Ok(inputs) => inputs,
+            Err(code) => return code,
+        };
+    let run = plow_engine::derive_health_run_options(plow_engine::HealthRunOptionsInput {
+        output,
+        thresholds: plow_engine::HealthThresholdOverrides {
+            max_cyclomatic: args.max_cyclomatic,
+            max_cognitive: args.max_cognitive,
+            max_crap: args.max_crap,
+        },
+        top: args.top,
+        sort: args.sort.clone().into(),
+        complexity: args.complexity,
+        file_scores: args.file_scores,
+        coverage_gaps: args.coverage_gaps,
+        hotspots: args.hotspots,
+        ownership: args.ownership,
+        ownership_emails: args.ownership_emails,
+        targets: args.targets,
+        css: args.css,
+        effort: args.effort.map(EffortFilter::to_estimate),
+        score: args.score,
+        gates: plow_engine::HealthGateOptions {
+            min_score: args.min_score,
+            min_severity: args.min_severity,
+            report_only: args.report_only,
+        },
+        snapshot_requested: args.save_snapshot.is_some(),
+        trend: args.trend,
+        since: args.since,
+        min_commits: args.min_commits,
+        coverage_inputs: plow_engine::HealthCoverageInputs {
+            coverage: coverage_inputs.coverage.as_deref(),
+            coverage_root: coverage_inputs.coverage_root.as_deref(),
+        },
+        runtime_coverage,
+    });
+    run_health_dispatch(dispatch, args, ResolvedHealthDispatch { run, production })
+}
+
+/// Resolved inputs threaded from `dispatch_health` into the `HealthOptions`
+/// builder. Owns the normalized engine run contract and resolved production
+/// mode.
+struct ResolvedHealthDispatch<'a> {
+    run: plow_engine::HealthRunOptions<'a>,
+    production: bool,
+}
+
+/// Build `HealthOptions` from the parsed args plus the resolved dispatch inputs,
+/// then run the health analysis.
+fn run_health_dispatch(
+    dispatch: &DispatchContext<'_>,
+    args: &HealthDispatchArgs<'_>,
+    resolved: ResolvedHealthDispatch<'_>,
+) -> ExitCode {
+    let cli = dispatch.cli;
+    let (output, quiet, _fail_on_issues) = dispatch.ci_defaults();
+    let run = resolved.run;
+    let sections = run.sections;
+    let production = resolved.production;
     health::run_health(&HealthOptions {
-        root,
+        root: dispatch.root,
         config_path: &cli.config,
         output,
         no_cache: cli.no_cache,
-        threads,
+        threads: dispatch.threads,
         quiet,
-        max_cyclomatic,
-        max_cognitive,
-        max_crap,
-        top,
-        sort,
+        thresholds: run.thresholds,
+        top: run.top,
+        sort: run.sort,
         production,
         production_override: Some(production),
         changed_since: cli.changed_since.as_deref(),
@@ -4719,103 +4231,35 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>)
         baseline: cli.baseline.as_deref(),
         save_baseline: cli.save_baseline.as_deref(),
         complexity: sections.complexity,
-        complexity_breakdown,
         file_scores: sections.file_scores,
         coverage_gaps: sections.coverage_gaps,
         config_activates_coverage_gaps: !sections.any_section,
         hotspots: sections.hotspots,
-        ownership: ownership && sections.hotspots,
-        ownership_emails,
+        ownership: run.ownership,
+        ownership_emails: run.ownership_emails,
         targets: sections.targets,
+        css: sections.css,
         force_full: sections.force_full,
         score_only_output: sections.score_only_output,
         enforce_coverage_gap_gate: true,
-        effort: effort.map(EffortFilter::to_estimate),
+        effort: run.effort,
         score: sections.score,
-        min_score,
-        min_severity,
-        report_only,
-        since,
-        min_commits,
+        gates: run.gates,
+        since: run.since,
+        min_commits: run.min_commits,
         explain: cli.explain,
         summary: cli.summary,
-        save_snapshot: save_snapshot.map(|opt| PathBuf::from(opt.as_deref().unwrap_or_default())),
-        trend,
-        group_by: cli.group_by,
-        coverage: coverage_inputs.coverage.as_deref(),
-        coverage_root: coverage_inputs.coverage_root.as_deref(),
+        save_snapshot: args
+            .save_snapshot
+            .map(|opt| PathBuf::from(opt.as_deref().unwrap_or_default())),
+        trend: args.trend,
+        coverage_inputs: run.coverage_inputs,
         performance: cli.performance,
-        runtime_coverage,
+        runtime_coverage: run.runtime_coverage,
         churn_file: cli.churn_file.as_deref(),
+        complexity_breakdown: args.complexity_breakdown,
+        group_by: cli.group_by.map(Into::into),
     })
-}
-
-struct EffectiveHealthSectionInput<'a> {
-    output: plow_config::OutputFormat,
-    complexity: bool,
-    file_scores: bool,
-    coverage_gaps: bool,
-    hotspots: bool,
-    targets: bool,
-    score: bool,
-    min_score: Option<f64>,
-    save_snapshot: Option<&'a Option<String>>,
-    trend: bool,
-}
-
-struct EffectiveHealthSections {
-    any_section: bool,
-    complexity: bool,
-    file_scores: bool,
-    coverage_gaps: bool,
-    hotspots: bool,
-    targets: bool,
-    score: bool,
-    force_full: bool,
-    score_only_output: bool,
-}
-
-fn effective_health_sections(input: &EffectiveHealthSectionInput<'_>) -> EffectiveHealthSections {
-    let score = input.score
-        || input.min_score.is_some()
-        || input.trend
-        || matches!(input.output, plow_config::OutputFormat::Badge);
-    let snapshot_requested = input.save_snapshot.is_some();
-    let any_section = input.complexity
-        || input.file_scores
-        || input.coverage_gaps
-        || input.hotspots
-        || input.targets
-        || score;
-    let eff_score = if any_section { score } else { true } || snapshot_requested;
-    let force_full = snapshot_requested || eff_score;
-    EffectiveHealthSections {
-        any_section,
-        complexity: if any_section { input.complexity } else { true },
-        file_scores: if any_section { input.file_scores } else { true } || force_full,
-        coverage_gaps: if any_section {
-            input.coverage_gaps
-        } else {
-            false
-        },
-        hotspots: if any_section { input.hotspots } else { true }
-            || snapshot_requested
-            || input.trend,
-        targets: if any_section { input.targets } else { true },
-        score: eff_score,
-        force_full,
-        score_only_output: is_health_score_only_output(input, score),
-    }
-}
-
-fn is_health_score_only_output(input: &EffectiveHealthSectionInput<'_>, score: bool) -> bool {
-    score
-        && !input.complexity
-        && !input.file_scores
-        && !input.coverage_gaps
-        && !input.hotspots
-        && !input.targets
-        && !input.trend
 }
 
 #[cfg(test)]
@@ -5000,7 +4444,7 @@ mod tests {
 
     #[test]
     fn security_help_hides_globals_rejected_by_security_validator() {
-        let help = render_security_help();
+        let help = render_security_help(SecurityHelpTarget::Parent);
 
         for long in SECURITY_UNSUPPORTED_GLOBAL_LONGS {
             assert!(
@@ -5026,7 +4470,6 @@ mod tests {
             "sarif-file",
             "summary",
             "output-file",
-            "legacy-envelope",
             "max-file-size",
             "explain",
             "surface",
@@ -5040,14 +4483,44 @@ mod tests {
 
     #[test]
     fn security_help_detection_covers_subcommand_and_help_alias_forms() {
-        assert!(args_request_security_help(["security", "--help"]));
-        assert!(args_request_security_help(["security", "-h"]));
-        assert!(args_request_security_help([
-            "--format", "json", "security", "--help"
-        ]));
-        assert!(args_request_security_help(["help", "security"]));
-        assert!(!args_request_security_help(["health", "--help"]));
-        assert!(!args_request_security_help(["help", "health"]));
+        assert_eq!(
+            security_help_target(["security", "--help"]),
+            Some(SecurityHelpTarget::Parent)
+        );
+        assert_eq!(
+            security_help_target(["security", "-h"]),
+            Some(SecurityHelpTarget::Parent)
+        );
+        assert_eq!(
+            security_help_target(["--format", "json", "security", "--help"]),
+            Some(SecurityHelpTarget::Parent)
+        );
+        assert_eq!(
+            security_help_target(["help", "security"]),
+            Some(SecurityHelpTarget::Parent)
+        );
+        assert_eq!(
+            security_help_target(["security", "survivors", "--help"]),
+            Some(SecurityHelpTarget::Survivors)
+        );
+        assert_eq!(
+            security_help_target(["security", "survivors", "-h"]),
+            Some(SecurityHelpTarget::Survivors)
+        );
+        assert_eq!(
+            security_help_target(["help", "security", "survivors"]),
+            Some(SecurityHelpTarget::Survivors)
+        );
+        assert_eq!(
+            security_help_target(["security", "blind-spots", "--help"]),
+            Some(SecurityHelpTarget::BlindSpots)
+        );
+        assert_eq!(
+            security_help_target(["help", "security", "blind-spots"]),
+            Some(SecurityHelpTarget::BlindSpots)
+        );
+        assert_eq!(security_help_target(["health", "--help"]), None);
+        assert_eq!(security_help_target(["help", "health"]), None);
     }
 
     #[test]
@@ -5093,12 +4566,11 @@ mod tests {
                         | "workspace"
                         | "changed-workspaces"
                         | "explain"
-                        | "legacy-envelope"
                 )
             })
             .collect();
         let programmatic_flags: std::collections::BTreeSet<String> =
-            plow_cli::programmatic::COMMON_ANALYSIS_OPTION_FLAGS
+            plow_api::COMMON_ANALYSIS_OPTION_FLAGS
                 .iter()
                 .map(|flag| (*flag).to_owned())
                 .collect();
@@ -5174,6 +4646,52 @@ mod tests {
         assert_eq!(code, ExitCode::from(2));
     }
 
+    fn telemetry_run_for_mode(mode: telemetry::AnalysisMode) -> TelemetryRun {
+        TelemetryRun {
+            workflow: telemetry::Workflow::Health,
+            output: plow_config::OutputFormat::Json,
+            quiet: true,
+            start: std::time::Instant::now(),
+            context: telemetry::WorkflowContext {
+                run_scope: telemetry::RunScope::FullProject,
+                config_shape: telemetry::ConfigShape::Default,
+                output_destination: telemetry::OutputDestination::Stdout,
+                analysis_mode: mode,
+            },
+        }
+    }
+
+    #[test]
+    fn fallback_failure_reason_skips_success_and_findings() {
+        let run = telemetry_run_for_mode(telemetry::AnalysisMode::Static);
+
+        assert_eq!(fallback_failure_reason_for(&run, ExitCode::SUCCESS), None);
+        assert_eq!(fallback_failure_reason_for(&run, ExitCode::from(1)), None);
+    }
+
+    #[test]
+    fn fallback_failure_reason_classifies_network_auth_and_analysis() {
+        let static_run = telemetry_run_for_mode(telemetry::AnalysisMode::Static);
+        let cloud_run = telemetry_run_for_mode(telemetry::AnalysisMode::ProductionCoverage);
+
+        assert_eq!(
+            fallback_failure_reason_for(&static_run, ExitCode::from(api::NETWORK_EXIT_CODE)),
+            Some(telemetry::FailureReason::Network),
+        );
+        assert_eq!(
+            fallback_failure_reason_for(&static_run, ExitCode::from(12)),
+            Some(telemetry::FailureReason::Auth),
+        );
+        assert_eq!(
+            fallback_failure_reason_for(&cloud_run, ExitCode::from(3)),
+            Some(telemetry::FailureReason::Auth),
+        );
+        assert_eq!(
+            fallback_failure_reason_for(&static_run, ExitCode::from(2)),
+            Some(telemetry::FailureReason::Analysis),
+        );
+    }
+
     #[test]
     fn bare_coverage_flags_parse_without_subcommand() {
         let cli = Cli::try_parse_from([
@@ -5220,75 +4738,48 @@ mod tests {
     }
 
     #[test]
-    fn legacy_check_alias_detection_ignores_option_values() {
-        assert!(args_use_legacy_check_alias(vec![
-            "plow".to_string(),
-            "check".to_string(),
-            "--summary".to_string(),
-        ]));
-        assert!(!args_use_legacy_check_alias(vec![
-            "plow".to_string(),
-            "--root".to_string(),
-            "check".to_string(),
-            "dead-code".to_string(),
-        ]));
-        assert!(!args_use_legacy_check_alias(vec![
-            "plow".to_string(),
-            "dead-code".to_string(),
-            "--file".to_string(),
-            "check".to_string(),
-        ]));
-    }
-
-    #[test]
     fn format_parsing_covers_all_variants() {
-        let parse = |s: &str| -> Option<Format> {
-            match s.to_lowercase().as_str() {
-                "json" => Some(Format::Json),
-                "human" => Some(Format::Human),
-                "sarif" => Some(Format::Sarif),
-                "compact" => Some(Format::Compact),
-                "markdown" | "md" => Some(Format::Markdown),
-                "codeclimate" | "gitlab-codequality" | "gitlab-code-quality" => {
-                    Some(Format::CodeClimate)
-                }
-                "pr-comment-github" => Some(Format::PrCommentGithub),
-                "pr-comment-gitlab" => Some(Format::PrCommentGitlab),
-                "review-github" => Some(Format::ReviewGithub),
-                "review-gitlab" => Some(Format::ReviewGitlab),
-                "badge" => Some(Format::Badge),
-                _ => None,
-            }
-        };
-        assert!(matches!(parse("json"), Some(Format::Json)));
-        assert!(matches!(parse("JSON"), Some(Format::Json)));
-        assert!(matches!(parse("human"), Some(Format::Human)));
-        assert!(matches!(parse("sarif"), Some(Format::Sarif)));
-        assert!(matches!(parse("compact"), Some(Format::Compact)));
-        assert!(matches!(parse("markdown"), Some(Format::Markdown)));
-        assert!(matches!(parse("md"), Some(Format::Markdown)));
-        assert!(matches!(parse("codeclimate"), Some(Format::CodeClimate)));
+        assert!(matches!(parse_format_arg("json"), Some(Format::Json)));
+        assert!(matches!(parse_format_arg("JSON"), Some(Format::Json)));
+        assert!(matches!(parse_format_arg("human"), Some(Format::Human)));
+        assert!(matches!(parse_format_arg("sarif"), Some(Format::Sarif)));
+        assert!(matches!(parse_format_arg("compact"), Some(Format::Compact)));
         assert!(matches!(
-            parse("gitlab-codequality"),
+            parse_format_arg("markdown"),
+            Some(Format::Markdown)
+        ));
+        assert!(matches!(parse_format_arg("md"), Some(Format::Markdown)));
+        assert!(matches!(
+            parse_format_arg("codeclimate"),
             Some(Format::CodeClimate)
         ));
         assert!(matches!(
-            parse("gitlab-code-quality"),
+            parse_format_arg("gitlab-codequality"),
             Some(Format::CodeClimate)
         ));
         assert!(matches!(
-            parse("pr-comment-github"),
+            parse_format_arg("gitlab-code-quality"),
+            Some(Format::CodeClimate)
+        ));
+        assert!(matches!(
+            parse_format_arg("pr-comment-github"),
             Some(Format::PrCommentGithub)
         ));
         assert!(matches!(
-            parse("pr-comment-gitlab"),
+            parse_format_arg("pr-comment-gitlab"),
             Some(Format::PrCommentGitlab)
         ));
-        assert!(matches!(parse("review-github"), Some(Format::ReviewGithub)));
-        assert!(matches!(parse("review-gitlab"), Some(Format::ReviewGitlab)));
-        assert!(matches!(parse("badge"), Some(Format::Badge)));
-        assert!(parse("xml").is_none());
-        assert!(parse("").is_none());
+        assert!(matches!(
+            parse_format_arg("review-github"),
+            Some(Format::ReviewGithub)
+        ));
+        assert!(matches!(
+            parse_format_arg("review-gitlab"),
+            Some(Format::ReviewGitlab)
+        ));
+        assert!(matches!(parse_format_arg("badge"), Some(Format::Badge)));
+        assert!(parse_format_arg("xml").is_none());
+        assert!(parse_format_arg("").is_none());
     }
 
     #[test]

@@ -313,18 +313,35 @@ impl HiddenDirScope {
         Self { root, dirs }
     }
 
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    #[must_use]
+    pub fn dirs(&self) -> &[String] {
+        &self.dirs
+    }
+
     fn allows(&self, path: &Path, name: &OsStr) -> bool {
         path.starts_with(&self.root) && self.dirs.iter().any(|dir| OsStr::new(dir) == name)
     }
 }
 
 /// Per-thread file collector for the parallel walker.
+///
+/// Source files (by extension) flow to `shared`; when `config_shared` is set,
+/// non-source files admitted by the config-candidate type group flow to it
+/// instead. The two channels are disjoint and the source channel is byte-for-byte
+/// identical to the config-capture-disabled walk.
 struct FileVisitor<'a> {
     root: &'a Path,
     ignore_patterns: &'a globset::GlobSet,
     production_excludes: &'a Option<globset::GlobSet>,
     shared: &'a Mutex<Vec<(std::path::PathBuf, u64)>>,
+    config_shared: Option<&'a Mutex<Vec<std::path::PathBuf>>>,
     local: Vec<(std::path::PathBuf, u64)>,
+    config_local: Vec<std::path::PathBuf>,
 }
 
 impl ignore::ParallelVisitor for FileVisitor<'_> {
@@ -349,8 +366,14 @@ impl ignore::ParallelVisitor for FileVisitor<'_> {
         {
             return ignore::WalkState::Continue;
         }
-        let size_bytes = entry.metadata().map_or(0, |m| m.len());
-        self.local.push((entry.into_path(), size_bytes));
+        if has_source_extension(entry.path()) {
+            let size_bytes = entry.metadata().map_or(0, |m| m.len());
+            self.local.push((entry.into_path(), size_bytes));
+        } else if self.config_shared.is_some() {
+            // A non-source file admitted by the config-candidate type group. No
+            // size metadata is needed; these are pattern-matched, never parsed.
+            self.config_local.push(entry.into_path());
+        }
         ignore::WalkState::Continue
     }
 }
@@ -367,6 +390,14 @@ impl Drop for FileVisitor<'_> {
                 .expect("walk collector lock poisoned")
                 .append(&mut self.local);
         }
+        if let Some(config_shared) = self.config_shared
+            && !self.config_local.is_empty()
+        {
+            config_shared
+                .lock()
+                .expect("walk config collector lock poisoned")
+                .append(&mut self.config_local);
+        }
     }
 }
 
@@ -376,6 +407,7 @@ struct FileVisitorBuilder<'a> {
     ignore_patterns: &'a globset::GlobSet,
     production_excludes: &'a Option<globset::GlobSet>,
     shared: &'a Mutex<Vec<(std::path::PathBuf, u64)>>,
+    config_shared: Option<&'a Mutex<Vec<std::path::PathBuf>>>,
 }
 
 impl<'s> ignore::ParallelVisitorBuilder<'s> for FileVisitorBuilder<'s> {
@@ -385,14 +417,16 @@ impl<'s> ignore::ParallelVisitorBuilder<'s> for FileVisitorBuilder<'s> {
             ignore_patterns: self.ignore_patterns,
             production_excludes: self.production_excludes,
             shared: self.shared,
+            config_shared: self.config_shared,
             local: Vec::new(),
+            config_local: Vec::new(),
         })
     }
 }
 
 pub const SOURCE_EXTENSIONS: &[&str] = &[
     "ts", "tsx", "mts", "cts", "gts", "js", "jsx", "mjs", "cjs", "gjs", "vue", "svelte", "astro",
-    "mdx", "css", "scss", "html", "graphql", "gql",
+    "mdx", "css", "scss", "sass", "less", "html", "graphql", "gql",
 ];
 
 /// Glob patterns for test/dev/story files excluded in production mode.
@@ -470,7 +504,133 @@ pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
     discover_files_with_additional_hidden_dirs(config, &[])
 }
 
+/// The set of config-file basenames (last path component of every built-in
+/// plugin `config_patterns()` entry, brace forms preserved) that the walk should
+/// additionally admit so non-source configs (`tsconfig.json`, `bunfig.toml`,
+/// `.eslintrc.json`, ...) can be captured in one traversal instead of being
+/// re-discovered by a filesystem re-walk in `discover_config_files`.
+///
+/// Derived live from the built-in plugin list, so it can never drift behind a
+/// new plugin's config patterns. Source-extension config basenames
+/// (`vite.config.{ts,js}`) are admitted too, but the walk visitor routes them
+/// back to the source channel by extension, so the config channel only ever
+/// collects genuinely non-source files.
+fn config_candidate_basename_globs() -> &'static [String] {
+    static GLOBS: OnceLock<Vec<String>> = OnceLock::new();
+    GLOBS.get_or_init(|| {
+        let mut set: FxHashSet<String> = FxHashSet::default();
+        for plugin in crate::plugins::registry::builtin::create_builtin_plugins() {
+            for pattern in plugin.config_patterns() {
+                let basename = pattern.rsplit('/').next().unwrap_or(pattern);
+                set.insert(basename.to_string());
+            }
+        }
+        let mut globs: Vec<String> = set.into_iter().collect();
+        globs.sort_unstable();
+        globs
+    })
+}
+
+/// True when `path`'s extension is one of the known source extensions, i.e. the
+/// file belongs in the source channel rather than the config-candidate channel.
+fn has_source_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(|ext| SOURCE_EXTENSIONS.contains(&ext))
+}
+
+/// Build the file-type filter. Always selects known source extensions; when
+/// `capture_config` is set, also selects config-candidate basenames so the
+/// walker yields them for the second collection channel.
+#[expect(
+    clippy::expect_used,
+    reason = "source file globs are hard-coded compile-time constants"
+)]
+fn build_walk_types(capture_config: bool) -> ignore::types::Types {
+    let mut types_builder = ignore::types::TypesBuilder::new();
+    for ext in SOURCE_EXTENSIONS {
+        types_builder
+            .add("source", &format!("*.{ext}"))
+            .expect("valid glob");
+    }
+    types_builder.select("source");
+    if capture_config {
+        for glob in config_candidate_basename_globs() {
+            // Ignore individually-invalid plugin patterns rather than panicking;
+            // a malformed pattern simply fails to admit its config file (the
+            // pre-existing filesystem fallback still covers production mode).
+            let _ = types_builder.add("config", glob);
+        }
+        types_builder.select("config");
+    }
+    types_builder.build().expect("valid types")
+}
+
+/// Construct the parallel walker, applying the appropriate hidden-dir filter.
+/// When `capture_config` is set the walk also yields config-candidate files for
+/// the secondary collection channel.
+fn build_source_walk_builder(
+    config: &ResolvedConfig,
+    additional_hidden_dir_scopes: &[HiddenDirScope],
+    capture_config: bool,
+) -> WalkBuilder {
+    let mut walk_builder = WalkBuilder::new(&config.root);
+    walk_builder
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .types(build_walk_types(capture_config))
+        .threads(config.threads);
+    if additional_hidden_dir_scopes.is_empty() {
+        walk_builder.filter_entry(is_allowed_hidden);
+    } else {
+        let scopes = additional_hidden_dir_scopes.to_vec();
+        walk_builder.filter_entry(move |entry| is_allowed_hidden_with_scopes(entry, &scopes));
+    }
+    walk_builder
+}
+
+/// Compile the production-mode exclude glob set, or `None` outside production mode.
+fn build_production_excludes(config: &ResolvedConfig) -> Option<globset::GlobSet> {
+    if !config.production {
+        return None;
+    }
+    let mut builder = globset::GlobSetBuilder::new();
+    for pattern in PRODUCTION_EXCLUDE_PATTERNS {
+        if let Ok(glob) = globset::GlobBuilder::new(pattern)
+            .literal_separator(true)
+            .build()
+        {
+            builder.add(glob);
+        }
+    }
+    builder.build().ok()
+}
+
 /// Discover all source files in the project, with package-scoped hidden dirs.
+///
+/// # Panics
+///
+/// Panics if the file type glob or progress template is invalid (compile-time constants).
+pub fn discover_files_with_additional_hidden_dirs(
+    config: &ResolvedConfig,
+    additional_hidden_dir_scopes: &[HiddenDirScope],
+) -> Vec<DiscoveredFile> {
+    discover_files_and_config_candidates(config, additional_hidden_dir_scopes).0
+}
+
+/// Discover source files AND, in one traversal, the non-source config-candidate
+/// files (`tsconfig.json`, `bunfig.toml`, `.eslintrc.json`, ...) used by
+/// `discover_config_files` to resolve plugin config patterns in-memory instead of
+/// re-walking the filesystem.
+///
+/// The returned `Vec<DiscoveredFile>` is byte-for-byte identical to the
+/// config-capture-disabled walk: config candidates are routed to the second
+/// return value by extension and never enter the source channel. Config capture
+/// is skipped in production mode (where the walk applies `PRODUCTION_EXCLUDE_PATTERNS`
+/// and `discover_config_files` keeps its filesystem path), so the second vector is
+/// empty there.
 ///
 /// # Panics
 ///
@@ -479,68 +639,45 @@ pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
     clippy::cast_possible_truncation,
     reason = "file count is bounded by project size, well under u32::MAX"
 )]
-#[expect(
-    clippy::expect_used,
-    reason = "source file globs are hard-coded and the collector lock must remain usable"
-)]
-pub fn discover_files_with_additional_hidden_dirs(
+#[expect(clippy::expect_used, reason = "the collector lock must remain usable")]
+pub fn discover_files_and_config_candidates(
     config: &ResolvedConfig,
     additional_hidden_dir_scopes: &[HiddenDirScope],
-) -> Vec<DiscoveredFile> {
+) -> (Vec<DiscoveredFile>, Vec<PathBuf>) {
     let _span = tracing::info_span!("discover_files").entered();
 
-    let mut types_builder = ignore::types::TypesBuilder::new();
-    for ext in SOURCE_EXTENSIONS {
-        types_builder
-            .add("source", &format!("*.{ext}"))
-            .expect("valid glob");
-    }
-    types_builder.select("source");
-    let types = types_builder.build().expect("valid types");
-
-    let mut walk_builder = WalkBuilder::new(&config.root);
-    walk_builder
-        .hidden(false)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        .types(types)
-        .threads(config.threads);
-    if additional_hidden_dir_scopes.is_empty() {
-        walk_builder.filter_entry(is_allowed_hidden);
-    } else {
-        let scopes = additional_hidden_dir_scopes.to_vec();
-        walk_builder.filter_entry(move |entry| is_allowed_hidden_with_scopes(entry, &scopes));
-    }
-
-    let production_excludes = if config.production {
-        let mut builder = globset::GlobSetBuilder::new();
-        for pattern in PRODUCTION_EXCLUDE_PATTERNS {
-            if let Ok(glob) = globset::GlobBuilder::new(pattern)
-                .literal_separator(true)
-                .build()
-            {
-                builder.add(glob);
-            }
-        }
-        builder.build().ok()
-    } else {
-        None
-    };
+    let capture_config = !config.production;
+    let walk_builder =
+        build_source_walk_builder(config, additional_hidden_dir_scopes, capture_config);
+    let production_excludes = build_production_excludes(config);
 
     let collected: Mutex<Vec<(std::path::PathBuf, u64)>> = Mutex::new(Vec::new());
+    let config_collected: Mutex<Vec<std::path::PathBuf>> = Mutex::new(Vec::new());
     let mut visitor_builder = FileVisitorBuilder {
         root: &config.root,
         ignore_patterns: &config.ignore_patterns,
         production_excludes: &production_excludes,
         shared: &collected,
+        config_shared: capture_config.then_some(&config_collected),
     };
     walk_builder.build_parallel().visit(&mut visitor_builder);
 
     let mut raw = collected
         .into_inner()
         .expect("walk collector lock poisoned");
+    // ADR-004 (path-sorted FileIds): the parallel walk visits files in
+    // nondeterministic order, so we sort by absolute path BEFORE the
+    // `.enumerate()` FileId assignment below. This is the stable-cross-run
+    // identity invariant the persisted graph cache depends on: an identical
+    // file set yields identical FileIds, so a cache hit (same paths +
+    // fingerprints) can trust graph data persisted by FileId. Do not replace
+    // this with insertion-order assignment.
     raw.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+    let mut config_candidates = config_collected
+        .into_inner()
+        .expect("walk config collector lock poisoned");
+    config_candidates.sort_unstable();
 
     // Drop any source-discovery diagnostics from a previous pass (watch-mode
     // rerun, combined-mode re-walk) BEFORE re-recording this walk's skips, so a
@@ -564,7 +701,7 @@ pub fn discover_files_with_additional_hidden_dirs(
 
     note_largest_files(config, &files);
 
-    files
+    (files, config_candidates)
 }
 
 #[cfg(test)]
@@ -572,6 +709,64 @@ mod tests {
     use std::ffi::OsStr;
 
     use super::*;
+
+    /// Reproduce the FileId-assignment rule used by `walk_source_files`: sort by
+    /// absolute path, then assign `FileId(idx)` in that order.
+    fn assign_file_ids(mut raw: Vec<(std::path::PathBuf, u64)>) -> Vec<DiscoveredFile> {
+        raw.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        raw.into_iter()
+            .enumerate()
+            .map(|(idx, (path, size_bytes))| DiscoveredFile {
+                id: FileId(idx as u32),
+                path,
+                size_bytes,
+            })
+            .collect()
+    }
+
+    /// ADR-004: an identical file set must yield identical FileIds regardless of
+    /// the (nondeterministic, parallel) discovery order. The persisted graph
+    /// cache keys persisted graph data by FileId, so a cache HIT (same paths +
+    /// fingerprints) must reproduce the exact same FileId-to-path mapping the
+    /// graph was built against. This guards the cache's soundness prerequisite.
+    #[test]
+    fn file_id_assignment_is_deterministic_for_identical_file_set() {
+        let paths = [
+            "/project/src/z.ts",
+            "/project/src/a.ts",
+            "/project/src/components/Button.tsx",
+            "/project/src/components/Button.module.css",
+            "/project/index.ts",
+        ];
+
+        // Two independent walks that observe the same paths in DIFFERENT orders.
+        let walk_one: Vec<(std::path::PathBuf, u64)> = paths
+            .iter()
+            .map(|p| (std::path::PathBuf::from(p), 10))
+            .collect();
+        let mut walk_two = walk_one.clone();
+        walk_two.reverse();
+
+        let files_one = assign_file_ids(walk_one);
+        let files_two = assign_file_ids(walk_two);
+
+        // Identical (FileId -> path) mapping despite the different walk orders.
+        assert_eq!(files_one.len(), files_two.len());
+        for (a, b) in files_one.iter().zip(files_two.iter()) {
+            assert_eq!(a.id, b.id);
+            assert_eq!(a.path, b.path);
+        }
+
+        // The mapping is the path-sorted order, and each FileId equals its index
+        // (the density invariant `project.rs` asserts and the graph relies on).
+        for (idx, file) in files_one.iter().enumerate() {
+            assert_eq!(file.id, FileId(idx as u32));
+        }
+        assert_eq!(
+            files_one[0].path,
+            std::path::PathBuf::from("/project/index.ts")
+        );
+    }
 
     #[test]
     fn allowed_hidden_dirs() {
@@ -626,6 +821,8 @@ mod tests {
     fn source_extensions_include_styles() {
         assert!(SOURCE_EXTENSIONS.contains(&"css"));
         assert!(SOURCE_EXTENSIONS.contains(&"scss"));
+        assert!(SOURCE_EXTENSIONS.contains(&"sass"));
+        assert!(SOURCE_EXTENSIONS.contains(&"less"));
     }
 
     #[test]
@@ -1208,6 +1405,7 @@ mod tests {
                 ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
                 used_class_members: vec![],
                 ignore_decorators: vec![],
+                unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
                 duplicates: DuplicatesConfig::default(),
                 health: HealthConfig::default(),
                 rules: RulesConfig::default(),
@@ -1260,6 +1458,27 @@ mod tests {
 
             assert_eq!(names.len(), 1, "only non-ignored files: {names:?}");
             assert!(names.contains(&"src/index.ts".to_string()));
+        }
+
+        #[test]
+        fn leading_dot_ignore_patterns_exclude_matching_files() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+
+            let generated = dir.path().join("src").join("generated");
+            std::fs::create_dir_all(&generated).unwrap();
+            std::fs::write(generated.join("client.ts"), "export const api = {};").unwrap();
+
+            let src = dir.path().join("src");
+            std::fs::write(src.join("index.ts"), "export const x = 1;").unwrap();
+
+            let config = make_config_with_ignores(
+                dir.path().to_path_buf(),
+                vec!["./src/generated/**".to_string()],
+            );
+            let files = discover_files(&config);
+            let names = file_names(&files, dir.path());
+
+            assert_eq!(names, vec!["src/index.ts"]);
         }
 
         #[test]

@@ -5,19 +5,21 @@
 //! `plow_core::extract::*` paths continue to resolve.
 
 pub use plow_extract::{
-    ANGULAR_TPL_SENTINEL, DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName,
-    FACTORY_CALL_SENTINEL, FLUENT_CHAIN_NEW_SENTINEL, FLUENT_CHAIN_SENTINEL,
-    INSTANCE_EXPORT_SENTINEL, ImportInfo, ImportedName, MemberAccess, MemberInfo, MemberKind,
-    ModuleInfo, PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL, PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
-    PLAYWRIGHT_FIXTURE_TYPE_SENTINEL, PLAYWRIGHT_FIXTURE_USE_SENTINEL, ParseResult, ReExportInfo,
-    RequireCallInfo, VisibilityTag,
+    DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
+    MemberAccess, MemberInfo, MemberKind, ModuleInfo, ParseResult, ReExportInfo, RequireCallInfo,
+    VisibilityTag,
 };
 pub use plow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
 
 pub use plow_extract::{
-    extract_astro_frontmatter, extract_css_module_exports, extract_mdx_statements,
-    extract_sfc_scripts, is_glimmer_file, is_sfc_file, parse_all_files, parse_from_content,
-    parse_single_file, strip_glimmer_templates,
+    MarkupClassScan, MarkupClassToken, TailwindArbitraryUse, ThemeScan, ThemeTokenDef,
+    compute_css_analytics, extract_apply_tokens, extract_astro_frontmatter,
+    extract_astro_style_regions, extract_astro_template_regions, extract_css_module_exports,
+    extract_mdx_statements, extract_sfc_scripts, extract_sfc_styles, extract_sfc_template_regions,
+    is_edit_distance_one, is_glimmer_file, is_sfc_file, is_typo_edit, parse_all_files,
+    parse_from_content, parse_single_file, scan_markup_class_tokens,
+    scan_tailwind_arbitrary_values, scan_theme_blocks, scoped_unused_classes,
+    sfc_virtual_stylesheet, strip_glimmer_templates,
 };
 
 pub use plow_extract::astro;

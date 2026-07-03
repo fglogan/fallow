@@ -14,19 +14,15 @@ mod exports;
 mod io;
 mod plan;
 
-pub use config::is_config_fixable;
+pub use plow_config::is_config_fixable;
 
 use plan::{CapturedHashes, CommitOutcome, FixPlan, SkippedFile};
 
 fn run_analyze(
     config: &plow_config::ResolvedConfig,
     output: OutputFormat,
-) -> Result<(plow_core::results::AnalysisResults, CapturedHashes), ExitCode> {
-    #[expect(
-        deprecated,
-        reason = "ADR-008 deprecates plow_core::analyze_with_file_hashes externally; the CLI still uses the workspace path dependency"
-    )]
-    let output_struct = plow_core::analyze_with_file_hashes(config)
+) -> Result<(plow_types::results::AnalysisResults, CapturedHashes), ExitCode> {
+    let output_struct = plow_engine::analyze_with_file_hashes(config)
         .map_err(|e| crate::error::emit_error(&format!("Analysis error: {e}"), 2, output))?;
     Ok((output_struct.results, output_struct.file_hashes))
 }
@@ -58,11 +54,13 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
     let config = match crate::runtime_support::load_config(
         opts.root,
         opts.config_path,
-        opts.output,
-        opts.no_cache,
-        opts.threads,
-        opts.production,
-        opts.quiet,
+        crate::runtime_support::LoadConfigArgs {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production: opts.production,
+            quiet: opts.quiet,
+        },
     ) {
         Ok(c) => c,
         Err(code) => return code,
@@ -80,59 +78,20 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
     let mut fixes: Vec<serde_json::Value> = Vec::new();
     let mut plan = FixPlan::new();
 
-    apply_unused_export_fixes(
-        opts.root,
-        &results,
-        &file_hashes,
-        &mut plan,
-        opts.output,
-        opts.dry_run,
-        &mut fixes,
-    );
+    let (had_write_error, catalog_totals) =
+        apply_all_fixes(opts, &config, &results, &file_hashes, &mut plan, &mut fixes);
 
-    deps::apply_dependency_fixes(
-        opts.root,
-        &results,
-        &file_hashes,
-        &mut plan,
-        opts.output,
-        opts.dry_run,
-        &mut fixes,
-    );
+    finalize_fix_run(opts, plan, &mut fixes, had_write_error, &catalog_totals)
+}
 
-    let mut had_write_error = config::apply_config_fixes(
-        opts.root,
-        opts.config_path.as_ref(),
-        &results,
-        opts.output,
-        opts.dry_run,
-        opts.no_create_config,
-        &mut fixes,
-    );
-
-    apply_unused_enum_member_fixes(
-        opts.root,
-        &results,
-        &file_hashes,
-        &mut plan,
-        opts.output,
-        opts.dry_run,
-        &mut fixes,
-    );
-
-    let mut catalog_request = CatalogFixRequest {
-        root: opts.root,
-        results: &results,
-        file_hashes: &file_hashes,
-        plan: &mut plan,
-        delete_preceding_comments: config.fix.catalog.delete_preceding_comments,
-        output: opts.output,
-        dry_run: opts.dry_run,
-        fixes: &mut fixes,
-    };
-    let catalog_totals = apply_catalog_fixes(&mut catalog_request);
-    had_write_error |= catalog_totals.write_error;
-
+/// Commit the plan, emit output, and compute the exit code after every fixer ran.
+fn finalize_fix_run(
+    opts: &FixOptions<'_>,
+    plan: FixPlan,
+    fixes: &mut Vec<serde_json::Value>,
+    mut had_write_error: bool,
+    catalog_totals: &CatalogFixTotals,
+) -> ExitCode {
     let plan_skip_records = build_skipped_records(opts.root, plan.skipped(), opts.quiet);
     fixes.extend(plan_skip_records.iter().cloned());
 
@@ -141,9 +100,9 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
         .iter()
         .any(|skip| !skip.reason.is_intentional());
 
-    let commit_outcome = commit_fix_plan(opts, plan, &mut fixes);
+    let commit_outcome = commit_fix_plan(opts, plan, fixes);
 
-    strip_target_sidechannel(&mut fixes);
+    strip_target_sidechannel(fixes);
 
     let skip_counts = count_fix_skips(&plan_skip_records);
     if commit_outcome.had_failures() {
@@ -157,7 +116,7 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
         output: opts.output,
         quiet: opts.quiet,
         dry_run: opts.dry_run,
-        fixes: &fixes,
+        fixes,
         catalog_applied: catalog_totals.applied,
         catalog_skipped: catalog_totals.skipped,
         catalog_comment_lines_removed: catalog_totals.comment_lines_removed,
@@ -175,17 +134,82 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
     }
 }
 
+/// Run every per-issue-type fixer, returning `(had_write_error, catalog_totals)`.
+fn apply_all_fixes(
+    opts: &FixOptions<'_>,
+    config: &plow_config::ResolvedConfig,
+    results: &plow_types::results::AnalysisResults,
+    file_hashes: &CapturedHashes,
+    plan: &mut FixPlan,
+    fixes: &mut Vec<serde_json::Value>,
+) -> (bool, CatalogFixTotals) {
+    apply_unused_export_fixes(&mut FixApplicationInput {
+        root: opts.root,
+        results,
+        file_hashes,
+        plan: &mut *plan,
+        output: opts.output,
+        dry_run: opts.dry_run,
+        fixes: &mut *fixes,
+    });
+
+    deps::apply_dependency_fixes(&mut deps::DependencyFixInput {
+        root: opts.root,
+        results,
+        hashes: file_hashes,
+        plan: &mut *plan,
+        output: opts.output,
+        dry_run: opts.dry_run,
+        fixes: &mut *fixes,
+    });
+
+    let mut had_write_error = config::apply_config_fixes(config::ConfigFixInput {
+        root: opts.root,
+        config_path: opts.config_path.as_ref(),
+        results,
+        output: opts.output,
+        dry_run: opts.dry_run,
+        no_create_config: opts.no_create_config,
+        fixes,
+    });
+
+    apply_unused_enum_member_fixes(&mut FixApplicationInput {
+        root: opts.root,
+        results,
+        file_hashes,
+        plan: &mut *plan,
+        output: opts.output,
+        dry_run: opts.dry_run,
+        fixes: &mut *fixes,
+    });
+
+    let catalog_totals = apply_catalog_fixes(&mut CatalogFixRequest {
+        root: opts.root,
+        results,
+        file_hashes,
+        plan,
+        delete_preceding_comments: config.fix.catalog.delete_preceding_comments,
+        output: opts.output,
+        dry_run: opts.dry_run,
+        fixes,
+    });
+    had_write_error |= catalog_totals.write_error;
+
+    (had_write_error, catalog_totals)
+}
+
 fn emit_empty_fix_output(opts: &FixOptions<'_>) -> ExitCode {
     if matches!(opts.output, OutputFormat::Json) {
-        match serde_json::to_string_pretty(&serde_json::json!({
-            "dry_run": opts.dry_run,
-            "fixes": [],
-            "total_fixed": 0,
-            "skipped": 0,
-            "skipped_content_changed": 0,
-            "skipped_mixed_line_endings": 0,
-            "skipped_low_confidence_exports": 0,
-        })) {
+        let fixes = [];
+        match plow_output::serialize_fix_json_output(plow_output::FixJsonOutputInput {
+            dry_run: opts.dry_run,
+            fixes: &fixes,
+            skipped_content_changed: 0,
+            skipped_mixed_line_endings: 0,
+            skipped_low_confidence_exports: 0,
+        })
+        .and_then(|value| serde_json::to_string_pretty(&value))
+        {
             Ok(json) => println!("{json}"),
             Err(e) => {
                 eprintln!("Error: failed to serialize fix output: {e}");
@@ -198,69 +222,64 @@ fn emit_empty_fix_output(opts: &FixOptions<'_>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn apply_unused_export_fixes(
-    root: &Path,
-    results: &plow_core::results::AnalysisResults,
-    file_hashes: &CapturedHashes,
-    plan: &mut FixPlan,
+struct FixApplicationInput<'a> {
+    root: &'a Path,
+    results: &'a plow_types::results::AnalysisResults,
+    file_hashes: &'a CapturedHashes,
+    plan: &'a mut FixPlan,
     output: OutputFormat,
     dry_run: bool,
-    fixes: &mut Vec<serde_json::Value>,
-) {
-    let mut exports_by_file: FxHashMap<PathBuf, Vec<&plow_core::results::UnusedExport>> =
+    fixes: &'a mut Vec<serde_json::Value>,
+}
+
+fn apply_unused_export_fixes(input: &mut FixApplicationInput<'_>) {
+    let mut exports_by_file: FxHashMap<PathBuf, Vec<&plow_types::results::UnusedExport>> =
         FxHashMap::default();
-    for finding in &results.unused_exports {
+    for finding in &input.results.unused_exports {
         exports_by_file
             .entry(finding.export.path.clone())
             .or_default()
             .push(&finding.export);
     }
-    let unresolved_import_files: FxHashSet<PathBuf> = results
+    let unresolved_import_files: FxHashSet<PathBuf> = input
+        .results
         .unresolved_imports
         .iter()
         .map(|finding| finding.import.path.clone())
         .collect();
-    exports::apply_export_fixes(
-        root,
-        &exports_by_file,
-        file_hashes,
-        &unresolved_import_files,
-        plan,
-        output,
-        dry_run,
-        fixes,
-    );
+    exports::apply_export_fixes(&mut exports::ExportFixInput {
+        root: input.root,
+        exports_by_file: &exports_by_file,
+        hashes: input.file_hashes,
+        unresolved_import_files: &unresolved_import_files,
+        plan: input.plan,
+        output: input.output,
+        dry_run: input.dry_run,
+        fixes: input.fixes,
+    });
 }
 
-fn apply_unused_enum_member_fixes(
-    root: &Path,
-    results: &plow_core::results::AnalysisResults,
-    file_hashes: &CapturedHashes,
-    plan: &mut FixPlan,
-    output: OutputFormat,
-    dry_run: bool,
-    fixes: &mut Vec<serde_json::Value>,
-) {
-    if results.unused_enum_members.is_empty() {
+fn apply_unused_enum_member_fixes(input: &mut FixApplicationInput<'_>) {
+    if input.results.unused_enum_members.is_empty() {
         return;
     }
-    let mut enum_members_by_file: FxHashMap<PathBuf, Vec<&plow_core::results::UnusedMember>> =
+    let mut enum_members_by_file: FxHashMap<PathBuf, Vec<&plow_types::results::UnusedMember>> =
         FxHashMap::default();
-    for finding in &results.unused_enum_members {
+    for finding in &input.results.unused_enum_members {
         enum_members_by_file
             .entry(finding.member.path.clone())
             .or_default()
             .push(&finding.member);
     }
-    enum_members::apply_enum_member_fixes(
-        root,
-        &enum_members_by_file,
-        file_hashes,
-        plan,
-        output,
-        dry_run,
-        fixes,
-    );
+    enum_members::apply_enum_member_fixes(enum_members::EnumMemberFixInput {
+        root: input.root,
+        members_by_file: &enum_members_by_file,
+        hashes: input.file_hashes,
+        plan: input.plan,
+        output: input.output,
+        dry_run: input.dry_run,
+        fixes: input.fixes,
+    });
 }
 
 impl CommitOutcome {
@@ -300,7 +319,7 @@ struct CatalogFixTotals {
 
 struct CatalogFixRequest<'a> {
     root: &'a Path,
-    results: &'a plow_core::results::AnalysisResults,
+    results: &'a plow_types::results::AnalysisResults,
     file_hashes: &'a CapturedHashes,
     plan: &'a mut FixPlan,
     delete_preceding_comments: CatalogPrecedingCommentPolicy,
@@ -358,15 +377,16 @@ fn apply_catalog_fixes(request: &mut CatalogFixRequest<'_>) -> CatalogFixTotals 
             fixes: &mut *request.fixes,
         },
     );
-    let empty_catalog_summary = catalog::apply_empty_catalog_group_fixes(
-        request.root,
-        &request.results.empty_catalog_groups,
-        request.file_hashes,
-        request.plan,
-        request.output,
-        request.dry_run,
-        request.fixes,
-    );
+    let empty_catalog_summary =
+        catalog::apply_empty_catalog_group_fixes(catalog::EmptyCatalogGroupFixInput {
+            root: request.root,
+            groups: &request.results.empty_catalog_groups,
+            hashes: request.file_hashes,
+            plan: request.plan,
+            output: request.output,
+            dry_run: request.dry_run,
+            fixes: request.fixes,
+        });
     CatalogFixTotals {
         applied: catalog_summary.applied + empty_catalog_summary.applied,
         skipped: catalog_summary.skipped + empty_catalog_summary.skipped,
@@ -390,45 +410,15 @@ fn commit_fix_plan(
 
 fn emit_fix_output(input: &FixOutputInput<'_>) -> Result<(), ExitCode> {
     if matches!(input.output, OutputFormat::Json) {
-        let applied_count = input
-            .fixes
-            .iter()
-            .filter(|fix| {
-                fix.get("applied")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false)
-            })
-            .count();
-        let skipped_count = input
-            .fixes
-            .iter()
-            .filter(|fix| {
-                let is_skipped = fix
-                    .get("skipped")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false);
-                let reason = fix.get("skip_reason").and_then(serde_json::Value::as_str);
-                let is_plan_skip = matches!(
-                    reason,
-                    Some(
-                        "content_changed"
-                            | "mixed_line_endings"
-                            | "low_confidence_off_graph"
-                            | "low_confidence_unresolved_imports"
-                    )
-                );
-                is_skipped && !is_plan_skip
-            })
-            .count();
-        match serde_json::to_string_pretty(&serde_json::json!({
-            "dry_run": input.dry_run,
-            "fixes": input.fixes,
-            "total_fixed": applied_count,
-            "skipped": skipped_count,
-            "skipped_content_changed": input.content_changed_count,
-            "skipped_mixed_line_endings": input.mixed_line_endings_count,
-            "skipped_low_confidence_exports": input.low_confidence_count,
-        })) {
+        match plow_output::serialize_fix_json_output(plow_output::FixJsonOutputInput {
+            dry_run: input.dry_run,
+            fixes: input.fixes,
+            skipped_content_changed: input.content_changed_count,
+            skipped_mixed_line_endings: input.mixed_line_endings_count,
+            skipped_low_confidence_exports: input.low_confidence_count,
+        })
+        .and_then(|value| serde_json::to_string_pretty(&value))
+        {
             Ok(json) => println!("{json}"),
             Err(e) => {
                 eprintln!("Error: failed to serialize fix output: {e}");
@@ -539,81 +529,89 @@ struct HumanSummaryInput<'a> {
 }
 
 fn emit_human_summary(input: &HumanSummaryInput<'_>) {
-    let dry_run = input.dry_run;
-    let fixes = input.fixes;
-    let catalog_applied = input.catalog_applied;
-    let catalog_skipped = input.catalog_skipped;
-    let catalog_comment_lines_removed = input.catalog_comment_lines_removed;
-    let content_changed_count = input.content_changed_count;
-    let mixed_line_endings_count = input.mixed_line_endings_count;
-    let low_confidence_count = input.low_confidence_count;
-    if dry_run {
-        eprintln!("Dry run complete. No files were modified.");
-    } else {
-        let fixed_count = fixes
-            .iter()
-            .filter(|f| {
-                f.get("applied")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false)
-            })
-            .count();
-        if catalog_comment_lines_removed > 0 {
-            let line_word = if catalog_comment_lines_removed == 1 {
-                "line"
-            } else {
-                "lines"
-            };
-            eprintln!(
-                "Fixed {fixed_count} issue(s) (+{catalog_comment_lines_removed} catalog comment {line_word})."
-            );
-        } else {
-            eprintln!("Fixed {fixed_count} issue(s).");
-        }
-    }
-    if !dry_run && catalog_applied > 0 {
+    emit_fix_count_line(
+        input.dry_run,
+        input.fixes,
+        input.catalog_comment_lines_removed,
+    );
+    if !input.dry_run && input.catalog_applied > 0 {
         eprintln!(
             "Catalog entries were removed from pnpm-workspace.yaml. Run `pnpm install` to refresh pnpm-lock.yaml.",
         );
     }
-    if catalog_skipped > 0 {
-        let entries_word = if catalog_skipped == 1 {
+    emit_residual_skip_warnings(input);
+}
+
+/// Print the leading dry-run notice or `Fixed N issue(s)` count line.
+fn emit_fix_count_line(
+    dry_run: bool,
+    fixes: &[serde_json::Value],
+    catalog_comment_lines_removed: usize,
+) {
+    if dry_run {
+        eprintln!("Dry run complete. No files were modified.");
+        return;
+    }
+    let fixed_count = plow_output::count_applied_fixes(fixes);
+    if catalog_comment_lines_removed > 0 {
+        let line_word = if catalog_comment_lines_removed == 1 {
+            "line"
+        } else {
+            "lines"
+        };
+        eprintln!(
+            "Fixed {fixed_count} issue(s) (+{catalog_comment_lines_removed} catalog comment {line_word})."
+        );
+    } else {
+        eprintln!("Fixed {fixed_count} issue(s).");
+    }
+}
+
+/// Print the trailing skipped-entry warning lines (catalog guards, hash
+/// mismatch, mixed line endings, low-confidence exports).
+fn emit_residual_skip_warnings(input: &HumanSummaryInput<'_>) {
+    if input.catalog_skipped > 0 {
+        let entries_word = if input.catalog_skipped == 1 {
             "entry"
         } else {
             "entries"
         };
         eprintln!(
-            "Skipped {catalog_skipped} catalog {entries_word} with hardcoded consumers or other guards (run with --format json for details).",
+            "Skipped {} catalog {entries_word} with hardcoded consumers or other guards (run with --format json for details).",
+            input.catalog_skipped,
         );
     }
-    if content_changed_count > 0 {
-        let files_word = if content_changed_count == 1 {
+    if input.content_changed_count > 0 {
+        let files_word = if input.content_changed_count == 1 {
             "file"
         } else {
             "files"
         };
         eprintln!(
-            "Skipped {content_changed_count} {files_word} that changed since `plow dead-code` ran. Re-run `plow fix` to refresh the analysis."
+            "Skipped {} {files_word} that changed since `plow dead-code` ran. Re-run `plow fix` to refresh the analysis.",
+            input.content_changed_count,
         );
     }
-    if mixed_line_endings_count > 0 {
-        let files_word = if mixed_line_endings_count == 1 {
+    if input.mixed_line_endings_count > 0 {
+        let files_word = if input.mixed_line_endings_count == 1 {
             "file"
         } else {
             "files"
         };
         eprintln!(
-            "Skipped {mixed_line_endings_count} {files_word} with mixed CRLF/LF line endings. Normalize each file (`dos2unix <path>` or `git config core.autocrlf input` + re-checkout) before re-running.",
+            "Skipped {} {files_word} with mixed CRLF/LF line endings. Normalize each file (`dos2unix <path>` or `git config core.autocrlf input` + re-checkout) before re-running.",
+            input.mixed_line_endings_count,
         );
     }
-    if low_confidence_count > 0 {
-        let files_word = if low_confidence_count == 1 {
+    if input.low_confidence_count > 0 {
+        let files_word = if input.low_confidence_count == 1 {
             "file"
         } else {
             "files"
         };
         eprintln!(
-            "Kept unused exports in {low_confidence_count} {files_word} where consumers may be invisible to plow (test, mock, and fixture directories, or files with unresolved imports). Still listed by `plow dead-code`; remove by hand if you have confirmed they are unused.",
+            "Kept unused exports in {} {files_word} where consumers may be invisible to plow (test, mock, and fixture directories, or files with unresolved imports). Still listed by `plow dead-code`; remove by hand if you have confirmed they are unused.",
+            input.low_confidence_count,
         );
     }
 }

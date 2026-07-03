@@ -28,6 +28,12 @@ pub fn parse_tsx(source: &str) -> ModuleInfo {
     parse_source_to_module(FileId(0), Path::new("test.tsx"), source, 0, false)
 }
 
+/// Shared test helper: parse source at a specific path (basename-gated
+/// extraction such as the SvelteKit `load()` harvest needs the real filename).
+pub fn parse_at_path(path: &str, source: &str) -> ModuleInfo {
+    parse_source_to_module(FileId(0), Path::new(path), source, 0, false)
+}
+
 #[test]
 fn parses_glimmer_typescript_as_typescript() {
     let info = parse_source_to_module(
@@ -560,4 +566,114 @@ fn glimmer_file_without_template_still_flags_unused_imports() {
         false,
     );
     assert_unused(&info, &["unused"]);
+}
+
+#[test]
+fn array_callback_param_typed_to_element_class_emits_member_access() {
+    // Issue #1707 follow-up: a `.map` / `.forEach` callback param over a typed
+    // array binding is typed to the element class, so member accesses on it are
+    // re-emitted against the class.
+    let info = parse_ts(
+        "import { Util } from './utils/Util'\n\
+         const utils: Util[] = [new Util()]\n\
+         utils.map((util) => util.getter)\n\
+         utils.forEach((util) => util.hello())\n",
+    );
+    for member in ["getter", "hello"] {
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "Util" && access.member == member),
+            "util.{member} should map to Util.{member}, found: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn for_of_loop_variable_typed_to_element_class_emits_member_access() {
+    let info = parse_ts(
+        "import { Util } from './utils/Util'\n\
+         const utils: Util[] = [new Util()]\n\
+         for (const util of utils) { util.property; util.hello() }\n",
+    );
+    for member in ["property", "hello"] {
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "Util" && access.member == member),
+            "for-of util.{member} should map to Util.{member}, found: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn reduce_accumulator_param_is_not_typed_to_element_class() {
+    // `reduce` is excluded from the iterable-callback allowlist: its first
+    // callback parameter is the accumulator, NOT an element, so a member access on
+    // it must not be credited to the array element class.
+    let info = parse_ts(
+        "import { Util } from './utils/Util'\n\
+         const utils: Util[] = [new Util()]\n\
+         utils.reduce((acc, u) => acc.merged(), new Util())\n",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Util" && access.member == "merged"),
+        "reduce accumulator `acc.merged()` must not map to Util.merged, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn angular_component_field_for_loop_item_emits_member_access() {
+    // Issue #1712: an Angular component field typed `utils: Util[]` iterated by a
+    // `@for` / `*ngFor` inline template credits member accesses on the loop item.
+    let info = parse_ts(
+        "import { Component } from '@angular/core'\n\
+         import { Util } from './utils/Util'\n\
+         @Component({\n\
+           selector: 'app-root',\n\
+           template: `@for (util of utils; track util) { {{ util.getName() }} } <li *ngFor=\"let u of utils\">{{ u.getter }}</li>`,\n\
+         })\n\
+         export class AppComponent {\n\
+           utils: Util[] = [new Util()]\n\
+         }\n",
+    );
+    for member in ["getName", "getter"] {
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "Util" && access.member == member),
+            "@for/*ngFor util.{member} should map to Util.{member}, found: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn angular_component_field_builtin_array_is_not_typed() {
+    // A `number[]` field element is a builtin: the loop item must NOT credit any
+    // class member (over-credit only, no false positives).
+    let info = parse_ts(
+        "import { Component } from '@angular/core'\n\
+         @Component({\n\
+           selector: 'app-root',\n\
+           template: `@for (n of nums; track n) { {{ n.toFixed() }} }`,\n\
+         })\n\
+         export class AppComponent {\n\
+           nums: number[] = [1]\n\
+         }\n",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.member == "toFixed" && access.object != "n"),
+        "a builtin `number[]` loop item must not credit a class member, found: {:?}",
+        info.member_accesses
+    );
 }

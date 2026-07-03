@@ -5,6 +5,7 @@ use std::sync::{LazyLock, Mutex, OnceLock};
 use plow_config::{
     OutputFormat, PartialRulesConfig, PlowConfig, ProductionAnalysis, ResolvedConfig, RulesConfig,
 };
+use plow_output::GroupByMode;
 use rustc_hash::FxHashSet;
 
 static CONFIG_LOADED_LOGGED: LazyLock<Mutex<FxHashSet<PathBuf>>> =
@@ -62,6 +63,17 @@ pub enum GroupBy {
     Section,
 }
 
+impl From<GroupBy> for GroupByMode {
+    fn from(value: GroupBy) -> Self {
+        match value {
+            GroupBy::Owner => Self::Owner,
+            GroupBy::Directory => Self::Directory,
+            GroupBy::Package => Self::Package,
+            GroupBy::Section => Self::Section,
+        }
+    }
+}
+
 /// Build an `OwnershipResolver` from CLI `--group-by` and config settings.
 ///
 /// Returns `None` when no grouping is requested. Returns `Err(ExitCode)` when
@@ -72,15 +84,25 @@ pub fn build_ownership_resolver(
     codeowners_path: Option<&str>,
     output: OutputFormat,
 ) -> Result<Option<crate::report::OwnershipResolver>, ExitCode> {
+    build_ownership_resolver_for_mode(group_by.map(Into::into), root, codeowners_path, output)
+}
+
+/// Build an `OwnershipResolver` from a typed output grouping mode.
+pub fn build_ownership_resolver_for_mode(
+    group_by: Option<GroupByMode>,
+    root: &Path,
+    codeowners_path: Option<&str>,
+    output: OutputFormat,
+) -> Result<Option<crate::report::OwnershipResolver>, ExitCode> {
     let Some(mode) = group_by else {
         return Ok(None);
     };
     match mode {
-        GroupBy::Owner => match crate::codeowners::CodeOwners::load(root, codeowners_path) {
+        GroupByMode::Owner => match crate::codeowners::CodeOwners::load(root, codeowners_path) {
             Ok(co) => Ok(Some(crate::report::OwnershipResolver::Owner(co))),
             Err(e) => Err(crate::error::emit_error(&e, 2, output)),
         },
-        GroupBy::Section => match crate::codeowners::CodeOwners::load(root, codeowners_path) {
+        GroupByMode::Section => match crate::codeowners::CodeOwners::load(root, codeowners_path) {
             Ok(co) => {
                 if co.has_sections() {
                     Ok(Some(crate::report::OwnershipResolver::Section(co)))
@@ -96,8 +118,8 @@ pub fn build_ownership_resolver(
             }
             Err(e) => Err(crate::error::emit_error(&e, 2, output)),
         },
-        GroupBy::Directory => Ok(Some(crate::report::OwnershipResolver::Directory)),
-        GroupBy::Package => {
+        GroupByMode::Directory => Ok(Some(crate::report::OwnershipResolver::Directory)),
+        GroupByMode::Package => {
             let workspaces = plow_config::discover_workspaces(root);
             if workspaces.is_empty() {
                 Err(crate::error::emit_error(
@@ -137,123 +159,88 @@ fn should_log_config_loaded(path: &Path) -> bool {
         .is_ok_and(|mut logged| logged.insert(key))
 }
 
+#[derive(Clone, Copy)]
+pub struct ConfigLoadOptions {
+    pub output: OutputFormat,
+    pub no_cache: bool,
+    pub threads: usize,
+    pub production_override: Option<bool>,
+    pub quiet: bool,
+}
+
+/// The scalar config-loading knobs for [`load_config`], bundled so the entry
+/// point takes the root + config path plus one args struct instead of seven
+/// positional parameters.
+#[derive(Clone, Copy)]
+pub struct LoadConfigArgs {
+    pub output: OutputFormat,
+    pub no_cache: bool,
+    pub threads: usize,
+    pub production: bool,
+    pub quiet: bool,
+}
+
 #[expect(clippy::ref_option, reason = "&Option matches clap's field type")]
 pub fn load_config(
     root: &Path,
     config_path: &Option<PathBuf>,
-    output: OutputFormat,
-    no_cache: bool,
-    threads: usize,
-    production: bool,
-    quiet: bool,
+    args: LoadConfigArgs,
 ) -> Result<ResolvedConfig, ExitCode> {
-    load_config_for_analysis(
-        root,
-        config_path,
+    let LoadConfigArgs {
         output,
         no_cache,
         threads,
-        production.then_some(true),
+        production,
         quiet,
+    } = args;
+    load_config_for_analysis(
+        root,
+        config_path,
+        ConfigLoadOptions {
+            output,
+            no_cache,
+            threads,
+            production_override: production.then_some(true),
+            quiet,
+        },
         ProductionAnalysis::DeadCode,
     )
 }
 
 #[expect(clippy::ref_option, reason = "&Option matches clap's field type")]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "central config loader mirrors CLI dispatch options"
-)]
 pub fn load_config_for_analysis(
     root: &Path,
     config_path: &Option<PathBuf>,
-    output: OutputFormat,
-    no_cache: bool,
-    threads: usize,
-    production_override: Option<bool>,
-    quiet: bool,
+    options: ConfigLoadOptions,
     analysis: ProductionAnalysis,
 ) -> Result<ResolvedConfig, ExitCode> {
-    let user_config = if let Some(path) = config_path {
-        match PlowConfig::load(path) {
-            Ok(c) => {
-                log_config_loaded(path, output, quiet);
-                Some(c)
-            }
-            Err(e) => {
-                let msg = format!("failed to load config '{}': {e}", path.display());
-                return Err(crate::error::emit_error(&msg, 2, output));
-            }
-        }
-    } else {
-        match PlowConfig::find_and_load(root) {
-            Ok(Some((config, found_path))) => {
-                log_config_loaded(&found_path, output, quiet);
-                Some(config)
-            }
-            Ok(None) => None,
-            Err(e) => {
-                return Err(crate::error::emit_error(&e, 2, output));
-            }
-        }
-    };
+    let user_config = load_user_config(root, config_path, &options)?;
 
     let loaded_user_config = user_config.is_some();
     let final_config = match user_config {
         Some(mut config) => {
-            let production =
-                production_override.unwrap_or_else(|| config.production.for_analysis(analysis));
+            let production = options
+                .production_override
+                .unwrap_or_else(|| config.production.for_analysis(analysis));
             config.production = production.into();
             config
         }
         None => PlowConfig {
-            production: production_override.unwrap_or(false).into(),
+            production: options.production_override.unwrap_or(false).into(),
             ..PlowConfig::default()
         },
     };
     crate::telemetry::note_config_shape(config_shape_for(&final_config, loaded_user_config));
 
-    if let Err(errors) =
-        plow_config::discover_and_validate_external_plugins(root, &final_config.plugins)
-    {
-        let joined = errors
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("\n  - ");
-        let msg = format!("invalid external plugin definition:\n  - {joined}");
-        return Err(crate::error::emit_error(&msg, 2, output));
-    }
-
-    if let Err(errors) = final_config.validate_resolved_boundaries(root) {
-        let joined = errors
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("\n  - ");
-        let msg = format!("invalid boundary configuration:\n  - {joined}");
-        return Err(crate::error::emit_error(&msg, 2, output));
-    }
-
-    // A pack that fails to load must fail the run: silently skipping policy
-    // is the exact failure mode rule packs document themselves as preventing.
-    if let Err(errors) = plow_config::load_rule_packs(root, &final_config.rule_packs) {
-        let joined = errors
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("\n  - ");
-        let msg = format!("invalid rule pack:\n  - {joined}");
-        return Err(crate::error::emit_error(&msg, 2, output));
-    }
+    validate_config_extensions(root, &final_config, &options)?;
 
     let cache_max_size_mb = resolve_cache_max_size_env();
     let mut resolved = final_config.resolve(
         root.to_path_buf(),
-        output,
-        threads,
-        no_cache,
-        quiet,
+        options.output,
+        options.threads,
+        options.no_cache,
+        options.quiet,
         cache_max_size_mb,
     );
     if let Some(mb) = resolve_max_file_size_mb() {
@@ -263,15 +250,107 @@ pub fn load_config_for_analysis(
     crate::cache_notice::record_candidate(
         root,
         &resolved.cache_dir,
-        output,
-        quiet,
+        options.output,
+        options.quiet,
         resolved.no_cache,
     );
 
+    report_workspace_diagnostics(root, &resolved, &options)?;
+
+    Ok(resolved)
+}
+
+/// Load the user config from an explicit `--config` path or via auto-discovery,
+/// logging the resolved path. Returns `None` when no config file is found.
+#[expect(clippy::ref_option, reason = "&Option matches clap's field type")]
+fn load_user_config(
+    root: &Path,
+    config_path: &Option<PathBuf>,
+    options: &ConfigLoadOptions,
+) -> Result<Option<PlowConfig>, ExitCode> {
+    if let Some(path) = config_path {
+        return match PlowConfig::load(path) {
+            Ok(c) => {
+                log_config_loaded(path, options.output, options.quiet);
+                Ok(Some(c))
+            }
+            Err(e) => {
+                let msg = format!("failed to load config '{}': {e}", path.display());
+                Err(crate::error::emit_error(&msg, 2, options.output))
+            }
+        };
+    }
+    match PlowConfig::find_and_load(root) {
+        Ok(Some((config, found_path))) => {
+            log_config_loaded(&found_path, options.output, options.quiet);
+            Ok(Some(config))
+        }
+        Ok(None) => Ok(None),
+        Err(e) => Err(crate::error::emit_error(&e, 2, options.output)),
+    }
+}
+
+/// Join a list of validation errors into one indented `emit_error` exit code.
+fn emit_joined_config_errors<E: ToString>(
+    label: &str,
+    errors: &[E],
+    output: OutputFormat,
+) -> ExitCode {
+    let joined = errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n  - ");
+    crate::error::emit_error(&format!("{label}:\n  - {joined}"), 2, output)
+}
+
+/// Validate external plugins, resolved boundaries, and rule packs. A rule pack
+/// that fails to load must fail the run: silently skipping policy is the exact
+/// failure mode rule packs document themselves as preventing.
+fn validate_config_extensions(
+    root: &Path,
+    config: &PlowConfig,
+    options: &ConfigLoadOptions,
+) -> Result<(), ExitCode> {
+    if let Err(errors) = plow_config::discover_and_validate_external_plugins(root, &config.plugins)
+    {
+        return Err(emit_joined_config_errors(
+            "invalid external plugin definition",
+            &errors,
+            options.output,
+        ));
+    }
+    if let Err(errors) = config.validate_resolved_boundaries(root) {
+        return Err(emit_joined_config_errors(
+            "invalid boundary configuration",
+            &errors,
+            options.output,
+        ));
+    }
+    if let Err(errors) = plow_config::load_rule_packs(root, &config.rule_packs) {
+        return Err(emit_joined_config_errors(
+            "invalid rule pack",
+            &errors,
+            options.output,
+        ));
+    }
+    Ok(())
+}
+
+/// Discover and stash workspace diagnostics, surfacing a one-line stderr notice
+/// in human mode when any are present.
+fn report_workspace_diagnostics(
+    root: &Path,
+    resolved: &ResolvedConfig,
+    options: &ConfigLoadOptions,
+) -> Result<(), ExitCode> {
     match plow_config::discover_workspaces_with_diagnostics(root, &resolved.ignore_patterns) {
         Ok((_, diagnostics)) => {
             plow_config::stash_workspace_diagnostics(root, diagnostics.clone());
-            if !diagnostics.is_empty() && matches!(output, OutputFormat::Human) && !quiet {
+            if !diagnostics.is_empty()
+                && matches!(options.output, OutputFormat::Human)
+                && !options.quiet
+            {
                 eprintln!(
                     "plow: {} workspace discovery diagnostic{}. \
                      Run `plow list --workspaces` for detail.",
@@ -279,13 +358,14 @@ pub fn load_config_for_analysis(
                     if diagnostics.len() == 1 { "" } else { "s" }
                 );
             }
+            Ok(())
         }
-        Err(err) => {
-            return Err(crate::error::emit_error(&err.to_string(), 2, output));
-        }
+        Err(err) => Err(crate::error::emit_error(
+            &err.to_string(),
+            2,
+            options.output,
+        )),
     }
-
-    Ok(resolved)
 }
 
 fn config_shape_for(

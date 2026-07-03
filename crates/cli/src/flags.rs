@@ -5,49 +5,9 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use plow_config::{OutputFormat, ResolvedConfig};
-use plow_types::extract::{FlagUse, FlagUseKind, ModuleInfo, ParseResult};
-use plow_types::results::{FeatureFlag, FlagConfidence, FlagKind};
+use plow_types::results::{FeatureFlag, FlagKind};
 
 use crate::error::emit_error;
-
-/// Convert an extraction-level `FlagUse` to a result-level `FeatureFlag`.
-fn flag_use_to_feature_flag(
-    flag_use: &FlagUse,
-    module: &ModuleInfo,
-    path: &std::path::Path,
-) -> FeatureFlag {
-    let (kind, confidence) = match flag_use.kind {
-        FlagUseKind::EnvVar => (FlagKind::EnvironmentVariable, FlagConfidence::High),
-        FlagUseKind::SdkCall => (FlagKind::SdkCall, FlagConfidence::High),
-        FlagUseKind::ConfigObject => (FlagKind::ConfigObject, FlagConfidence::Low),
-    };
-
-    let (guard_line_start, guard_line_end) = if let (Some(start), Some(end)) =
-        (flag_use.guard_span_start, flag_use.guard_span_end)
-        && !module.line_offsets.is_empty()
-    {
-        let (sl, _) = plow_types::extract::byte_offset_to_line_col(&module.line_offsets, start);
-        let (el, _) = plow_types::extract::byte_offset_to_line_col(&module.line_offsets, end);
-        (Some(sl), Some(el))
-    } else {
-        (None, None)
-    };
-
-    FeatureFlag {
-        path: path.to_path_buf(),
-        flag_name: flag_use.flag_name.clone(),
-        kind,
-        confidence,
-        line: flag_use.line,
-        col: flag_use.col,
-        guard_span_start: flag_use.guard_span_start,
-        guard_span_end: flag_use.guard_span_end,
-        sdk_name: flag_use.sdk_name.clone(),
-        guard_line_start,
-        guard_line_end,
-        guarded_dead_exports: Vec::new(),
-    }
-}
 
 /// Options for the `plow flags` subcommand.
 pub struct FlagsOptions<'a> {
@@ -69,69 +29,74 @@ pub struct FlagsOptions<'a> {
 pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     let start = Instant::now();
 
-    let config = match crate::runtime_support::load_config(
-        opts.root,
-        opts.config_path,
-        opts.output,
-        opts.no_cache,
-        opts.threads,
-        opts.production,
-        opts.quiet,
-    ) {
+    let config = match load_flags_config(opts) {
         Ok(c) => c,
         Err(code) => return code,
     };
-
-    let files = plow_core::discover::discover_files_with_plugin_scopes(&config);
-    if files.is_empty() {
+    let analysis = plow_engine::analyze_feature_flags(&config);
+    if analysis.files_scanned == 0 {
         return emit_error("no files discovered", 2, opts.output);
     }
 
-    let cache_store = if config.no_cache {
-        None
-    } else {
-        plow_core::cache::CacheStore::load(
-            &config.cache_dir,
-            config.cache_config_hash,
-            plow_core::resolve_cache_max_size_bytes(&config),
-        )
-    };
-    let parse_result = plow_core::extract::parse_all_files(&files, cache_store.as_ref(), false);
+    let mut flags = analysis.flags;
+    if let Err(code) = apply_flag_scopes(&mut flags, opts) {
+        return code;
+    }
+    // Note find-state for telemetry before any exit (issue #1650 follow-up): the
+    // flags command emits a `code_quality_review` workflow event (the same label
+    // as combined `plow`), so without this its findings_present serialized as
+    // null. Count the scope-filtered flags BEFORE `--top` truncation so the
+    // bucket reflects the full set, not the displayed head.
+    crate::telemetry::note_result_count(flags.len());
+    sort_and_limit_flags(&mut flags, opts.top);
 
-    let mut flags = collect_flags_from_parse_result(&config, &files, &parse_result);
-
-    #[expect(
-        deprecated,
-        reason = "ADR-008 deprecates plow_core::analyze_with_parse_result and the feature_flags helpers externally; flags still uses the workspace path dependency"
-    )]
-    if let Ok(analysis_output) =
-        plow_core::analyze_with_parse_result(&config, &parse_result.modules)
-    {
-        plow_core::analyze::feature_flags::correlate_with_dead_code(
-            &mut flags,
-            &analysis_output.results,
-        );
+    let elapsed = start.elapsed();
+    if let Err(code) = validate_flags_output(opts.output) {
+        return code;
     }
 
+    print_flags_result(&flags, &config, opts, elapsed, analysis.files_scanned);
+
+    ExitCode::SUCCESS
+}
+
+fn load_flags_config(opts: &FlagsOptions<'_>) -> Result<ResolvedConfig, ExitCode> {
+    crate::runtime_support::load_config(
+        opts.root,
+        opts.config_path,
+        crate::runtime_support::LoadConfigArgs {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production: opts.production,
+            quiet: opts.quiet,
+        },
+    )
+}
+
+fn apply_flag_scopes(
+    flags: &mut Vec<FeatureFlag>,
+    opts: &FlagsOptions<'_>,
+) -> Result<(), ExitCode> {
     if let Some(git_ref) = opts.changed_since
         && let Some(changed) = crate::check::get_changed_files(opts.root, git_ref)
     {
         flags.retain(|f| changed.contains(&f.path));
     }
 
-    let ws_scope = match crate::check::resolve_workspace_scope(
+    let ws_scope = crate::check::resolve_workspace_scope(
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
         opts.output,
-    ) {
-        Ok(scope) => scope,
-        Err(code) => return code,
-    };
+    )?;
     if let Some(ref ws_roots) = ws_scope {
         flags.retain(|f| ws_roots.iter().any(|r| f.path.starts_with(r)));
     }
+    Ok(())
+}
 
+fn sort_and_limit_flags(flags: &mut Vec<FeatureFlag>, top: Option<usize>) {
     flags.sort_by(|a, b| {
         a.path
             .cmp(&b.path)
@@ -139,121 +104,27 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
             .then(a.flag_name.cmp(&b.flag_name))
     });
 
-    if let Some(top) = opts.top {
+    if let Some(top) = top {
         flags.truncate(top);
     }
+}
 
-    let elapsed = start.elapsed();
-
+fn validate_flags_output(output: OutputFormat) -> Result<(), ExitCode> {
     if matches!(
-        opts.output,
+        output,
         OutputFormat::PrCommentGithub
             | OutputFormat::PrCommentGitlab
             | OutputFormat::ReviewGithub
             | OutputFormat::ReviewGitlab
             | OutputFormat::Badge
     ) {
-        return emit_error(
+        return Err(emit_error(
             "flags supports human, json, compact, sarif, markdown, and codeclimate output",
             2,
-            opts.output,
-        );
+            output,
+        ));
     }
-
-    let files_scanned = files.len();
-    print_flags_result(&flags, &config, opts, elapsed, files_scanned);
-
-    ExitCode::SUCCESS
-}
-
-fn collect_flags_from_parse_result(
-    config: &ResolvedConfig,
-    files: &[plow_core::discover::DiscoveredFile],
-    parse_result: &ParseResult,
-) -> Vec<FeatureFlag> {
-    let file_paths: rustc_hash::FxHashMap<_, _> = files.iter().map(|f| (f.id, &f.path)).collect();
-
-    let extra_sdk: Vec<(String, usize, String)> = config
-        .flags
-        .sdk_patterns
-        .iter()
-        .map(|p| {
-            (
-                p.function.clone(),
-                p.name_arg,
-                p.provider.clone().unwrap_or_default(),
-            )
-        })
-        .collect();
-    let has_custom_config = !extra_sdk.is_empty()
-        || !config.flags.env_prefixes.is_empty()
-        || config.flags.config_object_heuristics;
-
-    let mut flags = Vec::new();
-    for module in &parse_result.modules {
-        let Some(path) = file_paths.get(&module.file_id) else {
-            continue;
-        };
-
-        collect_builtin_flags(&mut flags, module, path);
-        if has_custom_config {
-            collect_custom_flags(&mut flags, config, module, path, &extra_sdk);
-        }
-    }
-    flags
-}
-
-fn collect_builtin_flags(flags: &mut Vec<FeatureFlag>, module: &ModuleInfo, path: &Path) {
-    let file_suppressed = plow_core::suppress::is_file_suppressed(
-        &module.suppressions,
-        plow_core::suppress::IssueKind::FeatureFlag,
-    );
-    for flag_use in &module.flag_uses {
-        if file_suppressed
-            || plow_core::suppress::is_suppressed(
-                &module.suppressions,
-                flag_use.line,
-                plow_core::suppress::IssueKind::FeatureFlag,
-            )
-        {
-            continue;
-        }
-        flags.push(flag_use_to_feature_flag(flag_use, module, path));
-    }
-}
-
-fn collect_custom_flags(
-    flags: &mut Vec<FeatureFlag>,
-    config: &ResolvedConfig,
-    module: &ModuleInfo,
-    path: &Path,
-    extra_sdk: &[(String, usize, String)],
-) {
-    let Ok(source) = std::fs::read_to_string(path) else {
-        return;
-    };
-
-    let custom_flags = plow_core::extract::flags::extract_flags_from_source(
-        &source,
-        path,
-        extra_sdk,
-        &config.flags.env_prefixes,
-        config.flags.config_object_heuristics,
-    );
-    for flag_use in &custom_flags {
-        let already_found = module.flag_uses.iter().any(|existing| {
-            existing.line == flag_use.line && existing.flag_name == flag_use.flag_name
-        });
-        if !already_found
-            && !plow_core::suppress::is_suppressed(
-                &module.suppressions,
-                flag_use.line,
-                plow_core::suppress::IssueKind::FeatureFlag,
-            )
-        {
-            flags.push(flag_use_to_feature_flag(flag_use, module, path));
-        }
-    }
+    Ok(())
 }
 
 /// Print feature flag results in the requested format.
@@ -321,13 +192,11 @@ fn print_file_path(display: &str) {
 /// When `plow flags` finds nothing, surface the configuration surface so the
 /// user can distinguish a true negative from "plow does not recognize my SDK
 /// yet". On full defaults the hint enumerates the built-in detectors (sourced
-/// from `plow_core::extract::flags`, never hardcoded) and points at the config
-/// knobs. When custom `flags.*` config is present, it collapses to a single
-/// terse acknowledgement so users who already found the surface are not nagged.
-/// All lines go to stderr, mirroring the empty-result line they follow.
+/// from `plow-engine`, never hardcoded) and points at the config knobs. When
+/// custom `flags.*` config is present, it collapses to a single terse
+/// acknowledgement so users who already found the surface are not nagged. All
+/// lines go to stderr, mirroring the empty-result line they follow.
 fn print_empty_flags_hint(config: &ResolvedConfig, files_scanned: usize) {
-    use colored::Colorize;
-
     let custom_sdk = config.flags.sdk_patterns.len();
     let custom_env = config.flags.env_prefixes.len();
     let heuristics = config.flags.config_object_heuristics;
@@ -336,39 +205,66 @@ fn print_empty_flags_hint(config: &ResolvedConfig, files_scanned: usize) {
     let files_label = if files_scanned == 1 { "file" } else { "files" };
 
     if has_custom {
-        let mut parts: Vec<String> = Vec::new();
-        if custom_sdk > 0 {
-            parts.push(format!(
-                "{custom_sdk} custom SDK pattern{}",
-                if custom_sdk == 1 { "" } else { "s" }
-            ));
-        }
-        if custom_env > 0 {
-            parts.push(format!(
-                "{custom_env} custom env prefix{}",
-                if custom_env == 1 { "" } else { "es" }
-            ));
-        }
-        if heuristics {
-            parts.push("config-object heuristics enabled".to_string());
-        }
-        eprintln!(
-            "  {}",
-            format!(
-                "Scanned {files_scanned} {files_label} with your custom flag config: {}.",
-                parts.join(", ")
-            )
-            .dimmed()
+        print_empty_flags_custom_hint(
+            custom_sdk,
+            custom_env,
+            heuristics,
+            files_scanned,
+            files_label,
         );
-        return;
+    } else {
+        print_empty_flags_default_hint(files_scanned, files_label);
     }
+}
 
-    let env_prefixes = plow_core::extract::flags::builtin_env_prefixes()
+/// Terse one-line acknowledgement of an empty result when custom `flags.*`
+/// config is present.
+fn print_empty_flags_custom_hint(
+    custom_sdk: usize,
+    custom_env: usize,
+    heuristics: bool,
+    files_scanned: usize,
+    files_label: &str,
+) {
+    use colored::Colorize;
+
+    let mut parts: Vec<String> = Vec::new();
+    if custom_sdk > 0 {
+        parts.push(format!(
+            "{custom_sdk} custom SDK pattern{}",
+            if custom_sdk == 1 { "" } else { "s" }
+        ));
+    }
+    if custom_env > 0 {
+        parts.push(format!(
+            "{custom_env} custom env prefix{}",
+            if custom_env == 1 { "" } else { "es" }
+        ));
+    }
+    if heuristics {
+        parts.push("config-object heuristics enabled".to_string());
+    }
+    eprintln!(
+        "  {}",
+        format!(
+            "Scanned {files_scanned} {files_label} with your custom flag config: {}.",
+            parts.join(", ")
+        )
+        .dimmed()
+    );
+}
+
+/// Enumerate the built-in detectors and config knobs on an empty result with a
+/// full-defaults configuration.
+fn print_empty_flags_default_hint(files_scanned: usize, files_label: &str) {
+    use colored::Colorize;
+
+    let env_prefixes = plow_engine::builtin_env_prefixes()
         .iter()
         .map(|p| format!("{p}*"))
         .collect::<Vec<_>>()
         .join(", ");
-    let providers = plow_core::extract::flags::builtin_sdk_providers().join(", ");
+    let providers = plow_engine::builtin_sdk_providers().join(", ");
 
     eprintln!(
         "  {}",
@@ -395,68 +291,58 @@ fn print_empty_flags_hint(config: &ResolvedConfig, files_scanned: usize) {
     );
 }
 
-/// Human-readable output for `plow flags`.
-fn print_flags_human(
-    flags: &[FeatureFlag],
-    config: &ResolvedConfig,
-    elapsed: std::time::Duration,
-    quiet: bool,
-    files_scanned: usize,
-) {
+/// Print the "Flags guarding dead code" section (human format). No-op when no
+/// flag guards a statically dead export.
+fn print_dead_code_flags_section(flags: &[FeatureFlag], config: &ResolvedConfig) {
     use colored::Colorize;
-
-    if flags.is_empty() {
-        if !quiet {
-            eprintln!(
-                "{} No feature flags detected ({:.2}s)",
-                "\u{2713}".green().bold(),
-                elapsed.as_secs_f64()
-            );
-            print_empty_flags_hint(config, files_scanned);
-        }
-        return;
-    }
 
     let dead_code_flags: Vec<&FeatureFlag> = flags
         .iter()
         .filter(|f| !f.guarded_dead_exports.is_empty())
         .collect();
-
-    if !dead_code_flags.is_empty() {
-        let label = format!("Flags guarding dead code ({})", dead_code_flags.len());
-        println!("{} {}", "\u{25cf}".yellow(), label.yellow().bold());
-
-        for flag in &dead_code_flags {
-            let relative = flag
-                .path
-                .strip_prefix(&config.root)
-                .unwrap_or(&flag.path)
-                .to_string_lossy()
-                .replace('\\', "/");
-            print_file_path(&relative);
-
-            let dead_count = flag.guarded_dead_exports.len();
-            let guard_lines = flag
-                .guard_line_start
-                .and_then(|s| flag.guard_line_end.map(|e| e.saturating_sub(s) + 1))
-                .unwrap_or(0);
-
-            let detail = if guard_lines > 0 {
-                format!("guards {guard_lines} lines, {dead_count} statically dead")
-            } else {
-                format!("{dead_count} dead exports in guarded block")
-            };
-
-            println!(
-                "    {} {} {} {}",
-                format!(":{}", flag.line).dimmed(),
-                flag.flag_name.bold(),
-                kind_tag(flag),
-                format!("({detail})").dimmed(),
-            );
-        }
-        println!();
+    if dead_code_flags.is_empty() {
+        return;
     }
+
+    let label = format!("Flags guarding dead code ({})", dead_code_flags.len());
+    println!("{} {}", "\u{25cf}".yellow(), label.yellow().bold());
+
+    for flag in &dead_code_flags {
+        let relative = flag
+            .path
+            .strip_prefix(&config.root)
+            .unwrap_or(&flag.path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        print_file_path(&relative);
+
+        let dead_count = flag.guarded_dead_exports.len();
+        let guard_lines = flag
+            .guard_line_start
+            .and_then(|s| flag.guard_line_end.map(|e| e.saturating_sub(s) + 1))
+            .unwrap_or(0);
+
+        let detail = if guard_lines > 0 {
+            format!("guards {guard_lines} lines, {dead_count} statically dead")
+        } else {
+            format!("{dead_count} dead exports in guarded block")
+        };
+
+        println!(
+            "    {} {} {} {}",
+            format!(":{}", flag.line).dimmed(),
+            flag.flag_name.bold(),
+            kind_tag(flag),
+            format!("({detail})").dimmed(),
+        );
+    }
+    println!();
+}
+
+/// Print the per-file "Feature flags" listing (human format), preserving the
+/// order in which files first appear in `flags`.
+fn print_flags_by_file_section(flags: &[FeatureFlag], config: &ResolvedConfig) {
+    use colored::Colorize;
 
     let mut by_file: Vec<(&std::path::Path, Vec<&FeatureFlag>)> = Vec::new();
     for flag in flags {
@@ -484,6 +370,32 @@ fn print_flags_human(
             );
         }
     }
+}
+
+/// Human-readable output for `plow flags`.
+fn print_flags_human(
+    flags: &[FeatureFlag],
+    config: &ResolvedConfig,
+    elapsed: std::time::Duration,
+    quiet: bool,
+    files_scanned: usize,
+) {
+    use colored::Colorize;
+
+    if flags.is_empty() {
+        if !quiet {
+            eprintln!(
+                "{} No feature flags detected ({:.2}s)",
+                "\u{2713}".green().bold(),
+                elapsed.as_secs_f64()
+            );
+            print_empty_flags_hint(config, files_scanned);
+        }
+        return;
+    }
+
+    print_dead_code_flags_section(flags, config);
+    print_flags_by_file_section(flags, config);
 
     if !quiet {
         let elapsed_str = format!("{:.2}s", elapsed.as_secs_f64());
@@ -721,97 +633,20 @@ fn print_flags_json(
     elapsed: std::time::Duration,
     explain: bool,
 ) {
-    let flags_json: Vec<serde_json::Value> = flags
-        .iter()
-        .map(|f| {
-            let path = f
-                .path
-                .strip_prefix(&config.root)
-                .unwrap_or(&f.path)
-                .to_string_lossy()
-                .replace('\\', "/");
-
-            let confidence = match f.confidence {
-                FlagConfidence::High => "high",
-                FlagConfidence::Medium => "medium",
-                FlagConfidence::Low => "low",
-            };
-
-            let kind = match f.kind {
-                FlagKind::EnvironmentVariable => "environment_variable",
-                FlagKind::SdkCall => "sdk_call",
-                FlagKind::ConfigObject => "config_object",
-            };
-
-            let mut obj = serde_json::json!({
-                "path": path,
-                "flag_name": f.flag_name,
-                "kind": kind,
-                "confidence": confidence,
-                "line": f.line,
-                "col": f.col,
-                "actions": [
-                    {
-                        "type": "investigate-flag",
-                        "auto_fixable": false,
-                        "description": format!("Verify whether feature flag '{}' is still active", f.flag_name),
-                    },
-                    {
-                        "type": "suppress-line",
-                        "auto_fixable": false,
-                        "description": "Suppress with an inline comment",
-                        "comment": "// plow-ignore-next-line feature-flag",
-                    },
-                ],
-            });
-
-            if let Some(ref sdk) = f.sdk_name {
-                obj["sdk_name"] = serde_json::json!(sdk);
-            }
-
-            if !f.guarded_dead_exports.is_empty() {
-                let guard_lines = f
-                    .guard_line_start
-                    .and_then(|s| f.guard_line_end.map(|e| e.saturating_sub(s) + 1))
-                    .unwrap_or(0);
-                obj["dead_code_overlap"] = serde_json::json!({
-                    "guarded_lines": guard_lines,
-                    "dead_export_count": f.guarded_dead_exports.len(),
-                    "dead_exports": f.guarded_dead_exports,
-                });
-            }
-
-            obj
-        })
-        .collect();
-
-    let mut output = serde_json::json!({
-        "schema_version": crate::report::SCHEMA_VERSION,
-        "version": env!("CARGO_PKG_VERSION"),
-        "elapsed_ms": elapsed.as_millis(),
-        "feature_flags": flags_json,
-        "total_flags": flags.len(),
+    let output = plow_output::build_feature_flags_output(plow_output::FeatureFlagsOutputInput {
+        schema_version: crate::report::SCHEMA_VERSION,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        elapsed,
+        flags,
+        root: &config.root,
+        meta: explain.then(plow_output::feature_flags_meta),
     });
-
-    if explain {
-        output["_meta"] = serde_json::json!({
-            "feature_flags": {
-                "description": "Feature flag patterns detected via AST analysis",
-                "kinds": {
-                    "environment_variable": "process.env.FEATURE_* pattern (high confidence)",
-                    "sdk_call": "Feature flag SDK function call (high confidence)",
-                    "config_object": "Config object property access matching flag keywords (low confidence, heuristic)",
-                },
-                "confidence": {
-                    "high": "Unambiguous pattern match (env vars, direct SDK calls)",
-                    "medium": "Pattern match with some ambiguity",
-                    "low": "Heuristic match (config objects), may produce false positives",
-                },
-                "docs": "https://docs.genesis-plow.dev/cli/flags",
-            }
-        });
-    }
-    crate::output_envelope::attach_telemetry_meta(&mut output);
+    let output = plow_output::serialize_feature_flags_json_output(
+        output,
+        crate::output_runtime::current_root_envelope_mode(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+    )
+    .expect("JSON serialization should not fail");
 
     println!(
         "{}",
@@ -822,6 +657,7 @@ fn print_flags_json(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plow_types::results::FlagConfidence;
     use std::path::PathBuf;
 
     /// No explicit `--config`; static so the `&Option<PathBuf>` field borrows it.

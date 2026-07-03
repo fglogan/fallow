@@ -4,7 +4,7 @@ import * as path from "node:path";
 // VS Code injects this module into the extension host at runtime.
 // plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
-import { countCheckIssues } from "./analysis-utils.js";
+import { countDiagnosticErrorIssues } from "./analysis-utils.js";
 import {
   middleElidePath,
   resolveFilePath as resolveFilePathPure,
@@ -33,6 +33,21 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "unused-optional-dependencies": "package",
   "unused-enum-members": "symbol-enum-member",
   "unused-class-members": "symbol-field",
+  "unused-store-member": "symbol-field",
+  "unused-server-action": "symbol-method",
+  "unused-load-data-keys": "symbol-property",
+  "unused-component-prop": "symbol-property",
+  "unused-component-emit": "symbol-event",
+  "unused-component-input": "symbol-property",
+  "unused-component-output": "symbol-event",
+  "unused-svelte-event": "symbol-event",
+  "unrendered-component": "symbol-misc",
+  "unprovided-inject": "plug",
+  "invalid-client-export": "error",
+  "mixed-client-server-barrel": "files",
+  "misplaced-directive": "warning",
+  "route-collision": "git-merge",
+  "dynamic-segment-name-conflict": "git-merge",
   "unresolved-imports": "error",
   "unlisted-dependencies": "package",
   "duplicate-exports": "files",
@@ -41,6 +56,7 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "circular-dependencies": "sync",
   "re-export-cycles": "sync-ignored",
   "boundary-violation": "symbol-namespace",
+  "policy-violations": "symbol-namespace",
   "stale-suppressions": "trash",
   "unused-catalog-entries": "package",
   "empty-catalog-groups": "package",
@@ -60,6 +76,21 @@ const ISSUE_ICONS: Record<IssueCategory, string> = {
   "unused-optional-dependencies": "package",
   "unused-enum-members": "symbol-enum-member",
   "unused-class-members": "symbol-field",
+  "unused-store-member": "symbol-field",
+  "unused-server-action": "symbol-method",
+  "unused-load-data-keys": "symbol-property",
+  "unused-component-prop": "symbol-property",
+  "unused-component-emit": "symbol-event",
+  "unused-component-input": "symbol-property",
+  "unused-component-output": "symbol-event",
+  "unused-svelte-event": "symbol-event",
+  "unrendered-component": "symbol-misc",
+  "unprovided-inject": "plug",
+  "invalid-client-export": "error",
+  "mixed-client-server-barrel": "files",
+  "misplaced-directive": "warning",
+  "route-collision": "git-merge",
+  "dynamic-segment-name-conflict": "git-merge",
   "unresolved-imports": "error",
   "unlisted-dependencies": "package",
   "duplicate-exports": "copy",
@@ -68,6 +99,7 @@ const ISSUE_ICONS: Record<IssueCategory, string> = {
   "circular-dependencies": "sync",
   "re-export-cycles": "sync-ignored",
   "boundary-violation": "symbol-namespace",
+  "policy-violations": "symbol-namespace",
   "stale-suppressions": "trash",
   "unused-catalog-entries": "package",
   "empty-catalog-groups": "package",
@@ -181,10 +213,10 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
       this.view.badge = undefined;
       return;
     }
-    const count = countCheckIssues(this.result);
+    const count = countDiagnosticErrorIssues(this.result);
 
     this.view.badge =
-      count > 0 ? { value: count, tooltip: `${count} issue${count === 1 ? "" : "s"}` } : undefined;
+      count > 0 ? { value: count, tooltip: `${count} error${count === 1 ? "" : "s"}` } : undefined;
   }
 
   getTreeItem(element: DeadCodeItem): vscode.TreeItem {
@@ -301,6 +333,197 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
       ),
     );
 
+    if (this.result.unused_store_members) {
+      addCategory(
+        "unused-store-member",
+        this.result.unused_store_members.map(
+          (m) =>
+            new IssueItem(
+              `${m.parent_name}.${m.member_name}`,
+              m.path,
+              m.line,
+              m.col,
+              "unused-store-member",
+            ),
+        ),
+      );
+    }
+
+    if (this.result.unused_server_actions) {
+      addCategory(
+        "unused-server-action",
+        this.result.unused_server_actions.map(
+          (a) => new IssueItem(a.action_name, a.path, a.line, a.col, "unused-server-action"),
+        ),
+      );
+    }
+
+    if (this.result.unused_load_data_keys) {
+      addCategory(
+        "unused-load-data-keys",
+        this.result.unused_load_data_keys.map(
+          (k) => new IssueItem(k.key_name, k.path, k.line, k.col, "unused-load-data-keys"),
+        ),
+      );
+    }
+
+    if (this.result.unused_component_props) {
+      addCategory(
+        "unused-component-prop",
+        this.result.unused_component_props.map(
+          (p) =>
+            new IssueItem(
+              `${p.component_name}.${p.prop_name}`,
+              p.path,
+              p.line,
+              p.col,
+              "unused-component-prop",
+            ),
+        ),
+      );
+    }
+
+    if (this.result.unused_component_emits) {
+      addCategory(
+        "unused-component-emit",
+        this.result.unused_component_emits.map(
+          (e) =>
+            new IssueItem(
+              `${e.component_name}.${e.emit_name}`,
+              e.path,
+              e.line,
+              e.col,
+              "unused-component-emit",
+            ),
+        ),
+      );
+    }
+
+    if (this.result.unused_component_inputs) {
+      addCategory(
+        "unused-component-input",
+        this.result.unused_component_inputs.map(
+          (i) =>
+            new IssueItem(
+              `${i.component_name}.${i.input_name}`,
+              i.path,
+              i.line,
+              i.col,
+              "unused-component-input",
+            ),
+        ),
+      );
+    }
+
+    if (this.result.unused_component_outputs) {
+      addCategory(
+        "unused-component-output",
+        this.result.unused_component_outputs.map(
+          (o) =>
+            new IssueItem(
+              `${o.component_name}.${o.output_name}`,
+              o.path,
+              o.line,
+              o.col,
+              "unused-component-output",
+            ),
+        ),
+      );
+    }
+
+    if (this.result.unused_svelte_events) {
+      addCategory(
+        "unused-svelte-event",
+        this.result.unused_svelte_events.map(
+          (e) =>
+            new IssueItem(
+              `${e.component_name}.${e.event_name}`,
+              e.path,
+              e.line,
+              e.col,
+              "unused-svelte-event",
+            ),
+        ),
+      );
+    }
+
+    if (this.result.unrendered_components) {
+      addCategory(
+        "unrendered-component",
+        this.result.unrendered_components.map(
+          (c) => new IssueItem(c.component_name, c.path, c.line, c.col, "unrendered-component"),
+        ),
+      );
+    }
+
+    if (this.result.unprovided_injects) {
+      addCategory(
+        "unprovided-inject",
+        this.result.unprovided_injects.map(
+          (i) => new IssueItem(i.key_name, i.path, i.line, i.col, "unprovided-inject"),
+        ),
+      );
+    }
+
+    if (this.result.invalid_client_exports) {
+      addCategory(
+        "invalid-client-export",
+        this.result.invalid_client_exports.map(
+          (e) => new IssueItem(e.export_name, e.path, e.line, e.col, "invalid-client-export"),
+        ),
+      );
+    }
+
+    if (this.result.mixed_client_server_barrels) {
+      addCategory(
+        "mixed-client-server-barrel",
+        this.result.mixed_client_server_barrels.map(
+          (b) =>
+            new IssueItem(
+              `${b.client_origin} + ${b.server_origin}`,
+              b.path,
+              b.line,
+              b.col,
+              "mixed-client-server-barrel",
+            ),
+        ),
+      );
+    }
+
+    if (this.result.misplaced_directives) {
+      addCategory(
+        "misplaced-directive",
+        this.result.misplaced_directives.map(
+          (d) => new IssueItem(d.directive, d.path, d.line, d.col, "misplaced-directive"),
+        ),
+      );
+    }
+
+    if (this.result.route_collisions) {
+      addCategory(
+        "route-collision",
+        this.result.route_collisions.map(
+          (r) => new IssueItem(r.url, r.path, r.line, r.col, "route-collision"),
+        ),
+      );
+    }
+
+    if (this.result.dynamic_segment_name_conflicts) {
+      addCategory(
+        "dynamic-segment-name-conflict",
+        this.result.dynamic_segment_name_conflicts.map(
+          (c) =>
+            new IssueItem(
+              `${c.position} (${c.conflicting_segments.join(" vs ")})`,
+              c.path,
+              c.line,
+              c.col,
+              "dynamic-segment-name-conflict",
+            ),
+        ),
+      );
+    }
+
     addCategory(
       "unresolved-imports",
       this.result.unresolved_imports.map(
@@ -368,18 +591,35 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
       );
     }
 
-    if (this.result.boundary_violations) {
+    const boundaryItems = [
+      ...(this.result.boundary_violations?.map(
+        (v) =>
+          new IssueItem(
+            `${v.from_zone} -> ${v.to_zone}`,
+            v.from_path,
+            v.line,
+            v.col,
+            "boundary-violation",
+          ),
+      ) ?? []),
+      ...(this.result.boundary_coverage_violations?.map(
+        (v) =>
+          new IssueItem("Unmatched boundary zone", v.path, v.line, v.col, "boundary-violation"),
+      ) ?? []),
+      ...(this.result.boundary_call_violations?.map(
+        (v) => new IssueItem(`${v.zone}: ${v.callee}`, v.path, v.line, v.col, "boundary-violation"),
+      ) ?? []),
+    ];
+    if (boundaryItems.length > 0) {
+      addCategory("boundary-violation", boundaryItems);
+    }
+
+    if (this.result.policy_violations) {
       addCategory(
-        "boundary-violation",
-        this.result.boundary_violations.map(
+        "policy-violations",
+        this.result.policy_violations.map(
           (v) =>
-            new IssueItem(
-              `${v.from_zone} -> ${v.to_zone}`,
-              v.from_path,
-              v.line,
-              v.col,
-              "boundary-violation",
-            ),
+            new IssueItem(`${v.pack}/${v.rule_id}`, v.path, v.line, v.col, "policy-violations"),
         ),
       );
     }

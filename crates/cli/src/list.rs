@@ -2,9 +2,10 @@ use std::process::ExitCode;
 
 use plow_config::OutputFormat;
 
-use crate::output_envelope::{WorkspaceInfo, WorkspacesOutput};
 use crate::report::format_display_path;
-use crate::runtime_support::load_config;
+use crate::runtime_support::{LoadConfigArgs, load_config};
+use plow_api::{BoundaryData, ListJsonEnvelope, ListJsonOutputInput};
+use plow_output::WorkspaceInfo;
 
 pub struct ListOptions<'a> {
     pub root: &'a std::path::Path,
@@ -20,51 +21,34 @@ pub struct ListOptions<'a> {
     pub production: bool,
 }
 
+/// Owned listing data assembled by [`collect_list_data`] and borrowed by the
+/// JSON / human renderers.
+struct ListData {
+    show_all: bool,
+    plugin_result: Option<plow_engine::AggregatedPluginResult>,
+    discovered: Option<Vec<plow_engine::DiscoveredFile>>,
+    entry_points: Option<Vec<plow_engine::EntryPoint>>,
+    boundary_data: Option<BoundaryData>,
+    workspace_data: Option<WorkspaceData>,
+}
+
 pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
     let config = match load_config(
         opts.root,
         opts.config_path,
-        opts.output,
-        opts.no_cache,
-        opts.threads,
-        opts.production,
-        true, // list command doesn't need progress bars
+        LoadConfigArgs {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production: opts.production,
+            quiet: true, // list command doesn't need progress bars
+        },
     ) {
         Ok(c) => c,
         Err(code) => return code,
     };
 
-    let show_all = should_show_all(opts);
-
-    let plugin_result = match collect_plugin_result(opts, &config, show_all) {
-        Ok(result) => result,
-        Err(code) => return code,
-    };
-
-    let need_files = needs_file_discovery(opts.files, show_all, opts.entry_points, opts.boundaries);
-    let discovered = if need_files {
-        Some(plow_core::discover::discover_files_with_plugin_scopes(
-            &config,
-        ))
-    } else {
-        None
-    };
-
-    let all_entry_points = collect_list_entry_points(
-        opts,
-        &config,
-        show_all,
-        discovered.as_deref(),
-        plugin_result.as_ref(),
-    );
-
-    let boundary_data = if opts.boundaries {
-        Some(compute_boundary_data(&config, discovered.as_deref()))
-    } else {
-        None
-    };
-
-    let workspace_data = match collect_list_workspace_data(opts, &config, show_all) {
+    let data = match collect_list_data(opts, &config) {
         Ok(data) => data,
         Err(code) => return code,
     };
@@ -72,48 +56,94 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
     match opts.output {
         OutputFormat::Json => print_list_json(&ListJsonInput {
             opts,
-            show_all,
-            plugin_result: plugin_result.as_ref(),
-            discovered: discovered.as_deref(),
-            entry_points: all_entry_points.as_deref(),
-            boundary_data: boundary_data.as_ref(),
-            workspace_data: workspace_data.as_ref(),
+            show_all: data.show_all,
+            plugin_result: data.plugin_result.as_ref(),
+            discovered: data.discovered.as_deref(),
+            entry_points: data.entry_points.as_deref(),
+            boundary_data: data.boundary_data.as_ref(),
+            workspace_data: data.workspace_data.as_ref(),
         }),
         _ => {
             print_list_human(&ListHumanInput {
                 opts,
-                show_all,
-                plugin_result: plugin_result.as_ref(),
-                discovered: discovered.as_deref(),
-                entry_points: all_entry_points.as_deref(),
-                boundary_data: boundary_data.as_ref(),
-                workspace_data: workspace_data.as_ref(),
+                show_all: data.show_all,
+                plugin_result: data.plugin_result.as_ref(),
+                discovered: data.discovered.as_deref(),
+                entry_points: data.entry_points.as_deref(),
+                boundary_data: data.boundary_data.as_ref(),
+                workspace_data: data.workspace_data.as_ref(),
             });
             ExitCode::SUCCESS
         }
     }
 }
 
+/// Collect plugins, files, entry points, boundary, and workspace data for a
+/// `plow list` run, honoring which listing modes are active.
+fn collect_list_data(
+    opts: &ListOptions<'_>,
+    config: &plow_config::ResolvedConfig,
+) -> Result<ListData, ExitCode> {
+    let show_all = should_show_all(opts);
+
+    let need_plugin_result = opts.plugins || opts.entry_points || show_all;
+    let need_files = needs_file_discovery(opts.files, show_all, opts.entry_points, opts.boundaries);
+    let discovered = if need_files || need_plugin_result {
+        Some(plow_engine::discover_files_with_plugin_scopes(config))
+    } else {
+        None
+    };
+
+    let plugin_result = collect_plugin_result(opts, config, show_all, discovered.as_deref())?;
+
+    let entry_points = collect_list_entry_points(
+        opts,
+        config,
+        show_all,
+        discovered.as_deref(),
+        plugin_result.as_ref(),
+    );
+
+    let boundary_data = if opts.boundaries {
+        Some(plow_api::compute_boundary_data(
+            config,
+            discovered.as_deref(),
+        ))
+    } else {
+        None
+    };
+
+    let workspace_data = collect_list_workspace_data(opts, config, show_all)?;
+
+    Ok(ListData {
+        show_all,
+        plugin_result,
+        discovered,
+        entry_points,
+        boundary_data,
+        workspace_data,
+    })
+}
+
 fn collect_list_entry_points(
     opts: &ListOptions<'_>,
     config: &plow_config::ResolvedConfig,
     show_all: bool,
-    discovered: Option<&[plow_types::discover::DiscoveredFile]>,
-    plugin_result: Option<&plow_core::plugins::AggregatedPluginResult>,
-) -> Option<Vec<plow_core::discover::EntryPoint>> {
+    discovered: Option<&[plow_engine::DiscoveredFile]>,
+    plugin_result: Option<&plow_engine::AggregatedPluginResult>,
+) -> Option<Vec<plow_engine::EntryPoint>> {
     if !(opts.entry_points || show_all) {
         return None;
     }
     let disc = discovered?;
-    let mut entries = plow_core::discover::discover_entry_points(config, disc);
+    let mut entries = plow_engine::discover_entry_points(config, disc);
     let workspaces = plow_config::discover_workspaces(opts.root);
     for ws in &workspaces {
-        let ws_entries =
-            plow_core::discover::discover_workspace_entry_points(&ws.root, config, disc);
+        let ws_entries = plow_engine::discover_workspace_entry_points(&ws.root, config, disc);
         entries.extend(ws_entries);
     }
     if let Some(pr) = plugin_result {
-        let plugin_entries = plow_core::discover::discover_plugin_entry_points(pr, config, disc);
+        let plugin_entries = plow_engine::discover_plugin_entry_points(pr, config, disc);
         entries.extend(plugin_entries);
     }
     Some(entries)
@@ -192,13 +222,21 @@ fn collect_plugin_result(
     opts: &ListOptions<'_>,
     config: &plow_config::ResolvedConfig,
     show_all: bool,
-) -> Result<Option<plow_core::plugins::AggregatedPluginResult>, ExitCode> {
+    discovered: Option<&[plow_engine::DiscoveredFile]>,
+) -> Result<Option<plow_engine::AggregatedPluginResult>, ExitCode> {
     if !(opts.plugins || opts.entry_points || show_all) {
         return Ok(None);
     }
-    let disc = plow_core::discover::discover_files_with_plugin_scopes(config);
+    let fallback_discovered;
+    let disc = match discovered {
+        Some(discovered) => discovered,
+        None => {
+            fallback_discovered = plow_engine::discover_files_with_plugin_scopes(config);
+            &fallback_discovered
+        }
+    };
     let file_paths: Vec<std::path::PathBuf> = disc.iter().map(|f| f.path.clone()).collect();
-    let registry = plow_core::plugins::PluginRegistry::new(config.external_plugins.clone());
+    let registry = plow_engine::PluginRegistry::new(config.external_plugins.clone());
     let mut result = run_package_plugins(
         &registry,
         &opts.root.join("package.json"),
@@ -212,12 +250,12 @@ fn collect_plugin_result(
 }
 
 fn run_package_plugins(
-    registry: &plow_core::plugins::PluginRegistry,
+    registry: &plow_engine::PluginRegistry,
     package_path: &std::path::Path,
     root: &std::path::Path,
     file_paths: &[std::path::PathBuf],
     output: OutputFormat,
-) -> Result<Option<plow_core::plugins::AggregatedPluginResult>, ExitCode> {
+) -> Result<Option<plow_engine::AggregatedPluginResult>, ExitCode> {
     let Ok(pkg) = plow_config::PackageJson::load(package_path) else {
         return Ok(None);
     };
@@ -225,16 +263,16 @@ fn run_package_plugins(
         .try_run(&pkg, root, file_paths)
         .map(Some)
         .map_err(|errors| {
-            let message = plow_core::plugins::registry::format_plugin_regex_errors(&errors);
+            let message = plow_engine::format_plugin_regex_errors(&errors);
             crate::error::emit_error(&message, 2, output)
         })
 }
 
 fn merge_workspace_plugins(
     opts: &ListOptions<'_>,
-    registry: &plow_core::plugins::PluginRegistry,
+    registry: &plow_engine::PluginRegistry,
     file_paths: &[std::path::PathBuf],
-    result: &mut plow_core::plugins::AggregatedPluginResult,
+    result: &mut plow_engine::AggregatedPluginResult,
 ) -> Result<(), ExitCode> {
     for ws in &plow_config::discover_workspaces(opts.root) {
         let Some(ws_result) = run_package_plugins(
@@ -247,11 +285,7 @@ fn merge_workspace_plugins(
         else {
             continue;
         };
-        for plugin_name in &ws_result.active_plugins {
-            if !result.active_plugins.contains(plugin_name) {
-                result.active_plugins.push(plugin_name.clone());
-            }
-        }
+        result.merge_active_plugins_from(&ws_result);
     }
     Ok(())
 }
@@ -260,85 +294,39 @@ fn merge_workspace_plugins(
 struct ListJsonInput<'a> {
     opts: &'a ListOptions<'a>,
     show_all: bool,
-    plugin_result: Option<&'a plow_core::plugins::AggregatedPluginResult>,
-    discovered: Option<&'a [plow_core::discover::DiscoveredFile]>,
-    entry_points: Option<&'a [plow_core::discover::EntryPoint]>,
+    plugin_result: Option<&'a plow_engine::AggregatedPluginResult>,
+    discovered: Option<&'a [plow_engine::DiscoveredFile]>,
+    entry_points: Option<&'a [plow_engine::EntryPoint]>,
     boundary_data: Option<&'a BoundaryData>,
     workspace_data: Option<&'a WorkspaceData>,
 }
 
 fn print_list_json(input: &ListJsonInput<'_>) -> ExitCode {
-    let opts = input.opts;
-    let show_all = input.show_all;
-    let plugin_result = input.plugin_result;
-    let discovered = input.discovered;
-    let entry_points = input.entry_points;
-    let boundary_data = input.boundary_data;
-    let workspace_data = input.workspace_data;
-    let mut result = serde_json::Map::new();
-
-    if (opts.plugins || show_all)
-        && let Some(pr) = plugin_result
-    {
-        let pl: Vec<serde_json::Value> = pr
-            .active_plugins
-            .iter()
-            .map(|name| serde_json::json!({ "name": name }))
-            .collect();
-        result.insert("plugins".to_string(), serde_json::json!(pl));
-    }
-
-    if (opts.files || show_all)
-        && let Some(disc) = discovered
-    {
-        let paths: Vec<serde_json::Value> = disc
-            .iter()
-            .map(|f| serde_json::json!(format_display_path(&f.path, opts.root)))
-            .collect();
-        result.insert("file_count".to_string(), serde_json::json!(paths.len()));
-        result.insert("files".to_string(), serde_json::json!(paths));
-    }
-
-    if let Some(entries) = entry_points {
-        let eps: Vec<serde_json::Value> = entries
-            .iter()
-            .map(|ep| {
-                serde_json::json!({
-                    "path": format_display_path(&ep.path, opts.root),
-                    "source": ep.source.to_string(),
-                })
-            })
-            .collect();
-        result.insert(
-            "entry_point_count".to_string(),
-            serde_json::json!(eps.len()),
-        );
-        result.insert("entry_points".to_string(), serde_json::json!(eps));
-    }
-
-    let has_boundaries = boundary_data.is_some();
-    if let Some(bd) = boundary_data {
-        result.insert("boundaries".to_string(), boundary_data_to_json(bd));
-    }
-
-    let workspace_only =
-        opts.workspaces && !opts.plugins && !opts.files && !opts.entry_points && !opts.boundaries;
-    if let Some(ws) = workspace_data {
-        let mut workspace_value = serde_json::to_value(workspace_data_to_output(opts.root, ws))
-            .unwrap_or(serde_json::Value::Null);
-        let root_prefix = format!("{}/", opts.root.display());
-        crate::report::strip_root_prefix(&mut workspace_value, &root_prefix);
-        if let serde_json::Value::Object(map) = workspace_value {
-            result.extend(map);
-        }
-    }
-
-    let mut output = serde_json::Value::Object(result);
-    if has_boundaries {
-        crate::output_envelope::apply_root_kind(&mut output, "list-boundaries");
+    let has_boundaries = input.boundary_data.is_some();
+    let workspace_only = input.opts.workspaces
+        && !input.opts.plugins
+        && !input.opts.files
+        && !input.opts.entry_points
+        && !input.opts.boundaries;
+    let envelope = if has_boundaries {
+        ListJsonEnvelope::Boundaries
     } else if workspace_only {
-        crate::output_envelope::apply_root_kind(&mut output, "list-workspaces");
-    }
+        ListJsonEnvelope::Workspaces
+    } else {
+        ListJsonEnvelope::Plain
+    };
+
+    let output = match plow_api::serialize_list_json_output(
+        build_list_json_output_input(input),
+        crate::output_runtime::current_root_envelope_mode(),
+        envelope,
+    ) {
+        Ok(value) => value,
+        Err(err) => {
+            eprintln!("Error: failed to serialize list output: {err}");
+            return ExitCode::from(2);
+        }
+    };
 
     match serde_json::to_string_pretty(&output) {
         Ok(json) => {
@@ -352,7 +340,58 @@ fn print_list_json(input: &ListJsonInput<'_>) -> ExitCode {
     }
 }
 
-fn workspace_data_to_output(root: &std::path::Path, ws: &WorkspaceData) -> WorkspacesOutput {
+/// Assemble the typed JSON body for a `plow list` run, one section per
+/// active listing mode.
+fn build_list_json_output_input(
+    input: &ListJsonInput<'_>,
+) -> ListJsonOutputInput<plow_api::BoundariesListing, plow_config::WorkspaceDiagnostic> {
+    let opts = input.opts;
+    let show_all = input.show_all;
+
+    let plugins = if opts.plugins || show_all {
+        input
+            .plugin_result
+            .map(|plugin_result| plugin_result.active_plugins().to_vec())
+    } else {
+        None
+    };
+
+    let files = if opts.files || show_all {
+        input.discovered.map(|discovered| {
+            discovered
+                .iter()
+                .map(|file| format_display_path(&file.path, opts.root))
+                .collect()
+        })
+    } else {
+        None
+    };
+
+    let entry_points = input.entry_points.map(|entries| {
+        entries
+            .iter()
+            .map(|entry| plow_api::ListEntryPointOutput {
+                path: format_display_path(&entry.path, opts.root),
+                source: entry.source.to_string(),
+            })
+            .collect()
+    });
+
+    ListJsonOutputInput {
+        plugins,
+        files,
+        entry_points,
+        boundaries: input.boundary_data.map(plow_api::boundary_data_to_output),
+        workspaces: input
+            .workspace_data
+            .map(|workspaces| workspace_data_to_output(opts.root, workspaces)),
+    }
+}
+
+fn workspace_data_to_output(
+    root: &std::path::Path,
+    ws: &WorkspaceData,
+) -> plow_api::WorkspacesOutput {
     let workspaces = ws
         .workspaces
         .iter()
@@ -365,7 +404,7 @@ fn workspace_data_to_output(root: &std::path::Path, ws: &WorkspaceData) -> Works
             }
         })
         .collect::<Vec<_>>();
-    WorkspacesOutput {
+    plow_api::WorkspacesOutput {
         workspace_count: workspaces.len(),
         workspaces,
         workspace_diagnostics: ws.diagnostics.clone(),
@@ -376,9 +415,9 @@ fn workspace_data_to_output(root: &std::path::Path, ws: &WorkspaceData) -> Works
 struct ListHumanInput<'a> {
     opts: &'a ListOptions<'a>,
     show_all: bool,
-    plugin_result: Option<&'a plow_core::plugins::AggregatedPluginResult>,
-    discovered: Option<&'a [plow_core::discover::DiscoveredFile]>,
-    entry_points: Option<&'a [plow_core::discover::EntryPoint]>,
+    plugin_result: Option<&'a plow_engine::AggregatedPluginResult>,
+    discovered: Option<&'a [plow_engine::DiscoveredFile]>,
+    entry_points: Option<&'a [plow_engine::EntryPoint]>,
     boundary_data: Option<&'a BoundaryData>,
     workspace_data: Option<&'a WorkspaceData>,
 }
@@ -395,7 +434,7 @@ fn print_list_human(input: &ListHumanInput<'_>) {
         && let Some(pr) = plugin_result
     {
         eprintln!("Active plugins:");
-        for name in &pr.active_plugins {
+        for name in pr.active_plugins() {
             eprintln!("  - {name}");
         }
     }
@@ -480,259 +519,12 @@ struct WorkspaceData {
     diagnostics: Vec<plow_config::WorkspaceDiagnostic>,
 }
 
-struct BoundaryData {
-    zones: Vec<ZoneInfo>,
-    rules: Vec<RuleInfo>,
-    logical_groups: Vec<LogicalGroupInfo>,
-    is_empty: bool,
-}
-
-struct ZoneInfo {
-    name: String,
-    patterns: Vec<String>,
-    file_count: usize,
-}
-
-struct RuleInfo {
-    from: String,
-    allow: Vec<String>,
-}
-
-/// View-model mirror of [`plow_config::LogicalGroup`] with the summed
-/// `file_count` derived from `zones[]`. The config-layer type stops at
-/// "what did the user write?"; this struct adds the analytical view "how
-/// many files does the group reach?" so the JSON consumer (Sankey
-/// renderer, dashboard, agent tooling) does not have to re-aggregate.
-struct LogicalGroupInfo {
-    name: String,
-    children: Vec<String>,
-    auto_discover: Vec<String>,
-    authored_rule: Option<plow_config::AuthoredRule>,
-    fallback_zone: Option<String>,
-    source_zone_index: usize,
-    status: plow_config::LogicalGroupStatus,
-    /// Sum of `file_count` across `children` PLUS the fallback zone's
-    /// `file_count` when present. The two halves are kept separately in
-    /// [`Self::child_file_count`] and [`Self::fallback_file_count`] so the
-    /// human renderer can show the split when a fallback exists.
-    file_count: usize,
-    /// Subtotal: sum of `file_count` across `children` only. Equals
-    /// [`Self::file_count`] when there is no fallback zone.
-    child_file_count: usize,
-    /// Subtotal: `file_count` of the `fallback_zone`. `0` when there is
-    /// no fallback zone.
-    fallback_file_count: usize,
-    /// Parent zone indices merged into this group when the user declared
-    /// the same parent name twice. Mirrors
-    /// [`plow_config::LogicalGroup::merged_from`].
-    merged_from: Option<Vec<usize>>,
-    /// Parent zone's `root` (subtree scope) as the user authored it.
-    /// Mirrors [`plow_config::LogicalGroup::original_zone_root`].
-    original_zone_root: Option<String>,
-    /// Parallel to `children`: source path indices. Empty when only one
-    /// `auto_discover` path was authored. Mirrors
-    /// [`plow_config::LogicalGroup::child_source_indices`].
-    child_source_indices: Vec<usize>,
-}
-
-fn compute_boundary_data(
-    config: &plow_config::ResolvedConfig,
-    discovered: Option<&[plow_core::discover::DiscoveredFile]>,
-) -> BoundaryData {
-    let boundaries = &config.boundaries;
-
-    if boundaries.is_empty() {
-        return BoundaryData {
-            zones: vec![],
-            rules: vec![],
-            logical_groups: vec![],
-            is_empty: true,
-        };
-    }
-
-    let zones: Vec<ZoneInfo> = boundaries
-        .zones
-        .iter()
-        .map(|zone| {
-            let file_count = discovered.map_or(0, |files| {
-                files
-                    .iter()
-                    .filter(|f| {
-                        let rel = f
-                            .path
-                            .strip_prefix(&config.root)
-                            .ok()
-                            .map(|p| p.to_string_lossy().replace('\\', "/"));
-                        rel.is_some_and(|p| {
-                            boundaries.classify_zone(&p) == Some(zone.name.as_str())
-                        })
-                    })
-                    .count()
-            });
-            ZoneInfo {
-                name: zone.name.clone(),
-                patterns: zone.matchers.iter().map(|m| m.glob().to_string()).collect(),
-                file_count,
-            }
-        })
-        .collect();
-
-    let rules: Vec<RuleInfo> = boundaries
-        .rules
-        .iter()
-        .map(|r| RuleInfo {
-            from: r.from_zone.clone(),
-            allow: r.allowed_zones.clone(),
-        })
-        .collect();
-
-    let zone_count_by_name: rustc_hash::FxHashMap<&str, usize> = zones
-        .iter()
-        .map(|z| (z.name.as_str(), z.file_count))
-        .collect();
-
-    let logical_groups: Vec<LogicalGroupInfo> = boundaries
-        .logical_groups
-        .iter()
-        .map(|g| {
-            let child_file_count: usize = g
-                .children
-                .iter()
-                .filter_map(|child| zone_count_by_name.get(child.as_str()).copied())
-                .sum();
-            let fallback_file_count = g
-                .fallback_zone
-                .as_deref()
-                .and_then(|fb| zone_count_by_name.get(fb).copied())
-                .unwrap_or(0);
-            LogicalGroupInfo {
-                name: g.name.clone(),
-                children: g.children.clone(),
-                auto_discover: g.auto_discover.clone(),
-                authored_rule: g.authored_rule.clone(),
-                fallback_zone: g.fallback_zone.clone(),
-                source_zone_index: g.source_zone_index,
-                status: g.status,
-                file_count: child_file_count + fallback_file_count,
-                child_file_count,
-                fallback_file_count,
-                merged_from: g.merged_from.clone(),
-                original_zone_root: g.original_zone_root.clone(),
-                child_source_indices: g.child_source_indices.clone(),
-            }
-        })
-        .collect();
-
-    BoundaryData {
-        zones,
-        rules,
-        logical_groups,
-        is_empty: false,
-    }
-}
-
+#[cfg(test)]
 fn boundary_data_to_json(bd: &BoundaryData) -> serde_json::Value {
-    if bd.is_empty {
-        return serde_json::json!({
-            "configured": false,
-            "zone_count": 0,
-            "zones": [],
-            "rule_count": 0,
-            "rules": [],
-            "logical_group_count": 0,
-            "logical_groups": [],
-        });
+    match serde_json::to_value(plow_api::boundary_data_to_output(bd)) {
+        Ok(value) => value,
+        Err(error) => panic!("boundary list output should serialize: {error}"),
     }
-
-    let zones: Vec<serde_json::Value> = bd
-        .zones
-        .iter()
-        .map(|z| {
-            serde_json::json!({
-                "name": z.name,
-                "patterns": z.patterns,
-                "file_count": z.file_count,
-            })
-        })
-        .collect();
-
-    let rules: Vec<serde_json::Value> = bd
-        .rules
-        .iter()
-        .map(|r| {
-            serde_json::json!({
-                "from": r.from,
-                "allow": r.allow,
-            })
-        })
-        .collect();
-
-    let logical_groups: Vec<serde_json::Value> = bd
-        .logical_groups
-        .iter()
-        .map(logical_group_info_to_json)
-        .collect();
-
-    serde_json::json!({
-        "configured": true,
-        "zone_count": bd.zones.len(),
-        "zones": zones,
-        "rule_count": bd.rules.len(),
-        "rules": rules,
-        "logical_group_count": bd.logical_groups.len(),
-        "logical_groups": logical_groups,
-    })
-}
-
-fn logical_group_info_to_json(g: &LogicalGroupInfo) -> serde_json::Value {
-    let status = match g.status {
-        plow_config::LogicalGroupStatus::Ok => "ok",
-        plow_config::LogicalGroupStatus::Empty => "empty",
-        plow_config::LogicalGroupStatus::InvalidPath => "invalid_path",
-    };
-    let mut entry = serde_json::Map::new();
-    entry.insert("name".to_string(), serde_json::json!(g.name));
-    entry.insert("children".to_string(), serde_json::json!(g.children));
-    entry.insert(
-        "auto_discover".to_string(),
-        serde_json::json!(g.auto_discover),
-    );
-    entry.insert("status".to_string(), serde_json::json!(status));
-    entry.insert(
-        "source_zone_index".to_string(),
-        serde_json::json!(g.source_zone_index),
-    );
-    entry.insert("file_count".to_string(), serde_json::json!(g.file_count));
-    if let Some(rule) = &g.authored_rule {
-        let mut rule_obj = serde_json::Map::new();
-        rule_obj.insert("allow".to_string(), serde_json::json!(rule.allow));
-        if !rule.allow_type_only.is_empty() {
-            rule_obj.insert(
-                "allow_type_only".to_string(),
-                serde_json::json!(rule.allow_type_only),
-            );
-        }
-        entry.insert(
-            "authored_rule".to_string(),
-            serde_json::Value::Object(rule_obj),
-        );
-    }
-    if let Some(fb) = &g.fallback_zone {
-        entry.insert("fallback_zone".to_string(), serde_json::json!(fb));
-    }
-    if let Some(chain) = &g.merged_from {
-        entry.insert("merged_from".to_string(), serde_json::json!(chain));
-    }
-    if let Some(root) = &g.original_zone_root {
-        entry.insert("original_zone_root".to_string(), serde_json::json!(root));
-    }
-    if !g.child_source_indices.is_empty() {
-        entry.insert(
-            "child_source_indices".to_string(),
-            serde_json::json!(g.child_source_indices),
-        );
-    }
-    serde_json::Value::Object(entry)
 }
 
 fn print_boundary_data_human(bd: &BoundaryData) {
@@ -741,6 +533,14 @@ fn print_boundary_data_human(bd: &BoundaryData) {
         return;
     }
 
+    print_boundary_header(bd);
+    print_boundary_zones(&bd.zones);
+    print_boundary_rules(&bd.rules);
+    print_boundary_logical_groups(&bd.logical_groups);
+}
+
+/// Print the `Boundaries: N zones, M rules[, K logical groups]` summary line.
+fn print_boundary_header(bd: &BoundaryData) {
     let mut header_parts = vec![
         format!("{} {}", bd.zones.len(), pluralize("zone", bd.zones.len())),
         format!("{} {}", bd.rules.len(), pluralize("rule", bd.rules.len())),
@@ -753,67 +553,84 @@ fn print_boundary_data_human(bd: &BoundaryData) {
         ));
     }
     eprintln!("Boundaries: {}", header_parts.join(", "));
+}
 
-    if !bd.zones.is_empty() {
-        eprintln!("\nZones:");
-        for zone in &bd.zones {
-            eprintln!(
-                "  {:<20} {} {}  {}",
-                zone.name,
-                zone.file_count,
-                pluralize("file", zone.file_count),
-                zone.patterns.join(", ")
-            );
+/// Print the per-zone name / file-count / patterns section.
+fn print_boundary_zones(zones: &[plow_api::ZoneInfo]) {
+    if zones.is_empty() {
+        return;
+    }
+    eprintln!("\nZones:");
+    for zone in zones {
+        eprintln!(
+            "  {:<20} {} {}  {}",
+            zone.name,
+            zone.file_count,
+            pluralize("file", zone.file_count),
+            zone.patterns.join(", ")
+        );
+    }
+}
+
+/// Print the per-rule from-zone / allowed-zones section.
+fn print_boundary_rules(rules: &[plow_api::RuleInfo]) {
+    if rules.is_empty() {
+        return;
+    }
+    eprintln!("\nRules:");
+    for rule in rules {
+        if rule.allow.is_empty() {
+            eprintln!("  {:<20} (isolated, no imports allowed)", rule.from);
+        } else {
+            eprintln!("  {:<20} → {}", rule.from, rule.allow.join(", "));
         }
     }
+}
 
-    if !bd.rules.is_empty() {
-        eprintln!("\nRules:");
-        for rule in &bd.rules {
-            if rule.allow.is_empty() {
-                eprintln!("  {:<20} (isolated, no imports allowed)", rule.from);
-            } else {
-                eprintln!("  {:<20} → {}", rule.from, rule.allow.join(", "));
-            }
-        }
+/// Print the status-ordered logical-groups section.
+fn print_boundary_logical_groups(logical_groups: &[plow_api::LogicalGroupInfo]) {
+    if logical_groups.is_empty() {
+        return;
     }
+    eprintln!("\nLogical groups:");
+    let mut ordered: Vec<&plow_api::LogicalGroupInfo> = logical_groups.iter().collect();
+    ordered.sort_by_key(|g| match g.status {
+        plow_config::LogicalGroupStatus::InvalidPath => 0,
+        plow_config::LogicalGroupStatus::Empty => 1,
+        plow_config::LogicalGroupStatus::Ok => 2,
+    });
+    for g in ordered {
+        print_logical_group_row(g);
+    }
+}
 
-    if !bd.logical_groups.is_empty() {
-        eprintln!("\nLogical groups:");
-        let mut ordered: Vec<&LogicalGroupInfo> = bd.logical_groups.iter().collect();
-        ordered.sort_by_key(|g| match g.status {
-            plow_config::LogicalGroupStatus::InvalidPath => 0,
-            plow_config::LogicalGroupStatus::Empty => 1,
-            plow_config::LogicalGroupStatus::Ok => 2,
-        });
-        for g in ordered {
-            let status_suffix = match g.status {
-                plow_config::LogicalGroupStatus::Ok => String::new(),
-                plow_config::LogicalGroupStatus::Empty => " (empty)".to_owned(),
-                plow_config::LogicalGroupStatus::InvalidPath => " (invalid path)".to_owned(),
-            };
-            let file_count_render = if g.fallback_zone.is_some() {
-                format!(
-                    "{} {} ({} children + {} fallback)",
-                    g.file_count,
-                    pluralize("file", g.file_count),
-                    g.child_file_count,
-                    g.fallback_file_count
-                )
-            } else {
-                format!("{} {}", g.file_count, pluralize("file", g.file_count))
-            };
-            eprintln!(
-                "  {:<20} {}  autoDiscover: {}{}",
-                g.name,
-                file_count_render,
-                g.auto_discover.join(", "),
-                status_suffix
-            );
-            if !g.children.is_empty() {
-                eprintln!("    children: {}", g.children.join(", "));
-            }
-        }
+/// Print one logical-group row plus its optional children line.
+fn print_logical_group_row(g: &plow_api::LogicalGroupInfo) {
+    let status_suffix = match g.status {
+        plow_config::LogicalGroupStatus::Ok => String::new(),
+        plow_config::LogicalGroupStatus::Empty => " (empty)".to_owned(),
+        plow_config::LogicalGroupStatus::InvalidPath => " (invalid path)".to_owned(),
+    };
+    let file_count_render = if g.fallback_zone.is_some() {
+        format!(
+            "{} {} ({} children + {} fallback)",
+            g.file_count,
+            pluralize("file", g.file_count),
+            g.child_file_count,
+            g.fallback_file_count
+        )
+    } else {
+        format!("{} {}", g.file_count, pluralize("file", g.file_count))
+    };
+    eprintln!(
+        "  {:<20} {}  autoDiscover: {}{}",
+        g.name,
+        file_count_render,
+        g.auto_discover.join(", "),
+        status_suffix
+    );
+    if !g.children.is_empty() {
+        eprintln!("    children: {}", g.children.join(", "));
     }
 }
 
@@ -830,6 +647,8 @@ fn pluralize(noun: &str, count: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use plow_api::{LogicalGroupInfo, ZoneInfo};
+
     use super::*;
 
     fn make_opts(

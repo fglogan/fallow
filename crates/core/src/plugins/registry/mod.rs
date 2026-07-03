@@ -27,6 +27,7 @@ pub fn builtin_plugin_names() -> Vec<&'static str> {
         .collect()
 }
 
+pub use helpers::ConfigCandidateIndex;
 use helpers::{
     check_has_config_file, discover_config_files, is_external_plugin_active,
     prepare_config_pattern, process_config_result, process_external_plugins,
@@ -62,10 +63,77 @@ fn compile_config_matchers<'a>(
         .collect()
 }
 
+/// Emit one info-level line naming every active plugin.
+fn log_active_plugins(active: &[&dyn Plugin]) {
+    tracing::info!(
+        plugins = active
+            .iter()
+            .map(|p| p.name())
+            .collect::<Vec<_>>()
+            .join(", "),
+        "active plugins"
+    );
+}
+
+/// Compute `(absolute, root-relative)` file pairs, but only when at least one
+/// active plugin needs config matching or a package.json config key. Returns an
+/// empty vec otherwise to skip the per-file path work.
+fn compute_relative_files(
+    config_matchers: &[(&dyn Plugin, Vec<globset::GlobMatcher>)],
+    active: &[&dyn Plugin],
+    discovered_files: &[PathBuf],
+    root: &Path,
+) -> Vec<(PathBuf, String)> {
+    use rayon::prelude::*;
+    let needs_relative_files =
+        !config_matchers.is_empty() || active.iter().any(|p| p.package_json_config_key().is_some());
+    if !needs_relative_files {
+        return Vec::new();
+    }
+    discovered_files
+        .par_iter()
+        .map(|f| {
+            let rel = f
+                .strip_prefix(root)
+                .unwrap_or(f)
+                .to_string_lossy()
+                .into_owned();
+            (f.clone(), rel)
+        })
+        .collect()
+}
+
 /// Registry of all available plugins (built-in + external).
 pub struct PluginRegistry {
     plugins: Vec<Box<dyn Plugin>>,
     external_plugins: Vec<ExternalPluginDef>,
+}
+
+/// Inputs for the workspace-fast plugin path.
+pub struct WorkspacePluginRunInput<'a> {
+    pub pkg: &'a PackageJson,
+    pub root: &'a Path,
+    pub project_root: &'a Path,
+    pub precompiled_config_matchers: &'a [(&'a dyn Plugin, Vec<globset::GlobMatcher>)],
+    pub relative_files: &'a [(PathBuf, String)],
+    pub skip_config_plugins: &'a FxHashSet<&'a str>,
+    pub production_mode: bool,
+    pub candidate_index: Option<&'a ConfigCandidateIndex>,
+}
+
+struct PluginRunContext<'a> {
+    all_deps: Vec<String>,
+    active: Vec<&'a dyn Plugin>,
+}
+
+/// Inputs governing which built-in plugins activate for a project.
+struct PluginActivationInput<'a> {
+    pkg: &'a PackageJson,
+    root: &'a Path,
+    discovered_files: &'a [PathBuf],
+    all_deps: &'a [String],
+    script_packages: &'a FxHashSet<String>,
+    candidate_index: Option<&'a ConfigCandidateIndex>,
 }
 
 /// Invalid user-authored regex extracted from a plugin config file.
@@ -81,25 +149,28 @@ pub struct PluginRegexValidationError {
 }
 
 impl PluginRegexValidationError {
-    pub(crate) fn new(
-        plugin_name: &str,
-        config_path: Option<&Path>,
-        rule_kind: &'static str,
-        field: &'static str,
-        rule_pattern: &str,
-        regex_pattern: &str,
-        source: &regex::Error,
-    ) -> Self {
+    pub(crate) fn new(input: PluginRegexValidationErrorInput<'_>) -> Self {
         Self {
-            plugin_name: plugin_name.to_owned(),
-            config_path: config_path.map(Path::to_path_buf),
-            rule_kind,
-            field,
-            rule_pattern: rule_pattern.to_owned(),
-            regex_pattern: regex_pattern.to_owned(),
-            source: source.to_string(),
+            plugin_name: input.plugin_name.to_owned(),
+            config_path: input.config_path.map(Path::to_path_buf),
+            rule_kind: input.rule_kind,
+            field: input.field,
+            rule_pattern: input.rule_pattern.to_owned(),
+            regex_pattern: input.regex_pattern.to_owned(),
+            source: input.source.to_string(),
         }
     }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct PluginRegexValidationErrorInput<'a> {
+    pub(crate) plugin_name: &'a str,
+    pub(crate) config_path: Option<&'a Path>,
+    pub(crate) rule_kind: &'static str,
+    pub(crate) field: &'static str,
+    pub(crate) rule_pattern: &'a str,
+    pub(crate) regex_pattern: &'a str,
+    pub(crate) source: &'a regex::Error,
 }
 
 impl fmt::Display for PluginRegexValidationError {
@@ -390,11 +461,15 @@ impl PluginRegistry {
         root: &Path,
         discovered_files: &[PathBuf],
     ) -> Result<AggregatedPluginResult, Vec<PluginRegexValidationError>> {
-        self.try_run_with_search_roots(pkg, root, discovered_files, &[root], false)
+        self.try_run_with_search_roots(pkg, root, discovered_files, &[root], false, None)
     }
 
     /// Run all plugins against a project with explicit config-file search roots,
     /// returning invalid plugin regexes as hard errors.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "public PluginRegistry API; signature is part of the crate surface for embedders"
+    )]
     pub fn try_run_with_search_roots(
         &self,
         pkg: &PackageJson,
@@ -402,36 +477,21 @@ impl PluginRegistry {
         discovered_files: &[PathBuf],
         config_search_roots: &[&Path],
         production_mode: bool,
+        candidate_index: Option<&ConfigCandidateIndex>,
     ) -> Result<AggregatedPluginResult, Vec<PluginRegexValidationError>> {
         let _span = tracing::info_span!("run_plugins").entered();
         let mut result = AggregatedPluginResult::default();
         let mut regex_errors = Vec::new();
 
-        let all_deps = pkg.all_dependency_names();
-        let script_packages = script_activation_packages(pkg, root, &all_deps, production_mode);
-        let active: Vec<&dyn Plugin> = self
-            .plugins
-            .iter()
-            .filter(|p| {
-                p.is_enabled_with_files(&all_deps, root, discovered_files)
-                    || p.is_enabled_with_scripts(&script_packages, root)
-                    || p.is_enabled_with_package_json(pkg, root)
-            })
-            .map(AsRef::as_ref)
-            .collect();
-
-        tracing::info!(
-            plugins = active
-                .iter()
-                .map(|p| p.name())
-                .collect::<Vec<_>>()
-                .join(", "),
-            "active plugins"
+        let PluginRunContext { all_deps, active } = self.prepare_plugin_run_context(
+            pkg,
+            root,
+            discovered_files,
+            production_mode,
+            candidate_index,
         );
 
-        check_meta_framework_prerequisites(&active, root);
-
-        self.emit_silent_fail_diagnostics(&active, &all_deps, root, discovered_files);
+        self.run_plugin_preflight(&active, &all_deps, root, discovered_files);
 
         for plugin in &active {
             process_static_patterns(*plugin, root, &mut result);
@@ -447,35 +507,19 @@ impl PluginRegistry {
         );
 
         let config_matchers = compile_config_matchers(&active);
+        let relative_files =
+            compute_relative_files(&config_matchers, &active, discovered_files, root);
 
-        use rayon::prelude::*;
-        let needs_relative_files = !config_matchers.is_empty()
-            || active.iter().any(|p| p.package_json_config_key().is_some());
-        let relative_files: Vec<(PathBuf, String)> = if needs_relative_files {
-            discovered_files
-                .par_iter()
-                .map(|f| {
-                    let rel = f
-                        .strip_prefix(root)
-                        .unwrap_or(f)
-                        .to_string_lossy()
-                        .into_owned();
-                    (f.clone(), rel)
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
-
-        resolve_plugin_config_files(
-            &config_matchers,
-            &relative_files,
+        resolve_plugin_config_files(&mut PluginConfigResolutionInput {
+            config_matchers: &config_matchers,
+            relative_files: &relative_files,
             config_search_roots,
             production_mode,
+            candidate_index,
             root,
-            &mut result,
-            &mut regex_errors,
-        );
+            result: &mut result,
+            regex_errors: &mut regex_errors,
+        });
 
         process_package_json_inline_configs(
             &active,
@@ -498,32 +542,10 @@ impl PluginRegistry {
     /// Reuses pre-compiled config matchers and pre-computed relative files from the root
     /// project run, avoiding repeated glob compilation and path computation per workspace.
     /// Skips package.json inline config (workspace packages rarely have inline configs).
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "Each parameter is a distinct, small value with no natural grouping; \
-                  bundling them into a struct hurts call-site readability."
-    )]
     #[cfg(test)]
-    fn run_workspace_fast(
-        &self,
-        pkg: &PackageJson,
-        root: &Path,
-        project_root: &Path,
-        precompiled_config_matchers: &[(&dyn Plugin, Vec<globset::GlobMatcher>)],
-        relative_files: &[(PathBuf, String)],
-        skip_config_plugins: &FxHashSet<&str>,
-        production_mode: bool,
-    ) -> AggregatedPluginResult {
-        self.try_run_workspace_fast(
-            pkg,
-            root,
-            project_root,
-            precompiled_config_matchers,
-            relative_files,
-            skip_config_plugins,
-            production_mode,
-        )
-        .unwrap_or_else(|errors| panic!("{}", format_plugin_regex_errors(&errors)))
+    fn run_workspace_fast(&self, input: &WorkspacePluginRunInput<'_>) -> AggregatedPluginResult {
+        self.try_run_workspace_fast(input)
+            .unwrap_or_else(|errors| panic!("{}", format_plugin_regex_errors(&errors)))
     }
 
     /// Fast variant of `try_run()` for workspace packages.
@@ -531,58 +553,40 @@ impl PluginRegistry {
     /// Reuses pre-compiled config matchers and pre-computed relative files from the root
     /// project run, avoiding repeated glob compilation and path computation per workspace.
     /// Skips package.json inline config (workspace packages rarely have inline configs).
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "Each parameter is a distinct, small value with no natural grouping; \
-                  bundling them into a struct hurts call-site readability."
-    )]
     pub fn try_run_workspace_fast(
         &self,
-        pkg: &PackageJson,
-        root: &Path,
-        project_root: &Path,
-        precompiled_config_matchers: &[(&dyn Plugin, Vec<globset::GlobMatcher>)],
-        relative_files: &[(PathBuf, String)],
-        skip_config_plugins: &FxHashSet<&str>,
-        production_mode: bool,
+        input: &WorkspacePluginRunInput<'_>,
     ) -> Result<AggregatedPluginResult, Vec<PluginRegexValidationError>> {
         let _span = tracing::info_span!("run_plugins").entered();
         let mut result = AggregatedPluginResult::default();
         let mut regex_errors = Vec::new();
 
-        let all_deps = pkg.all_dependency_names();
-        let script_packages = script_activation_packages(pkg, root, &all_deps, production_mode);
-        let workspace_files: Vec<PathBuf> = relative_files
+        let all_deps = input.pkg.all_dependency_names();
+        let script_packages =
+            script_activation_packages(input.pkg, input.root, &all_deps, input.production_mode);
+        let workspace_files: Vec<PathBuf> = input
+            .relative_files
             .iter()
             .map(|(abs_path, _)| abs_path.clone())
             .collect();
 
-        let active: Vec<&dyn Plugin> = self
-            .plugins
-            .iter()
-            .filter(|p| {
-                p.is_enabled_with_files(&all_deps, root, &workspace_files)
-                    || p.is_enabled_with_scripts(&script_packages, root)
-                    || p.is_enabled_with_package_json(pkg, root)
-            })
-            .map(AsRef::as_ref)
-            .collect();
+        let active = self.collect_active_plugins(&PluginActivationInput {
+            pkg: input.pkg,
+            root: input.root,
+            discovered_files: &workspace_files,
+            all_deps: &all_deps,
+            script_packages: &script_packages,
+            candidate_index: input.candidate_index,
+        });
 
-        tracing::info!(
-            plugins = active
-                .iter()
-                .map(|p| p.name())
-                .collect::<Vec<_>>()
-                .join(", "),
-            "active plugins"
-        );
+        log_active_plugins(&active);
 
-        self.emit_silent_fail_diagnostics(&active, &all_deps, root, &workspace_files);
+        self.emit_silent_fail_diagnostics(&active, &all_deps, input.root, &workspace_files);
 
         process_external_plugins(
             &self.external_plugins,
             &all_deps,
-            root,
+            input.root,
             &workspace_files,
             &mut result,
         );
@@ -591,76 +595,8 @@ impl PluginRegistry {
             return Ok(result);
         }
 
-        for plugin in &active {
-            process_static_patterns(*plugin, root, &mut result);
-        }
-        process_package_json_metadata(&active, pkg, root, &mut result, &mut regex_errors);
-
-        let active_names: FxHashSet<&str> = active.iter().map(|p| p.name()).collect();
-        let workspace_matchers: Vec<_> = precompiled_config_matchers
-            .iter()
-            .filter(|(p, _)| {
-                active_names.contains(p.name())
-                    && (!skip_config_plugins.contains(p.name())
-                        || must_parse_workspace_config_when_root_active(p.name()))
-            })
-            .map(|(plugin, matchers)| (*plugin, matchers.clone()))
-            .collect();
-
-        let mut resolved_ws_plugins: FxHashSet<&str> = FxHashSet::default();
-        for (plugin, matchers) in &workspace_matchers {
-            resolve_plugin_matching_files(
-                *plugin,
-                matchers,
-                relative_files,
-                root,
-                &mut result,
-                &mut regex_errors,
-                &mut resolved_ws_plugins,
-            );
-        }
-
-        let ws_json_configs = if root == project_root {
-            discover_config_files(
-                &workspace_matchers,
-                &resolved_ws_plugins,
-                &[root],
-                production_mode,
-            )
-        } else {
-            discover_config_files(
-                &workspace_matchers,
-                &resolved_ws_plugins,
-                &[root, project_root],
-                production_mode,
-            )
-        };
-        for (abs_path, plugin) in &ws_json_configs {
-            if let Ok(source) = std::fs::read_to_string(abs_path) {
-                let plugin_result = plugin.resolve_config(abs_path, &source, root);
-                if !plugin_result.is_empty() {
-                    let rel = abs_path
-                        .strip_prefix(project_root)
-                        .map(|p| p.to_string_lossy())
-                        .unwrap_or_default();
-                    tracing::debug!(
-                        plugin = plugin.name(),
-                        config = %rel,
-                        entries = plugin_result.entry_patterns.len(),
-                        deps = plugin_result.referenced_dependencies.len(),
-                        "resolved config (workspace filesystem fallback)"
-                    );
-                    if let Err(mut errors) = process_config_result(
-                        plugin.name(),
-                        plugin_result,
-                        &mut result,
-                        Some(abs_path),
-                    ) {
-                        regex_errors.append(&mut errors);
-                    }
-                }
-            }
-        }
+        process_workspace_active_plugins(&active, input, &mut result, &mut regex_errors);
+        resolve_workspace_plugin_configs(&active, input, &mut result, &mut regex_errors);
 
         if regex_errors.is_empty() {
             Ok(result)
@@ -693,6 +629,55 @@ impl PluginRegistry {
     }
 }
 
+fn process_workspace_active_plugins(
+    active: &[&dyn Plugin],
+    input: &WorkspacePluginRunInput<'_>,
+    result: &mut AggregatedPluginResult,
+    regex_errors: &mut Vec<PluginRegexValidationError>,
+) {
+    for plugin in active {
+        process_static_patterns(*plugin, input.root, result);
+    }
+    process_package_json_metadata(active, input.pkg, input.root, result, regex_errors);
+}
+
+fn resolve_workspace_plugin_configs(
+    active: &[&dyn Plugin],
+    input: &WorkspacePluginRunInput<'_>,
+    result: &mut AggregatedPluginResult,
+    regex_errors: &mut Vec<PluginRegexValidationError>,
+) {
+    let workspace_matchers = select_workspace_matchers(
+        input.precompiled_config_matchers,
+        active,
+        input.skip_config_plugins,
+    );
+
+    let mut resolved_ws_plugins: FxHashSet<&str> = FxHashSet::default();
+    for (plugin, matchers) in &workspace_matchers {
+        resolve_plugin_matching_files(&mut PluginMatchingFilesInput {
+            plugin: *plugin,
+            matchers,
+            relative_files: input.relative_files,
+            root: input.root,
+            result,
+            regex_errors,
+            resolved_plugins: &mut resolved_ws_plugins,
+        });
+    }
+
+    load_workspace_filesystem_configs(&mut WorkspaceFsConfigInput {
+        workspace_matchers: &workspace_matchers,
+        resolved_ws_plugins: &resolved_ws_plugins,
+        root: input.root,
+        project_root: input.project_root,
+        production_mode: input.production_mode,
+        candidate_index: input.candidate_index,
+        result,
+        regex_errors,
+    });
+}
+
 impl Default for PluginRegistry {
     fn default() -> Self {
         Self::new(vec![])
@@ -700,6 +685,61 @@ impl Default for PluginRegistry {
 }
 
 impl PluginRegistry {
+    fn prepare_plugin_run_context<'a>(
+        &'a self,
+        pkg: &PackageJson,
+        root: &Path,
+        discovered_files: &[PathBuf],
+        production_mode: bool,
+        candidate_index: Option<&ConfigCandidateIndex>,
+    ) -> PluginRunContext<'a> {
+        let all_deps = pkg.all_dependency_names();
+        let script_packages = script_activation_packages(pkg, root, &all_deps, production_mode);
+        let active = self.collect_active_plugins(&PluginActivationInput {
+            pkg,
+            root,
+            discovered_files,
+            all_deps: &all_deps,
+            script_packages: &script_packages,
+            candidate_index,
+        });
+
+        PluginRunContext { all_deps, active }
+    }
+
+    fn run_plugin_preflight(
+        &self,
+        active: &[&dyn Plugin],
+        all_deps: &[String],
+        root: &Path,
+        discovered_files: &[PathBuf],
+    ) {
+        log_active_plugins(active);
+        check_meta_framework_prerequisites(active, root);
+        self.emit_silent_fail_diagnostics(active, all_deps, root, discovered_files);
+    }
+
+    /// Collect every built-in plugin enabled for this project via files,
+    /// scripts, or package.json. Shared by the root and workspace-fast paths.
+    fn collect_active_plugins<'a>(
+        &'a self,
+        activation: &PluginActivationInput<'_>,
+    ) -> Vec<&'a dyn Plugin> {
+        self.plugins
+            .iter()
+            .filter(|p| {
+                p.is_enabled_with_files(
+                    activation.all_deps,
+                    activation.root,
+                    activation.discovered_files,
+                    activation.candidate_index,
+                ) || p.is_enabled_with_scripts(activation.script_packages, activation.root)
+                    || p.is_enabled_with_package_json(activation.pkg, activation.root)
+            })
+            .map(AsRef::as_ref)
+            .collect()
+    }
+
     /// Collect the active subset of external plugins, run the silent-fail
     /// diagnostics (#479), and emit one `tracing::warn!` per finding (dedup'd
     /// across analysis passes via [`plugin_warn_dedupe`]).
@@ -738,58 +778,144 @@ fn plugin_warn_dedupe() -> &'static std::sync::Mutex<FxHashSet<String>> {
     WARNED.get_or_init(|| std::sync::Mutex::new(FxHashSet::default()))
 }
 
-fn resolve_plugin_config_files(
-    config_matchers: &[(&dyn Plugin, Vec<globset::GlobMatcher>)],
-    relative_files: &[(PathBuf, String)],
-    config_search_roots: &[&Path],
+struct PluginConfigResolutionInput<'a> {
+    config_matchers: &'a [(&'a dyn Plugin, Vec<globset::GlobMatcher>)],
+    relative_files: &'a [(PathBuf, String)],
+    config_search_roots: &'a [&'a Path],
     production_mode: bool,
-    root: &Path,
-    result: &mut AggregatedPluginResult,
-    regex_errors: &mut Vec<PluginRegexValidationError>,
-) {
-    if config_matchers.is_empty() {
+    candidate_index: Option<&'a ConfigCandidateIndex>,
+    root: &'a Path,
+    result: &'a mut AggregatedPluginResult,
+    regex_errors: &'a mut Vec<PluginRegexValidationError>,
+}
+
+/// Filter pre-compiled matchers down to active plugins, keeping a config-skipped
+/// plugin only when it must still parse its workspace config while root-active.
+fn select_workspace_matchers<'a>(
+    precompiled_config_matchers: &[(&'a dyn Plugin, Vec<globset::GlobMatcher>)],
+    active: &[&dyn Plugin],
+    skip_config_plugins: &FxHashSet<&str>,
+) -> Vec<(&'a dyn Plugin, Vec<globset::GlobMatcher>)> {
+    let active_names: FxHashSet<&str> = active.iter().map(|p| p.name()).collect();
+    precompiled_config_matchers
+        .iter()
+        .filter(|(p, _)| {
+            active_names.contains(p.name())
+                && (!skip_config_plugins.contains(p.name())
+                    || must_parse_workspace_config_when_root_active(p.name()))
+        })
+        .map(|(plugin, matchers)| (*plugin, matchers.clone()))
+        .collect()
+}
+
+struct WorkspaceFsConfigInput<'a> {
+    workspace_matchers: &'a [(&'a dyn Plugin, Vec<globset::GlobMatcher>)],
+    resolved_ws_plugins: &'a FxHashSet<&'a str>,
+    root: &'a Path,
+    project_root: &'a Path,
+    production_mode: bool,
+    candidate_index: Option<&'a ConfigCandidateIndex>,
+    result: &'a mut AggregatedPluginResult,
+    regex_errors: &'a mut Vec<PluginRegexValidationError>,
+}
+
+/// Discover and parse workspace config files on disk for plugins not already
+/// matched against discovered source files (workspace filesystem fallback).
+fn load_workspace_filesystem_configs(input: &mut WorkspaceFsConfigInput<'_>) {
+    let search_roots: &[&Path] = if input.root == input.project_root {
+        &[input.root]
+    } else {
+        &[input.root, input.project_root]
+    };
+    let ws_json_configs = discover_config_files(
+        input.workspace_matchers,
+        input.resolved_ws_plugins,
+        search_roots,
+        input.production_mode,
+        input.candidate_index,
+    );
+    for (abs_path, plugin) in &ws_json_configs {
+        let Ok(source) = std::fs::read_to_string(abs_path) else {
+            continue;
+        };
+        let plugin_result = plugin.resolve_config(abs_path, &source, input.root);
+        if plugin_result.is_empty() {
+            continue;
+        }
+        let rel = abs_path
+            .strip_prefix(input.project_root)
+            .map(|p| p.to_string_lossy())
+            .unwrap_or_default();
+        tracing::debug!(
+            plugin = plugin.name(),
+            config = %rel,
+            entries = plugin_result.entry_patterns.len(),
+            deps = plugin_result.referenced_dependencies.len(),
+            "resolved config (workspace filesystem fallback)"
+        );
+        if let Err(mut errors) =
+            process_config_result(plugin.name(), plugin_result, input.result, Some(abs_path))
+        {
+            input.regex_errors.append(&mut errors);
+        }
+    }
+}
+
+fn resolve_plugin_config_files(input: &mut PluginConfigResolutionInput<'_>) {
+    if input.config_matchers.is_empty() {
         return;
     }
 
     let mut resolved_plugins: FxHashSet<&str> = FxHashSet::default();
-    for (plugin, matchers) in config_matchers {
-        resolve_plugin_matching_files(
-            *plugin,
+    for (plugin, matchers) in input.config_matchers {
+        resolve_plugin_matching_files(&mut PluginMatchingFilesInput {
+            plugin: *plugin,
             matchers,
-            relative_files,
-            root,
-            result,
-            regex_errors,
-            &mut resolved_plugins,
-        );
+            relative_files: input.relative_files,
+            root: input.root,
+            result: input.result,
+            regex_errors: input.regex_errors,
+            resolved_plugins: &mut resolved_plugins,
+        });
     }
 
     let json_configs = discover_config_files(
-        config_matchers,
+        input.config_matchers,
         &resolved_plugins,
-        config_search_roots,
-        production_mode,
+        input.config_search_roots,
+        input.production_mode,
+        input.candidate_index,
     );
     for (abs_path, plugin) in &json_configs {
-        resolve_plugin_filesystem_config(*plugin, abs_path, root, result, regex_errors);
+        resolve_plugin_filesystem_config(
+            *plugin,
+            abs_path,
+            input.root,
+            input.result,
+            input.regex_errors,
+        );
     }
 }
 
-fn resolve_plugin_matching_files<'a>(
-    plugin: &'a dyn Plugin,
-    matchers: &[globset::GlobMatcher],
-    relative_files: &'a [(PathBuf, String)],
-    root: &Path,
-    result: &mut AggregatedPluginResult,
-    regex_errors: &mut Vec<PluginRegexValidationError>,
-    resolved_plugins: &mut FxHashSet<&'a str>,
-) {
+struct PluginMatchingFilesInput<'plugins, 'data, 'state> {
+    plugin: &'plugins dyn Plugin,
+    matchers: &'data [globset::GlobMatcher],
+    relative_files: &'data [(PathBuf, String)],
+    root: &'data Path,
+    result: &'state mut AggregatedPluginResult,
+    regex_errors: &'state mut Vec<PluginRegexValidationError>,
+    resolved_plugins: &'state mut FxHashSet<&'plugins str>,
+}
+
+fn resolve_plugin_matching_files(input: &mut PluginMatchingFilesInput<'_, '_, '_>) {
     use rayon::prelude::*;
 
-    let plugin_hits: Vec<&PathBuf> = relative_files
+    let plugin_hits: Vec<&PathBuf> = input
+        .relative_files
         .par_iter()
         .filter_map(|(abs_path, rel_path)| {
-            matchers
+            input
+                .matchers
                 .iter()
                 .any(|m| m.is_match(rel_path.as_str()))
                 .then_some(abs_path)
@@ -799,20 +925,20 @@ fn resolve_plugin_matching_files<'a>(
         let Ok(source) = std::fs::read_to_string(abs_path) else {
             continue;
         };
-        let plugin_result = plugin.resolve_config(abs_path, &source, root);
+        let plugin_result = input.plugin.resolve_config(abs_path, &source, input.root);
         if plugin_result.is_empty() {
             continue;
         }
-        resolved_plugins.insert(plugin.name());
-        process_resolved_plugin_config(
-            plugin,
+        input.resolved_plugins.insert(input.plugin.name());
+        process_resolved_plugin_config(ResolvedPluginConfigInput {
+            plugin: input.plugin,
             abs_path,
             plugin_result,
-            result,
-            regex_errors,
-            "resolved config",
-            abs_path.display(),
-        );
+            result: input.result,
+            regex_errors: input.regex_errors,
+            message: "resolved config",
+            config_display: abs_path.display(),
+        });
     }
 }
 
@@ -834,37 +960,42 @@ fn resolve_plugin_filesystem_config(
         .strip_prefix(root)
         .map(|p| p.to_string_lossy())
         .unwrap_or_default();
-    process_resolved_plugin_config(
+    process_resolved_plugin_config(ResolvedPluginConfigInput {
         plugin,
         abs_path,
         plugin_result,
         result,
         regex_errors,
-        "resolved config (filesystem fallback)",
-        rel,
-    );
+        message: "resolved config (filesystem fallback)",
+        config_display: rel,
+    });
 }
 
-fn process_resolved_plugin_config(
-    plugin: &dyn Plugin,
-    abs_path: &Path,
+struct ResolvedPluginConfigInput<'a, D> {
+    plugin: &'a dyn Plugin,
+    abs_path: &'a Path,
     plugin_result: PluginResult,
-    result: &mut AggregatedPluginResult,
-    regex_errors: &mut Vec<PluginRegexValidationError>,
+    result: &'a mut AggregatedPluginResult,
+    regex_errors: &'a mut Vec<PluginRegexValidationError>,
     message: &'static str,
-    config_display: impl std::fmt::Display,
-) {
+    config_display: D,
+}
+
+fn process_resolved_plugin_config(input: ResolvedPluginConfigInput<'_, impl std::fmt::Display>) {
     tracing::debug!(
-        plugin = plugin.name(),
-        config = %config_display,
-        entries = plugin_result.entry_patterns.len(),
-        deps = plugin_result.referenced_dependencies.len(),
-        message
+        plugin = input.plugin.name(),
+        config = %input.config_display,
+        entries = input.plugin_result.entry_patterns.len(),
+        deps = input.plugin_result.referenced_dependencies.len(),
+        input.message
     );
-    if let Err(mut errors) =
-        process_config_result(plugin.name(), plugin_result, result, Some(abs_path))
-    {
-        regex_errors.append(&mut errors);
+    if let Err(mut errors) = process_config_result(
+        input.plugin.name(),
+        input.plugin_result,
+        input.result,
+        Some(input.abs_path),
+    ) {
+        input.regex_errors.append(&mut errors);
     }
 }
 

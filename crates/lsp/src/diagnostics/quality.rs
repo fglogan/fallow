@@ -5,8 +5,9 @@ use ls_types::{
     Location, NumberOrString, Position, Range, Uri,
 };
 
-use plow_core::duplicates::DuplicationReport;
-use plow_core::results::AnalysisResults;
+use plow_api::{
+    EditorAnalysisResults as AnalysisResults, EditorDuplicationReport as DuplicationReport,
+};
 
 use super::doc_link;
 
@@ -75,82 +76,103 @@ pub fn push_duplicate_export_diagnostics(
     }
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "line/col numbers are bounded by source size"
-)]
 pub fn push_duplication_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     duplication: &DuplicationReport,
 ) {
     for group in &duplication.clone_groups {
         for instance in &group.instances {
-            let Some(inst_uri) = Uri::from_file_path(&instance.file) else {
-                continue;
-            };
-
-            let start_line = (instance.start_line as u32).saturating_sub(1);
-            let end_line = (instance.end_line as u32).saturating_sub(1);
-
-            let related_info: Vec<DiagnosticRelatedInformation> = group
-                .instances
-                .iter()
-                .filter(|other| {
-                    !(other.file == instance.file && other.start_line == instance.start_line)
-                })
-                .filter_map(|other| {
-                    let other_uri = Uri::from_file_path(&other.file)?;
-                    Some(DiagnosticRelatedInformation {
-                        location: Location {
-                            uri: other_uri,
-                            range: Range {
-                                start: Position {
-                                    line: (other.start_line as u32).saturating_sub(1),
-                                    character: other.start_col as u32,
-                                },
-                                end: Position {
-                                    line: (other.end_line as u32).saturating_sub(1),
-                                    character: u32::MAX,
-                                },
-                            },
-                        },
-                        message: "Also duplicated here".to_string(),
-                    })
-                })
-                .collect();
-
-            map.entry(inst_uri).or_default().push(Diagnostic {
-                range: Range {
-                    start: Position {
-                        line: start_line,
-                        character: instance.start_col as u32,
-                    },
-                    end: Position {
-                        line: end_line,
-                        character: u32::MAX,
-                    },
-                },
-                severity: Some(DiagnosticSeverity::INFORMATION),
-                source: Some("plow".to_string()),
-                code: Some(NumberOrString::String("code-duplication".to_string())),
-                code_description: "https://docs.genesis-plow.dev/explanations/duplication"
-                    .parse::<Uri>()
-                    .ok()
-                    .map(|href| CodeDescription { href }),
-                message: format!(
-                    "Duplicated code block ({} lines, {} instances)",
-                    group.line_count,
-                    group.instances.len()
-                ),
-                related_information: if related_info.is_empty() {
-                    None
-                } else {
-                    Some(related_info)
-                },
-                ..Default::default()
-            });
+            push_duplication_instance_diagnostic(map, group, instance);
         }
     }
+}
+
+/// Push one INFORMATION diagnostic for a single clone instance, with the
+/// group's other instances linked as related info.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "line/col numbers are bounded by source size"
+)]
+fn push_duplication_instance_diagnostic(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    group: &plow_api::editor_duplicates::CloneGroup,
+    instance: &plow_api::editor_duplicates::CloneInstance,
+) {
+    let Some(inst_uri) = Uri::from_file_path(&instance.file) else {
+        return;
+    };
+
+    let start_line = (instance.start_line as u32).saturating_sub(1);
+    let end_line = (instance.end_line as u32).saturating_sub(1);
+
+    let related_info = duplication_related_info(group, instance);
+
+    map.entry(inst_uri).or_default().push(Diagnostic {
+        range: Range {
+            start: Position {
+                line: start_line,
+                character: instance.start_col as u32,
+            },
+            end: Position {
+                line: end_line,
+                character: u32::MAX,
+            },
+        },
+        severity: Some(DiagnosticSeverity::INFORMATION),
+        source: Some("plow".to_string()),
+        code: Some(NumberOrString::String("code-duplication".to_string())),
+        code_description: "https://docs.genesis-plow.dev/explanations/duplication"
+            .parse::<Uri>()
+            .ok()
+            .map(|href| CodeDescription { href }),
+        message: format!(
+            "Duplicated code block ({} lines, {} instances)",
+            group.line_count,
+            group.instances.len()
+        ),
+        related_information: if related_info.is_empty() {
+            None
+        } else {
+            Some(related_info)
+        },
+        ..Default::default()
+    });
+}
+
+/// Build the "Also duplicated here" related-info entries for every clone
+/// instance in `group` other than `instance` itself.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "line/col numbers are bounded by source size"
+)]
+fn duplication_related_info(
+    group: &plow_api::editor_duplicates::CloneGroup,
+    instance: &plow_api::editor_duplicates::CloneInstance,
+) -> Vec<DiagnosticRelatedInformation> {
+    group
+        .instances
+        .iter()
+        .filter(|other| !(other.file == instance.file && other.start_line == instance.start_line))
+        .filter_map(|other| {
+            let other_uri = Uri::from_file_path(&other.file)?;
+            Some(DiagnosticRelatedInformation {
+                location: Location {
+                    uri: other_uri,
+                    range: Range {
+                        start: Position {
+                            line: (other.start_line as u32).saturating_sub(1),
+                            character: other.start_col as u32,
+                        },
+                        end: Position {
+                            line: (other.end_line as u32).saturating_sub(1),
+                            character: u32::MAX,
+                        },
+                    },
+                },
+                message: "Also duplicated here".to_string(),
+            })
+        })
+        .collect()
 }
 
 pub fn push_stale_suppression_diagnostics(
@@ -195,13 +217,15 @@ mod tests {
     use std::path::PathBuf;
 
     use ls_types::{DiagnosticSeverity, NumberOrString, Uri};
-    use plow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
-    use plow_core::results::{
+    use plow_api::editor_duplicates::{
+        CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
+    };
+    use plow_api::editor_results::{
         AnalysisResults, DuplicateExport, DuplicateExportFinding, DuplicateLocation, UnusedExport,
         UnusedExportFinding, UnusedTypeFinding,
     };
 
-    use crate::diagnostics::build_diagnostics;
+    use crate::diagnostics::build_diagnostics_for_test;
 
     fn test_root() -> PathBuf {
         if cfg!(windows) {
@@ -261,7 +285,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri_utils = Uri::from_file_path(&utils_path).unwrap();
         let uri_helpers = Uri::from_file_path(&helpers_path).unwrap();
@@ -329,7 +353,7 @@ mod tests {
             },
         };
 
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri_a = Uri::from_file_path(root.join("src/a.ts")).unwrap();
         let diags_a = &diags[&uri_a];
@@ -393,7 +417,7 @@ mod tests {
             },
         };
 
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
         let uri = Uri::from_file_path(root.join("src/only.ts")).unwrap();
         let d = &diags[&uri][0];
 
@@ -418,7 +442,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&path).unwrap();
         let d = &diags[&uri][0];
@@ -455,16 +479,16 @@ mod tests {
             }));
         results
             .unused_files
-            .push(plow_core::results::UnusedFileFinding::with_actions(
-                plow_core::results::UnusedFile { path: path.clone() },
+            .push(plow_api::editor_results::UnusedFileFinding::with_actions(
+                plow_api::editor_results::UnusedFile { path: path.clone() },
             ));
         results.unused_enum_members.push(
-            plow_core::results::UnusedEnumMemberFinding::with_actions(
-                plow_core::results::UnusedMember {
+            plow_api::editor_results::UnusedEnumMemberFinding::with_actions(
+                plow_api::editor_results::UnusedMember {
                     path: path.clone(),
                     parent_name: "E".to_string(),
                     member_name: "A".to_string(),
-                    kind: plow_core::extract::MemberKind::EnumMember,
+                    kind: plow_api::editor_extract::MemberKind::EnumMember,
                     line: 3,
                     col: 0,
                 },
@@ -472,7 +496,7 @@ mod tests {
         );
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&path).unwrap();
         let file_diags = &diags[&uri];

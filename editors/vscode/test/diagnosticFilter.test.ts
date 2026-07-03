@@ -713,6 +713,32 @@ describe("DiagnosticFilter pull-mode middleware", () => {
     expect(c.sets.some((s) => s.uri === "file:///open.ts")).toBe(false);
   });
 
+  it("clears stale push diagnostics when a pull report owns the same document", async () => {
+    const f = new DiagnosticFilter(memento() as never);
+    const c = collection();
+    f.attachClient({ diagnostics: c as never, refreshPullDiagnostics: vi.fn() });
+    f.handleDiagnostics(
+      fakeUri("file:///open.ts") as never,
+      [diag({ code: "unused-export" })] as never,
+      vi.fn()
+    );
+
+    await f.provideDiagnostics(
+      fakeUri("file:///open.ts") as never,
+      undefined,
+      {} as never,
+      vi.fn(async () => ({
+        kind: "full",
+        items: [diag({ code: "unused-export" })],
+      })) as never
+    );
+
+    expect(c.sets[c.sets.length - 1]).toEqual({
+      uri: "file:///open.ts",
+      diags: [],
+    });
+  });
+
   it("refresh re-publishes push-delivered files but leaves pull-delivered files to the re-pull", async () => {
     const f = new DiagnosticFilter(memento() as never);
     const c = collection();
@@ -773,6 +799,18 @@ describe("DIAGNOSTIC_CATEGORIES", () => {
       "unused-optional-dependency",
       "unused-enum-member",
       "unused-class-member",
+      "unused-store-member",
+      "unused-server-action",
+      "unused-load-data-key",
+      "unused-component-prop",
+      "unused-component-emit",
+      "unrendered-component",
+      "unprovided-inject",
+      "invalid-client-export",
+      "mixed-client-server-barrel",
+      "misplaced-directive",
+      "route-collision",
+      "dynamic-segment-name-conflict",
       "unresolved-import",
       "unlisted-dependency",
       "duplicate-export",
@@ -782,6 +820,7 @@ describe("DIAGNOSTIC_CATEGORIES", () => {
       "stale-suppression",
       "code-duplication",
       "boundary-violation",
+      "policy-violation",
     ];
     const actual = new Set(DIAGNOSTIC_CATEGORIES.map((c) => c.code));
     for (const code of expected) {

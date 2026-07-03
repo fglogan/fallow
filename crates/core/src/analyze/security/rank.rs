@@ -70,31 +70,47 @@ pub fn annotate_dead_code_cross_links(
         if !matches!(finding.kind, SecurityFindingKind::TaintedSink) {
             continue;
         }
-        if unused_file_paths.contains(finding.path.as_path()) {
-            finding.dead_code = Some(SecurityDeadCodeContext {
-                kind: SecurityDeadCodeKind::UnusedFile,
-                export_name: None,
-                line: None,
-                guidance: UNUSED_FILE_GUIDANCE.to_string(),
-            });
-            prepend_dead_code_action(finding);
-            continue;
-        }
-
-        if let Some(export) = matching_unused_export(
-            module_by_path.get(finding.path.as_path()).copied(),
+        annotate_finding_dead_code(
+            finding,
+            &unused_file_paths,
+            &module_by_path,
             line_offsets_by_file,
             unused_exports,
-            finding,
-        ) {
-            finding.dead_code = Some(SecurityDeadCodeContext {
-                kind: SecurityDeadCodeKind::UnusedExport,
-                export_name: Some(export.export.export_name.clone()),
-                line: Some(export.export.line),
-                guidance: UNUSED_EXPORT_GUIDANCE.to_string(),
-            });
-            prepend_dead_code_action(finding);
-        }
+        );
+    }
+}
+
+fn annotate_finding_dead_code(
+    finding: &mut SecurityFinding,
+    unused_file_paths: &FxHashSet<&Path>,
+    module_by_path: &FxHashMap<&Path, &ModuleInfo>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    unused_exports: &[UnusedExportFinding],
+) {
+    if unused_file_paths.contains(finding.path.as_path()) {
+        finding.dead_code = Some(SecurityDeadCodeContext {
+            kind: SecurityDeadCodeKind::UnusedFile,
+            export_name: None,
+            line: None,
+            guidance: UNUSED_FILE_GUIDANCE.to_string(),
+        });
+        prepend_dead_code_action(finding);
+        return;
+    }
+
+    if let Some(export) = matching_unused_export(
+        module_by_path.get(finding.path.as_path()).copied(),
+        line_offsets_by_file,
+        unused_exports,
+        finding,
+    ) {
+        finding.dead_code = Some(SecurityDeadCodeContext {
+            kind: SecurityDeadCodeKind::UnusedExport,
+            export_name: Some(export.export.export_name.clone()),
+            line: Some(export.export.line),
+            guidance: UNUSED_EXPORT_GUIDANCE.to_string(),
+        });
+        prepend_dead_code_action(finding);
     }
 }
 
@@ -183,97 +199,143 @@ fn prepend_dead_code_action(finding: &mut SecurityFinding) {
 /// radius, crosses-boundary, active-code over dead-code candidates, then the
 /// existing deterministic `(path, line, col, category)` tiebreak so output stays
 /// stable across runs.
-pub fn rank_security_findings(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    declared_deps: &FxHashSet<String>,
-    request_receivers: &FxHashSet<String>,
-    boundary_crossings: &FxHashMap<PathBuf, (String, String)>,
-    findings: &mut [SecurityFinding],
-) {
+/// Graph and run inputs that drive security-finding ranking.
+pub struct SecurityRankingInput<'a> {
+    pub graph: &'a ModuleGraph,
+    pub modules: &'a [ModuleInfo],
+    pub line_offsets_by_file: &'a LineOffsetsMap<'a>,
+    pub declared_deps: &'a FxHashSet<String>,
+    pub request_receivers: &'a FxHashSet<String>,
+    pub boundary_crossings: &'a FxHashMap<PathBuf, (String, String)>,
+}
+
+pub fn rank_security_findings(input: &SecurityRankingInput<'_>, findings: &mut [SecurityFinding]) {
     if findings.is_empty() {
         return;
     }
 
-    // O(1) path -> FileId index over graph modules, built once.
-    let path_to_id: FxHashMap<&Path, FileId> = graph
-        .modules
-        .iter()
-        .map(|node| (node.path.as_path(), node.file_id))
-        .collect();
-    let source_index =
-        UntrustedSourceIndex::build(graph, modules, declared_deps, request_receivers);
-    let modules_by_id: FxHashMap<FileId, &ModuleInfo> = modules
-        .iter()
-        .map(|module| (module.file_id, module))
-        .collect();
-    let modules_by_path: FxHashMap<&Path, &ModuleInfo> = graph
-        .modules
-        .iter()
-        .filter_map(|node| {
-            modules_by_id
-                .get(&node.file_id)
-                .map(|module| (node.path.as_path(), *module))
-        })
-        .collect();
+    let context = SecurityRankingContext::build(input);
 
     for finding in findings.iter_mut() {
-        let reachability = path_to_id.get(finding.path.as_path()).map(|&file_id| {
-            compute_reachability(
-                graph,
-                file_id,
-                finding,
-                boundary_crossings,
-                &source_index,
-                line_offsets_by_file,
-            )
-        });
-        finding.reachability = reachability;
-        // Issue #900: fill the candidate boundary slot and the taint-flow triple
-        // from the reachability + trace just computed. Pure re-projection: no new
-        // analysis. The zone names come from the same boundary-crossing map.
-        enrich_candidate(finding, boundary_crossings.get(&finding.path));
-        finding.attack_surface =
-            build_attack_surface(finding, &modules_by_path, line_offsets_by_file);
-        finding.severity = derive_security_severity(finding);
+        enrich_ranked_security_finding(finding, &context);
     }
 
-    findings.sort_by(|a, b| {
-        let (ra, rb) = (a.reachability.as_ref(), b.reachability.as_ref());
-        // Reachable-from-entry findings sort first.
-        let reach_a = ra.is_some_and(|r| r.reachable_from_entry);
-        let reach_b = rb.is_some_and(|r| r.reachable_from_entry);
-        reach_b
-            .cmp(&reach_a)
-            // Then same-module source-backed sinks first.
-            .then_with(|| b.source_backed.cmp(&a.source_backed))
-            // Then module-level source-reachable sinks first.
-            .then_with(|| {
-                let source_a = ra.is_some_and(|r| r.reachable_from_untrusted_source);
-                let source_b = rb.is_some_and(|r| r.reachable_from_untrusted_source);
-                source_b.cmp(&source_a)
+    findings.sort_by(compare_ranked_findings);
+}
+
+struct SecurityRankingContext<'a> {
+    graph: &'a ModuleGraph,
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+    boundary_crossings: &'a FxHashMap<PathBuf, (String, String)>,
+    path_to_id: FxHashMap<&'a Path, FileId>,
+    source_index: UntrustedSourceIndex,
+    modules_by_path: FxHashMap<&'a Path, &'a ModuleInfo>,
+}
+
+impl<'a> SecurityRankingContext<'a> {
+    fn build(input: &SecurityRankingInput<'a>) -> Self {
+        let graph = input.graph;
+        let modules = input.modules;
+        let path_to_id = graph
+            .modules
+            .iter()
+            .map(|node| (node.path.as_path(), node.file_id))
+            .collect();
+        let source_index = UntrustedSourceIndex::build(
+            graph,
+            modules,
+            input.declared_deps,
+            input.request_receivers,
+        );
+        let modules_by_id: FxHashMap<FileId, &ModuleInfo> = modules
+            .iter()
+            .map(|module| (module.file_id, module))
+            .collect();
+        let modules_by_path = graph
+            .modules
+            .iter()
+            .filter_map(|node| {
+                modules_by_id
+                    .get(&node.file_id)
+                    .map(|module| (node.path.as_path(), *module))
             })
-            // Then larger blast radius first.
-            .then_with(|| {
-                let ba = ra.map_or(0, |r| r.blast_radius);
-                let bb = rb.map_or(0, |r| r.blast_radius);
-                bb.cmp(&ba)
-            })
-            // Then boundary-crossing candidates first.
-            .then_with(|| {
-                let ca = ra.is_some_and(|r| r.crosses_boundary);
-                let cb = rb.is_some_and(|r| r.crosses_boundary);
-                cb.cmp(&ca)
-            })
-            // Then active-code candidates before dead-code candidates.
-            .then_with(|| a.dead_code.is_some().cmp(&b.dead_code.is_some()))
-            // Deterministic tiebreak (matches the detectors' own ordering).
-            .then_with(|| a.path.cmp(&b.path))
-            .then_with(|| a.line.cmp(&b.line))
-            .then_with(|| a.col.cmp(&b.col))
-            .then_with(|| a.category.cmp(&b.category))
-    });
+            .collect();
+
+        Self {
+            graph,
+            line_offsets_by_file: input.line_offsets_by_file,
+            boundary_crossings: input.boundary_crossings,
+            path_to_id,
+            source_index,
+            modules_by_path,
+        }
+    }
+}
+
+fn enrich_ranked_security_finding(
+    finding: &mut SecurityFinding,
+    context: &SecurityRankingContext<'_>,
+) {
+    finding.reachability = context
+        .path_to_id
+        .get(finding.path.as_path())
+        .map(|&file_id| {
+            compute_reachability(
+                context.graph,
+                file_id,
+                finding,
+                context.boundary_crossings,
+                &context.source_index,
+                context.line_offsets_by_file,
+            )
+        });
+
+    enrich_candidate(finding, context.boundary_crossings.get(&finding.path));
+    finding.attack_surface = build_attack_surface(
+        finding,
+        &context.modules_by_path,
+        context.line_offsets_by_file,
+    );
+    finding.severity = derive_security_severity(finding);
+}
+
+/// Rank ordering for two enriched security findings: entry-reachable, then
+/// source-backed, then source-reachable, blast radius, boundary crossing, active
+/// before dead, then a deterministic path/line/col/category tiebreak.
+fn compare_ranked_findings(a: &SecurityFinding, b: &SecurityFinding) -> std::cmp::Ordering {
+    let (ra, rb) = (a.reachability.as_ref(), b.reachability.as_ref());
+    // Reachable-from-entry findings sort first.
+    let reach_a = ra.is_some_and(|r| r.reachable_from_entry);
+    let reach_b = rb.is_some_and(|r| r.reachable_from_entry);
+    reach_b
+        .cmp(&reach_a)
+        // Then same-module source-backed sinks first.
+        .then_with(|| b.source_backed.cmp(&a.source_backed))
+        // Then module-level source-reachable sinks first.
+        .then_with(|| {
+            let source_a = ra.is_some_and(|r| r.reachable_from_untrusted_source);
+            let source_b = rb.is_some_and(|r| r.reachable_from_untrusted_source);
+            source_b.cmp(&source_a)
+        })
+        // Then larger blast radius first.
+        .then_with(|| {
+            let ba = ra.map_or(0, |r| r.blast_radius);
+            let bb = rb.map_or(0, |r| r.blast_radius);
+            bb.cmp(&ba)
+        })
+        // Then boundary-crossing candidates first.
+        .then_with(|| {
+            let ca = ra.is_some_and(|r| r.crosses_boundary);
+            let cb = rb.is_some_and(|r| r.crosses_boundary);
+            cb.cmp(&ca)
+        })
+        // Then active-code candidates before dead-code candidates.
+        .then_with(|| a.dead_code.is_some().cmp(&b.dead_code.is_some()))
+        // Deterministic tiebreak (matches the detectors' own ordering).
+        .then_with(|| a.path.cmp(&b.path))
+        .then_with(|| a.line.cmp(&b.line))
+        .then_with(|| a.col.cmp(&b.col))
+        .then_with(|| a.category.cmp(&b.category))
 }
 
 /// Derive the verification-priority tier from existing security signals. This is
@@ -572,36 +634,54 @@ impl UntrustedSourceIndex {
         let hop_count = u32::try_from(ids.len().saturating_sub(1)).unwrap_or(u32::MAX);
 
         if source_id == sink_id {
-            // Arg-level (source_backed): anchor the source node at the real
-            // source read and label it `UntrustedSource` (a specific read is
-            // implicated). Module-level (source elsewhere in the same file, no
-            // arg trace): keep line 1 and label `ModuleSource` so the node is
-            // never read as a proven value path (issue #1093). `source_read` is
-            // Some exactly when `source_backed`.
-            let (source_line, source_col, source_role) = finding
-                .source_read
-                .map_or((1, 0, TraceHopRole::ModuleSource), |(line, col)| {
-                    (line, col, TraceHopRole::UntrustedSource)
-                });
-            return Some(UntrustedSourceTrace {
-                hop_count,
-                trace: vec![
-                    TraceHop {
-                        path: finding.path.clone(),
-                        line: source_line,
-                        col: source_col,
-                        role: source_role,
-                    },
-                    TraceHop {
-                        path: finding.path.clone(),
-                        line: finding.line,
-                        col: finding.col,
-                        role: TraceHopRole::Sink,
-                    },
-                ],
-            });
+            return Some(Self::same_module_trace(finding, hop_count));
         }
 
+        let trace = self.multi_hop_trace(graph, &ids, finding, line_offsets_by_file)?;
+        Some(UntrustedSourceTrace { hop_count, trace })
+    }
+
+    /// Build the two-hop arg-level / module-level trace for a sink whose source
+    /// read is in the same module (issue #1093).
+    fn same_module_trace(finding: &SecurityFinding, hop_count: u32) -> UntrustedSourceTrace {
+        // Arg-level (source_backed): anchor the source node at the real
+        // source read and label it `UntrustedSource` (a specific read is
+        // implicated). Module-level (source elsewhere in the same file, no
+        // arg trace): keep line 1 and label `ModuleSource` so the node is
+        // never read as a proven value path (issue #1093). `source_read` is
+        // Some exactly when `source_backed`.
+        let (source_line, source_col, source_role) = finding
+            .source_read
+            .map_or((1, 0, TraceHopRole::ModuleSource), |(line, col)| {
+                (line, col, TraceHopRole::UntrustedSource)
+            });
+        UntrustedSourceTrace {
+            hop_count,
+            trace: vec![
+                TraceHop {
+                    path: finding.path.clone(),
+                    line: source_line,
+                    col: source_col,
+                    role: source_role,
+                },
+                TraceHop {
+                    path: finding.path.clone(),
+                    line: finding.line,
+                    col: finding.col,
+                    role: TraceHopRole::Sink,
+                },
+            ],
+        }
+    }
+
+    /// Build the cross-module trace from the resolved source -> sink id chain.
+    fn multi_hop_trace(
+        &self,
+        graph: &ModuleGraph,
+        ids: &[FileId],
+        finding: &SecurityFinding,
+        line_offsets_by_file: &LineOffsetsMap<'_>,
+    ) -> Option<Vec<TraceHop>> {
         let mut trace = Vec::with_capacity(ids.len().saturating_add(1));
         for (idx, &file_id) in ids.iter().enumerate() {
             let path = graph.modules.get(file_id.0 as usize)?.path.clone();
@@ -638,8 +718,7 @@ impl UntrustedSourceIndex {
                 },
             });
         }
-
-        Some(UntrustedSourceTrace { hop_count, trace })
+        Some(trace)
     }
 }
 
@@ -775,13 +854,15 @@ mod tests {
                     resolved_dynamic_imports: vec![],
                     resolved_dynamic_patterns: vec![],
                     member_accesses: vec![],
-                    whole_object_uses: vec![],
+                    semantic_facts: Box::default(),
+                    whole_object_uses: Box::default(),
                     has_cjs_exports: false,
                     has_angular_component_template_url: false,
                     unused_import_bindings: FxHashSet::default(),
                     type_referenced_import_bindings: vec![],
                     value_referenced_import_bindings: vec![],
                     namespace_object_aliases: vec![],
+                    exported_factory_returns: Box::default(),
                 }
             })
             .collect();
@@ -815,12 +896,14 @@ mod tests {
             .map(|path| (path.clone(), ("from".to_string(), "to".to_string())))
             .collect();
         rank_security_findings(
-            graph,
-            &modules,
-            &line_offsets,
-            &declared_deps,
-            &request_receivers,
-            &boundary_crossings,
+            &SecurityRankingInput {
+                graph,
+                modules: &modules,
+                line_offsets_by_file: &line_offsets,
+                declared_deps: &declared_deps,
+                request_receivers: &request_receivers,
+                boundary_crossings: &boundary_crossings,
+            },
             findings,
         );
     }
@@ -835,12 +918,14 @@ mod tests {
         let request_receivers = FxHashSet::default();
         let boundary_crossings = FxHashMap::default();
         rank_security_findings(
-            graph,
-            modules,
-            &line_offsets,
-            &declared_deps,
-            &request_receivers,
-            &boundary_crossings,
+            &SecurityRankingInput {
+                graph,
+                modules,
+                line_offsets_by_file: &line_offsets,
+                declared_deps: &declared_deps,
+                request_receivers: &request_receivers,
+                boundary_crossings: &boundary_crossings,
+            },
             findings,
         );
     }
@@ -854,9 +939,10 @@ mod tests {
             dynamic_imports: vec![],
             dynamic_import_patterns: vec![],
             require_calls: vec![],
-            package_path_references: vec![],
+            package_path_references: Box::default(),
             member_accesses: vec![],
-            whole_object_uses: vec![],
+            semantic_facts: Box::default(),
+            whole_object_uses: Box::default(),
             has_cjs_exports: false,
             has_angular_component_template_url: false,
             content_hash: 0,
@@ -869,6 +955,7 @@ mod tests {
             complexity: vec![],
             flag_uses: vec![],
             class_heritage: vec![],
+            exported_factory_returns: Box::default(),
             injection_tokens: vec![],
             local_type_declarations: vec![],
             public_signature_type_references: vec![],
@@ -886,6 +973,7 @@ mod tests {
             security_control_sites: vec![],
             callee_uses: vec![],
             misplaced_directives: vec![],
+            inline_server_action_exports: Vec::new(),
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
             referenced_import_bindings: Vec::new(),
@@ -895,9 +983,28 @@ mod tests {
             has_define_model: false,
             has_unharvestable_props: false,
             component_emits: Vec::new(),
+            angular_inputs: Vec::new(),
+            angular_outputs: Vec::new(),
             has_unharvestable_emits: false,
             has_dynamic_emit: false,
             has_emit_whole_object_use: false,
+            load_return_keys: Vec::new(),
+            has_unharvestable_load: false,
+            has_load_data_whole_use: false,
+            has_page_data_store_whole_use: false,
+            component_functions: Vec::new(),
+            react_props: Vec::new(),
+            hook_uses: Vec::new(),
+            render_edges: Vec::new(),
+            svelte_dispatched_events: Vec::new(),
+            svelte_listened_events: Vec::new(),
+            angular_component_selectors: Vec::new(),
+            registered_custom_elements: Vec::new(),
+            used_custom_element_tags: Vec::new(),
+            angular_used_selectors: Vec::new(),
+            angular_entry_component_refs: Vec::new(),
+            has_dynamic_component_render: false,
+            has_dynamic_dispatch: false,
         }
     }
 

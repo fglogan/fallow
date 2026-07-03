@@ -137,9 +137,9 @@ Field purposes:
 
 ## Integration surfaces
 
-The MCP server runs Plow by invoking the CLI, so an MCP tool call already produces one CLI telemetry event. The server tags that spawned process (via the `PLOW_INTEGRATION_SURFACE` and `PLOW_MCP_TOOL` environment variables) so the single event is attributed to the `mcp` surface and the specific tool, instead of looking like any other `cli_json` run. Code Mode snippets can make several read-only host calls; those spawned CLI events are attributed to `code_execute`, not to free-form code text or nested helper names. No second event is emitted, and the privacy posture is identical because it is the same CLI code path and consent check. `PLOW_MCP_TOOL` is validated CLI-side against a fixed allowlist of tool names; any other value is dropped.
+The MCP server runs cleanly-mapped analysis tools in-process through `plow-api` and falls back to invoking the CLI for CLI-only surfaces. Fallback subprocesses are tagged via the `PLOW_INTEGRATION_SURFACE` and `PLOW_MCP_TOOL` environment variables so their single CLI telemetry event is attributed to the `mcp` surface and the specific tool, instead of looking like any other `cli_json` run. Code Mode snippets can make several read-only host calls; spawned CLI events are attributed to `code_execute`, not to free-form code text or nested helper names. No second event is emitted for CLI fallbacks, and API-backed MCP analysis emits no telemetry today. `PLOW_MCP_TOOL` is validated CLI-side against a fixed allowlist of tool names; any other value is dropped.
 
-The LSP server, VS Code extension, N-API bindings, and programmatic embedding run analysis in-process rather than by spawning the CLI, so the environment-variable tagging does not reach them and they emit no telemetry today. Their `integration_surface` values are reserved for when a future shared telemetry layer lets them emit directly.
+The LSP server, VS Code extension, N-API bindings, MCP API-backed tools, and programmatic embedding run analysis in-process rather than by spawning the CLI, so the environment-variable tagging does not reach them and they emit no telemetry today. Their `integration_surface` values are reserved for when a future shared telemetry layer lets them emit directly.
 
 ## Agent Source
 

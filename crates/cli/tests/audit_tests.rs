@@ -490,6 +490,114 @@ fn audit_default_gate_ignores_inherited_issues() {
 }
 
 #[test]
+fn audit_new_only_inherits_shifted_duplicate_group() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+
+    let duplicate = "export function sharedBlock(x: number): number {\n\
+          const a = x + 1;\n\
+          const b = a * 2;\n\
+          const c = b - 3;\n\
+          const d = c * c;\n\
+          const e = d + a;\n\
+          const f = e - b;\n\
+          const g = f + c;\n\
+          const h = g * d;\n\
+          const i = h - e;\n\
+          return a + b + c + d + e + f + g + h + i;\n\
+        }\n";
+    fs::write(dir.join("fileB.ts"), duplicate).unwrap();
+
+    use std::fmt::Write as _;
+    let mut shifted_source = String::new();
+    for n in 1..=120 {
+        writeln!(shifted_source, "export const v{n} = {n};").unwrap();
+    }
+    shifted_source.push_str(duplicate);
+    fs::write(dir.join("fileA.ts"), &shifted_source).unwrap();
+
+    git(dir, &["init", "-b", "main"]);
+    // The clone fingerprint is hashed over the raw fragment text, so CRLF vs LF
+    // shifts it. `plow audit` spawns its own `git worktree add` for the base
+    // snapshot, which inherits the runner's global git config (Windows defaults
+    // to `core.autocrlf=true`), so the checked-out base would get CRLF while the
+    // head file written via `fs::write` keeps LF, making the inherited clone look
+    // introduced. Pin the repo to LF so base and head fingerprints match.
+    git(dir, &["config", "core.autocrlf", "false"]);
+    commit_all(dir, "initial");
+    git(dir, &["checkout", "-b", "edit"]);
+
+    fs::write(
+        dir.join("fileA.ts"),
+        format!("export const NEW_TOP_CONST = 0;\n{shifted_source}"),
+    )
+    .unwrap();
+    commit_all(dir, "shift unchanged duplicate");
+
+    let output = run_plow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "main",
+        "--gate",
+        "new-only",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+        "--performance",
+        "--dupes-mode",
+        "strict",
+        "--dupes-min-tokens",
+        "10",
+        "--dupes-min-lines",
+        "3",
+    ]);
+
+    assert_eq!(
+        output.code, 0,
+        "audit should pass when only line numbers changed for an inherited duplicate. stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["base_snapshot_skipped"].as_bool(), Some(false));
+    assert_eq!(
+        json["attribution"]["duplication_introduced"].as_u64(),
+        Some(0)
+    );
+    assert!(
+        json["attribution"]["duplication_inherited"]
+            .as_u64()
+            .is_some_and(|count| count > 0),
+        "expected inherited duplicate attribution"
+    );
+
+    let groups = json["duplication"]["clone_groups"]
+        .as_array()
+        .expect("duplication.clone_groups should be an array");
+    assert!(!groups.is_empty(), "expected at least one clone group");
+    assert!(
+        groups.iter().all(|group| group["introduced"] == false),
+        "all duplicate groups should be marked inherited"
+    );
+    assert!(
+        groups.iter().any(|group| {
+            group["instances"].as_array().is_some_and(|instances| {
+                let has_shifted_file = instances
+                    .iter()
+                    .any(|instance| instance["file"].as_str() == Some("fileA.ts"));
+                let has_peer_file = instances
+                    .iter()
+                    .any(|instance| instance["file"].as_str() == Some("fileB.ts"));
+                has_shifted_file && has_peer_file
+            })
+        }),
+        "expected a clone group spanning fileA.ts and fileB.ts"
+    );
+}
+
+#[test]
 fn audit_gate_all_reports_preexisting_issues() {
     let tmp = create_audit_baseline_fixture();
     fs::write(tmp.path().join("plow.toml"), "[audit]\ngate = \"all\"\n").unwrap();
@@ -2038,5 +2146,771 @@ fn audit_annotates_newly_added_misplaced_directive_as_introduced() {
     assert_eq!(
         directives[0]["introduced"], true,
         "the newly-misplaced directive must be annotated introduced: true"
+    );
+}
+
+// ----------------------------------------------------------------------------
+// E5 agent-contract loop (walkthrough guide + walkthrough-file post-validation)
+// ----------------------------------------------------------------------------
+
+/// A fixture with two boundary zones (`ui`, `db`) where the diff introduces a
+/// new cross-zone edge (ui -> db), so the decision surface emits exactly one
+/// real, anchored coupling/boundary decision. The base has no such edge.
+fn create_boundary_walkthrough_fixture() -> TempDir {
+    let tmp = TempDir::new().expect("temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src/ui")).unwrap();
+    fs::create_dir_all(dir.join("src/db")).unwrap();
+
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "wt-test", "main": "src/ui/page.ts"}"#,
+    )
+    .unwrap();
+    // Boundary config: ui may import only itself (so importing db is a
+    // disallowed cross-zone edge).
+    fs::write(
+        dir.join(".plowrc.json"),
+        r#"{
+  "entry": ["src/ui/page.ts"],
+  "boundaries": {
+    "zones": [
+      { "name": "ui", "patterns": ["src/ui/**"] },
+      { "name": "db", "patterns": ["src/db/**"] }
+    ],
+    "rules": [
+      { "from": "ui", "allow": [] }
+    ]
+  }
+}"#,
+    )
+    .unwrap();
+    fs::write(dir.join("src/db/conn.ts"), "export const conn = () => 1;\n").unwrap();
+    // Base page.ts does NOT import db.
+    fs::write(
+        dir.join("src/ui/page.ts"),
+        "export const render = () => 'hi';\n",
+    )
+    .unwrap();
+
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+
+    // HEAD: page.ts now imports db -> a new cross-zone edge ui->db.
+    fs::write(
+        dir.join("src/ui/page.ts"),
+        "import { conn } from '../db/conn';\nexport const render = () => conn();\n",
+    )
+    .unwrap();
+    commit_all(dir, "ui imports db");
+
+    tmp
+}
+
+fn run_walkthrough_guide(root: &Path) -> serde_json::Value {
+    let output = run_plow_raw(&[
+        "review",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--walkthrough-guide",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 0,
+        "walkthrough-guide always exits 0. stderr: {}",
+        output.stderr
+    );
+    parse_json(&output)
+}
+
+fn run_walkthrough_file(root: &Path, file: &Path) -> serde_json::Value {
+    let output = run_plow_raw(&[
+        "review",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--walkthrough-file",
+        file.to_str().unwrap(),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 0,
+        "walkthrough-file always exits 0. stderr: {}",
+        output.stderr
+    );
+    parse_json(&output)
+}
+
+#[test]
+fn e5_walkthrough_guide_pins_a_deterministic_snapshot_hash() {
+    let tmp = create_boundary_walkthrough_fixture();
+    let guide = run_walkthrough_guide(tmp.path());
+    assert_eq!(guide["kind"], "review-walkthrough-guide");
+    assert_eq!(guide["command"], "review-walkthrough-guide");
+    let hash = guide["graph_snapshot_hash"]
+        .as_str()
+        .expect("guide pins a graph_snapshot_hash");
+    assert!(hash.starts_with("graph:"), "hash is namespaced: {hash}");
+    // The digest is graph-derived; the injection note states PR prose is untrusted.
+    assert!(
+        guide["injection_note"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("untrusted"),
+        "injection note documents untrusted PR prose"
+    );
+    // Re-run on the same tree: the hash is byte-stable (deterministic).
+    let again = run_walkthrough_guide(tmp.path());
+    assert_eq!(again["graph_snapshot_hash"], guide["graph_snapshot_hash"]);
+}
+
+/// The guide emits per-hunk `change_anchors` from the committed diff, and a
+/// judgment citing one (with NO signal_id) is ACCEPTED with `anchor_kind: change`,
+/// the weaker region-level anchor. End-to-end through the real binary, so the
+/// emitted anchor set equals the set validated on reentry.
+#[test]
+fn e5_change_anchor_judgment_accepts_anchor_kind_change() {
+    let tmp = create_boundary_walkthrough_fixture();
+    let guide = run_walkthrough_guide(tmp.path());
+    let hash = guide["graph_snapshot_hash"].as_str().unwrap().to_string();
+    let anchors = guide["change_anchors"]
+        .as_array()
+        .expect("the guide carries change_anchors");
+    assert!(
+        !anchors.is_empty(),
+        "the page.ts edit must emit at least one change anchor. guide: {}",
+        serde_json::to_string_pretty(&guide).unwrap_or_default()
+    );
+    let anchor_id = anchors[0]["change_anchor"].as_str().unwrap().to_string();
+    assert!(anchor_id.starts_with("chg:"), "namespaced: {anchor_id}");
+
+    let agent = serde_json::json!({
+        "graph_snapshot_hash": hash,
+        "judgments": [
+            { "change_anchor": anchor_id, "framing": "This region trades a direct import for a seam." }
+        ]
+    });
+    let agent_path = tmp.path().join("agent_change.json");
+    fs::write(&agent_path, serde_json::to_string(&agent).unwrap()).unwrap();
+
+    let validation = run_walkthrough_file(tmp.path(), &agent_path);
+    assert_eq!(validation["stale"], false, "matching hash is not stale");
+    assert_eq!(
+        validation["accepted_count"],
+        1,
+        "the change-anchored judgment accepts. validation: {}",
+        serde_json::to_string_pretty(&validation).unwrap_or_default()
+    );
+    assert_eq!(validation["accepted"][0]["anchor_kind"], "change");
+    assert_eq!(validation["accepted"][0]["signal_id"], "");
+    assert_eq!(validation["accepted"][0]["deterministic"], false);
+
+    // A fabricated change anchor is rejected (anti-hallucination for the region anchor).
+    let bogus = serde_json::json!({
+        "graph_snapshot_hash": guide["graph_snapshot_hash"],
+        "judgments": [ { "change_anchor": "chg:deadbeefdeadbeef", "framing": "made up" } ]
+    });
+    let bogus_path = tmp.path().join("agent_bogus.json");
+    fs::write(&bogus_path, serde_json::to_string(&bogus).unwrap()).unwrap();
+    let rejected = run_walkthrough_file(tmp.path(), &bogus_path);
+    assert_eq!(rejected["rejected_count"], 1, "fabricated region rejects");
+    assert_eq!(rejected["rejected"][0]["reason"], "unknown-change-anchor");
+}
+
+/// Done-condition (a): a clean agent JSON citing only emitted signal_ids with
+/// the correct snapshot hash is ACCEPTED with zero unanchored findings.
+#[test]
+fn e5_clean_agent_json_is_accepted_zero_unanchored() {
+    let tmp = create_boundary_walkthrough_fixture();
+    let guide = run_walkthrough_guide(tmp.path());
+    let hash = guide["graph_snapshot_hash"].as_str().unwrap().to_string();
+    let emitted = guide["digest"]["decisions"]["emitted_signal_ids"]
+        .as_array()
+        .expect("digest carries the emitted signal_id allowlist");
+    assert!(
+        !emitted.is_empty(),
+        "the boundary change must emit at least one anchored signal. guide: {}",
+        serde_json::to_string_pretty(&guide).unwrap_or_default()
+    );
+    let real_id = emitted[0].as_str().unwrap().to_string();
+
+    let agent = serde_json::json!({
+        "graph_snapshot_hash": hash,
+        "judgments": [
+            { "signal_id": real_id, "framing": "Intended coupling.", "concern": "coupling" }
+        ]
+    });
+    let agent_path = tmp.path().join("agent.json");
+    fs::write(&agent_path, serde_json::to_string(&agent).unwrap()).unwrap();
+
+    let validation = run_walkthrough_file(tmp.path(), &agent_path);
+    assert_eq!(validation["kind"], "review-walkthrough-validation");
+    assert_eq!(validation["stale"], false, "matching hash is not stale");
+    assert_eq!(
+        validation["accepted_count"], 1,
+        "the anchored judgment accepts"
+    );
+    assert_eq!(validation["rejected_count"], 0, "no rejections");
+    assert_eq!(
+        validation["unanchored_count"], 0,
+        "zero unanchored findings"
+    );
+    // The framing is fenced as non-deterministic.
+    assert_eq!(validation["accepted"][0]["deterministic"], false);
+}
+
+/// Done-condition (b): an injected unanchored finding is REJECTED.
+#[test]
+fn e5_injected_unanchored_signal_is_rejected() {
+    let tmp = create_boundary_walkthrough_fixture();
+    let guide = run_walkthrough_guide(tmp.path());
+    let hash = guide["graph_snapshot_hash"].as_str().unwrap().to_string();
+
+    let agent = serde_json::json!({
+        "graph_snapshot_hash": hash,
+        "judgments": [
+            { "signal_id": "sig:deadbeefdeadbeef", "framing": "hallucinated, no graph anchor" }
+        ]
+    });
+    let agent_path = tmp.path().join("agent.json");
+    fs::write(&agent_path, serde_json::to_string(&agent).unwrap()).unwrap();
+
+    let validation = run_walkthrough_file(tmp.path(), &agent_path);
+    assert_eq!(validation["stale"], false);
+    assert_eq!(
+        validation["accepted_count"], 0,
+        "the fabricated id never accepts"
+    );
+    assert_eq!(validation["rejected_count"], 1, "it is rejected");
+    assert_eq!(validation["rejected"][0]["reason"], "unanchored-signal-id");
+}
+
+/// Done-condition (c): stale JSON (old snapshot hash, e.g. the tree moved) is
+/// REFUSED.
+#[test]
+fn e5_stale_snapshot_hash_is_refused() {
+    let tmp = create_boundary_walkthrough_fixture();
+    let guide = run_walkthrough_guide(tmp.path());
+    let emitted = guide["digest"]["decisions"]["emitted_signal_ids"]
+        .as_array()
+        .unwrap();
+    let real_id = emitted[0].as_str().unwrap().to_string();
+
+    // The agent echoes a STALE hash (the tree moved since the guide was emitted),
+    // even though it cites a real signal id.
+    let agent = serde_json::json!({
+        "graph_snapshot_hash": "graph:0000000000000000",
+        "judgments": [
+            { "signal_id": real_id, "framing": "would be valid, but the snapshot moved" }
+        ]
+    });
+    let agent_path = tmp.path().join("agent.json");
+    fs::write(&agent_path, serde_json::to_string(&agent).unwrap()).unwrap();
+
+    let validation = run_walkthrough_file(tmp.path(), &agent_path);
+    assert_eq!(
+        validation["stale"], true,
+        "the old hash is refused as stale"
+    );
+    assert_eq!(
+        validation["accepted_count"], 0,
+        "nothing accepts when stale"
+    );
+    assert_eq!(validation["rejected"][0]["reason"], "stale-snapshot");
+}
+
+// ---------------------------------------------------------------------------
+// W2 (#347): `plow review --walkthrough` human/markdown renderer.
+// ---------------------------------------------------------------------------
+
+/// Run `plow review --walkthrough` (default human) and return the raw output.
+fn run_walkthrough_human(root: &Path) -> common::CommandOutput {
+    run_plow_raw(&[
+        "review",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--walkthrough",
+    ])
+}
+
+/// Strip the per-run `analysis_run_id` so two walkthrough-guide JSON envelopes
+/// from separate processes can be compared (the id is random telemetry meta, not
+/// part of the guide contract).
+fn strip_run_id(mut value: serde_json::Value) -> serde_json::Value {
+    if let Some(telemetry) = value
+        .get_mut("_meta")
+        .and_then(|m| m.get_mut("telemetry"))
+        .and_then(|t| t.as_object_mut())
+    {
+        telemetry.remove("analysis_run_id");
+    }
+    value
+}
+
+#[test]
+fn w2_walkthrough_human_renders_stages_and_badges() {
+    let tmp = create_boundary_walkthrough_fixture();
+    let output = run_walkthrough_human(tmp.path());
+    assert_eq!(
+        output.code, 0,
+        "walkthrough always exits 0. stderr: {}",
+        output.stderr
+    );
+    // The Review Focus header is orientation on stderr.
+    assert!(
+        output.stderr.contains("Review Focus"),
+        "stderr carries the Review Focus header. stderr: {}",
+        output.stderr
+    );
+    // The tour body is on stdout: at least one stage and the changed file row.
+    assert!(
+        output.stdout.contains("Stage"),
+        "stdout carries a stage header. stdout: {}",
+        output.stdout
+    );
+    assert!(
+        output.stdout.contains("page.ts"),
+        "the changed page.ts file is in the tour. stdout: {}",
+        output.stdout
+    );
+    // The ui->db boundary decision synthesizes a COUPLING badge.
+    assert!(
+        output.stdout.contains("COUPLING"),
+        "the boundary decision renders a COUPLING badge. stdout: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn w2_walkthrough_json_is_byte_identical_to_guide() {
+    let tmp = create_boundary_walkthrough_fixture();
+    let walkthrough_json = run_plow_raw(&[
+        "review",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--walkthrough",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(walkthrough_json.code, 0, "exits 0");
+    let guide_json = run_walkthrough_guide(tmp.path());
+
+    let from_walkthrough = parse_json(&walkthrough_json);
+    // Same agent-contract kind + deterministic snapshot hash.
+    assert_eq!(from_walkthrough["kind"], "review-walkthrough-guide");
+    assert_eq!(
+        from_walkthrough["graph_snapshot_hash"],
+        guide_json["graph_snapshot_hash"],
+    );
+    // The whole envelope matches once the random per-run id is stripped: the
+    // json branch reuses the one guide JSON path, no second serializer.
+    assert_eq!(
+        strip_run_id(from_walkthrough),
+        strip_run_id(guide_json),
+        "--walkthrough --format json must reuse the guide JSON path verbatim",
+    );
+}
+
+#[test]
+fn w2_walkthrough_markdown_renders_plain_paste_artifact() {
+    let tmp = create_boundary_walkthrough_fixture();
+    let output = run_plow_raw(&[
+        "review",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--walkthrough",
+        "--format",
+        "markdown",
+        "--quiet",
+    ]);
+    assert_eq!(output.code, 0, "exits 0. stderr: {}", output.stderr);
+    assert!(
+        output.stdout.starts_with("## Plow Review"),
+        "markdown leads with the H2 header. stdout: {}",
+        output.stdout
+    );
+    assert!(
+        output.stdout.contains("### Stage"),
+        "markdown has a stage section. stdout: {}",
+        output.stdout
+    );
+    assert!(
+        output.stdout.contains("`COUPLING`"),
+        "badges render as inline code spans. stdout: {}",
+        output.stdout
+    );
+    assert!(
+        !output.stdout.contains('\u{1b}'),
+        "markdown carries no ANSI escapes. stdout: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn w2_walkthrough_exits_zero_even_when_verdict_fails() {
+    let tmp = create_audit_baseline_fixture();
+    fs::write(tmp.path().join("plow.toml"), "[audit]\ngate = \"all\"\n").unwrap();
+    let config = tmp.path().join("plow.toml");
+
+    // Sanity: the plain audit on this fixture really does fail.
+    let audit = run_plow_raw(&[
+        "audit",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main",
+        "--config",
+        config.to_str().unwrap(),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(audit.code, 1, "the underlying audit verdict is fail");
+
+    // All three walkthrough render modes stay exit 0 (advisory surface).
+    for format in ["human", "markdown", "json"] {
+        let output = run_plow_raw(&[
+            "review",
+            "--root",
+            tmp.path().to_str().unwrap(),
+            "--base",
+            "main",
+            "--config",
+            config.to_str().unwrap(),
+            "--walkthrough",
+            "--format",
+            format,
+            "--quiet",
+        ]);
+        assert_eq!(
+            output.code, 0,
+            "--walkthrough --format {format} must exit 0 on a fail verdict. stderr: {}",
+            output.stderr
+        );
+    }
+}
+
+#[test]
+fn w2_walkthrough_cleared_panel_collapses_then_expands() {
+    let tmp = create_audit_baseline_fixture();
+    // Default human render: the Cleared panel is a single collapsed line.
+    let collapsed = run_plow_raw(&[
+        "review",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main",
+        "--walkthrough",
+    ]);
+    assert_eq!(collapsed.code, 0, "exits 0. stderr: {}", collapsed.stderr);
+
+    // The baseline fixture may or may not de-prioritize a unit; only assert the
+    // collapse/expand contract when a Cleared panel is present.
+    if collapsed.stdout.contains("Cleared (") {
+        assert!(
+            collapsed.stdout.contains("--show-cleared"),
+            "collapsed Cleared panel points at --show-cleared. stdout: {}",
+            collapsed.stdout
+        );
+        let expanded = run_plow_raw(&[
+            "review",
+            "--root",
+            tmp.path().to_str().unwrap(),
+            "--base",
+            "main",
+            "--walkthrough",
+            "--show-cleared",
+        ]);
+        assert_eq!(expanded.code, 0, "exits 0");
+        assert!(
+            !expanded.stdout.contains("pass --show-cleared to expand"),
+            "the expanded panel drops the collapse hint. stdout: {}",
+            expanded.stdout
+        );
+    }
+}
+
+#[test]
+fn w2_walkthrough_viewed_state_round_trips() {
+    let tmp = create_boundary_walkthrough_fixture();
+    // First render to learn the current snapshot hash.
+    let guide = run_walkthrough_guide(tmp.path());
+    let hash = guide["graph_snapshot_hash"].as_str().unwrap().to_string();
+
+    // Write a viewed-state ledger keyed on the changed file.
+    let state_dir = tmp.path().join(".plow");
+    fs::create_dir_all(&state_dir).unwrap();
+    let state = serde_json::json!({
+        "version": 1,
+        "schema": "walkthrough-viewed-marks",
+        "graph_snapshot_hash": hash,
+        "entries": { "src/ui/page.ts": { "viewed_at": "2026-01-01T00:00:00Z" } }
+    });
+    fs::write(
+        state_dir.join("walkthrough-state.json"),
+        serde_json::to_string(&state).unwrap(),
+    )
+    .unwrap();
+
+    let output = run_walkthrough_human(tmp.path());
+    assert_eq!(output.code, 0, "exits 0. stderr: {}", output.stderr);
+    assert!(
+        output.stdout.contains("viewed"),
+        "the matched file renders a viewed mark. stdout: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn w2_walkthrough_stale_viewed_state_is_ignored_not_deleted() {
+    let tmp = create_boundary_walkthrough_fixture();
+    let state_dir = tmp.path().join(".plow");
+    fs::create_dir_all(&state_dir).unwrap();
+    let state_path = state_dir.join("walkthrough-state.json");
+    // A deliberately WRONG hash: the marks must be ignored on render.
+    let state = serde_json::json!({
+        "version": 1,
+        "schema": "walkthrough-viewed-marks",
+        "graph_snapshot_hash": "graph:staleeeeeeeeeeee",
+        "entries": { "src/ui/page.ts": { "viewed_at": "2026-01-01T00:00:00Z" } }
+    });
+    fs::write(&state_path, serde_json::to_string(&state).unwrap()).unwrap();
+
+    let output = run_walkthrough_human(tmp.path());
+    assert_eq!(output.code, 0, "exits 0");
+    assert!(
+        !output.stdout.contains("\u{2713} viewed"),
+        "a stale viewed mark must not render. stdout: {}",
+        output.stdout
+    );
+    // The ledger on disk is NOT deleted (carry-forward).
+    assert!(
+        state_path.exists(),
+        "a stale ledger is carried forward, never deleted"
+    );
+    let on_disk: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&state_path).unwrap()).unwrap();
+    assert!(
+        on_disk["entries"]["src/ui/page.ts"].is_object(),
+        "the stale entry survives on disk"
+    );
+}
+
+#[test]
+fn w2_walkthrough_missing_and_garbled_state_still_exit_zero() {
+    let tmp = create_boundary_walkthrough_fixture();
+    // No state file: first-run common case.
+    let fresh = run_walkthrough_human(tmp.path());
+    assert_eq!(fresh.code, 0, "missing state file still exits 0");
+    assert!(
+        !fresh.stdout.contains("\u{2713} viewed"),
+        "no viewed marks without a ledger"
+    );
+
+    // A garbled state file must not hard-error the render.
+    let state_dir = tmp.path().join(".plow");
+    fs::create_dir_all(&state_dir).unwrap();
+    fs::write(state_dir.join("walkthrough-state.json"), b"{ not json").unwrap();
+    let garbled = run_walkthrough_human(tmp.path());
+    assert_eq!(garbled.code, 0, "garbled state file still exits 0");
+}
+
+#[test]
+fn w2_walkthrough_mark_viewed_writes_local_ledger() {
+    let tmp = create_boundary_walkthrough_fixture();
+    let output = run_plow_raw(&[
+        "review",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--walkthrough",
+        "--mark-viewed",
+        "src/ui/page.ts",
+    ]);
+    assert_eq!(output.code, 0, "exits 0. stderr: {}", output.stderr);
+    let state_path = tmp.path().join(".plow/walkthrough-state.json");
+    assert!(state_path.exists(), "--mark-viewed writes the ledger");
+    let state: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&state_path).unwrap()).unwrap();
+    assert_eq!(state["version"], 1);
+    assert_eq!(state["schema"], "walkthrough-viewed-marks");
+    assert!(
+        state["entries"]["src/ui/page.ts"].is_object(),
+        "the marked file is recorded. state: {state}"
+    );
+}
+
+#[test]
+fn w2_walkthrough_conflicts_with_guide_and_file() {
+    let tmp = create_boundary_walkthrough_fixture();
+    // --walkthrough + --walkthrough-guide is a clap arg conflict (usage error,
+    // distinct from the exit-0 success path).
+    let with_guide = run_plow_raw(&[
+        "review",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--walkthrough",
+        "--walkthrough-guide",
+    ]);
+    assert_ne!(
+        with_guide.code, 0,
+        "--walkthrough + --walkthrough-guide is rejected by clap"
+    );
+
+    let with_file = run_plow_raw(&[
+        "review",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--walkthrough",
+        "--walkthrough-file",
+        "agent.json",
+    ]);
+    assert_ne!(
+        with_file.code, 0,
+        "--walkthrough + --walkthrough-file is rejected by clap"
+    );
+}
+
+/// A fixture whose HEAD diff mixes a load-bearing exported source file (consumed
+/// by an UNCHANGED consumer outside the diff), plain source churn, and a
+/// NON-source migration file. Exercises the file-accounting + membership fixes:
+/// the migration must be surfaced as excluded (not dropped), and no file may
+/// appear in both a stage and the Cleared panel.
+fn create_mixed_walkthrough_fixture() -> TempDir {
+    let tmp = TempDir::new().expect("temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::create_dir_all(dir.join("migrations")).unwrap();
+
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "wt-mixed", "main": "src/app.ts"}"#,
+    )
+    .unwrap();
+    fs::write(dir.join(".plowrc.json"), r#"{"entry": ["src/app.ts"]}"#).unwrap();
+
+    // The consumer imports the contract; it is NOT touched by the HEAD diff, so
+    // `lib.ts` is consumed out-of-diff -> load-bearing.
+    fs::write(
+        dir.join("src/app.ts"),
+        "import { value } from './lib';\nexport const run = () => value();\n",
+    )
+    .unwrap();
+    fs::write(dir.join("src/lib.ts"), "export const value = () => 1;\n").unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+
+    // HEAD: change the load-bearing contract, add plain source churn, and add a
+    // non-source migration file (which must be surfaced as excluded).
+    fs::write(
+        dir.join("src/lib.ts"),
+        "export const value = () => 2;\nexport const extra = () => 3;\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/helper.ts"),
+        "export const help = () => 'x';\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("migrations/0001_init.sql"),
+        "CREATE TABLE t (id INTEGER);\n",
+    )
+    .unwrap();
+    commit_all(dir, "change lib, add helper + migration");
+    tmp
+}
+
+// F1/F2: the rendered Review Focus count reconciles staged + cleared + excluded,
+// and the non-source migration file is surfaced as excluded, never dropped.
+#[test]
+fn w2_walkthrough_surfaces_non_source_and_reconciles_counts() {
+    let tmp = create_mixed_walkthrough_fixture();
+    let output = run_walkthrough_human(tmp.path());
+    assert_eq!(output.code, 0, "exits 0. stderr: {}", output.stderr);
+    // The non-source migration is surfaced honestly, not silently dropped.
+    assert!(
+        output.stderr.contains("non-source not reviewed"),
+        "the .sql migration must be surfaced as excluded. stderr: {}",
+        output.stderr
+    );
+    // The accounting sub-line names the staged bucket.
+    assert!(
+        output.stderr.contains("in stages"),
+        "the header breakdown names the staged bucket. stderr: {}",
+        output.stderr
+    );
+    // The migration file never appears as a reviewable stage row in the tour body.
+    assert!(
+        !output.stdout.contains("0001_init.sql"),
+        "the non-source migration is not a stage row. stdout: {}",
+        output.stdout
+    );
+}
+
+// F3: a --mark-viewed file is removed from its stage and shown only under
+// Cleared (each file in exactly one place: stage XOR cleared).
+#[test]
+fn w2_walkthrough_viewed_file_collapses_into_cleared_only() {
+    let tmp = create_mixed_walkthrough_fixture();
+    // Mark the load-bearing file viewed, then render with the Cleared panel open.
+    let marked = run_plow_raw(&[
+        "review",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--walkthrough",
+        "--mark-viewed",
+        "src/lib.ts",
+    ]);
+    assert_eq!(
+        marked.code, 0,
+        "mark-viewed exits 0. stderr: {}",
+        marked.stderr
+    );
+
+    let output = run_plow_raw(&[
+        "review",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--walkthrough",
+        "--show-cleared",
+    ]);
+    assert_eq!(output.code, 0, "exits 0. stderr: {}", output.stderr);
+    let body = &output.stdout;
+    let cleared_at = body
+        .find("Cleared")
+        .unwrap_or_else(|| panic!("cleared panel present. stdout: {body}"));
+    let (stage_section, cleared_section) = body.split_at(cleared_at);
+    // The viewed file is gone from the stage section and present only in Cleared.
+    assert!(
+        !stage_section.contains("lib.ts"),
+        "the viewed file left its stage. stage section: {stage_section}"
+    );
+    assert!(
+        cleared_section.contains("lib.ts"),
+        "the viewed file shows only under Cleared. cleared section: {cleared_section}"
     );
 }

@@ -61,6 +61,7 @@ export type {
   EntryPoints,
   FindingSeverity,
   FixAction as SuggestionFixAction,
+  PlowOutput,
   HealthFinding,
   HealthOutput,
   HealthReport,
@@ -114,7 +115,10 @@ export type {
   WorkspacesOutput,
 } from "./generated/output-contract.js";
 
+import type { PlowOutput } from "./generated/output-contract.js";
+
 export type { CheckOutput as PlowCheckResult } from "./generated/output-contract.js";
+export type PlowInspectResult = Extract<PlowOutput, { kind: "inspect_target" }>;
 // The VS Code extension reads dupes only via the combined invocation
 // (`plow --format json`), where `combined.dupes` is the typed
 // `DupesReportPayload` body (introduced in #409), NOT the full

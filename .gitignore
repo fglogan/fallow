@@ -36,6 +36,9 @@ benchmarks/knip6/
 # Incremental cache
 .plow/
 
+# Ephemeral git worktrees created for parallel/agent work
+.worktrees/
+
 # Python cache
 __pycache__/
 
@@ -97,9 +100,16 @@ AGENTS.md
 # In-flight feature plans written by /plow-implement and re-read by /panel-review,
 # the implementation phase, and /plow-review. Transient; promoted concepts go to decisions/.
 .plans/
+# Stray undotted variant: research/plan scratch docs belong in the gitignored
+# .plans/, never committed. Ignored so `git add -A` cannot sweep one in again.
+plans/
 
 # Crash-handover markers from sdk-cli automation
 /HANDOVER-CRASH-*.md
 
 decisions
 decisions/
+
+# Runtime scratch the review app writes (human notes feed, captured framing).
+# App-subtree .gitignore already ignores it; this keeps a root `git add -A` safe.
+.plow-review/

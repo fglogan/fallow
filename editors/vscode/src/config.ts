@@ -14,7 +14,8 @@ import { getDiagnosticCategories } from "./diagnosticFilter.js";
 
 const SECTION = "plow";
 
-const getConfig = (): vscode.WorkspaceConfiguration => vscode.workspace.getConfiguration(SECTION);
+const getConfig = (resource?: vscode.Uri): vscode.WorkspaceConfiguration =>
+  vscode.workspace.getConfiguration(SECTION, resource);
 
 const getConfiguredValue = <T>(key: string): T | undefined => {
   const inspected = getConfig().inspect<T>(key);
@@ -30,15 +31,17 @@ const getConfiguredValue = <T>(key: string): T | undefined => {
 
 export const getLspPath = (): string => getConfig().get<string>("lspPath", "");
 
-const getConfigPath = (): string => getConfig().get<string>("configPath", "").trim();
+const getConfigPath = (resource?: vscode.Uri): string =>
+  getConfig(resource).get<string>("configPath", "").trim();
 
-export const getResolvedConfigPath = (): string => {
-  const configPath = getConfigPath();
+export const getResolvedConfigPath = (workspaceRootOverride?: string): string => {
+  const resource = workspaceRootOverride ? vscode.Uri.file(workspaceRootOverride) : undefined;
+  const configPath = getConfigPath(resource);
   if (!configPath || path.isAbsolute(configPath)) {
     return configPath;
   }
 
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const workspaceRoot = workspaceRootOverride ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   return workspaceRoot ? path.resolve(workspaceRoot, configPath) : configPath;
 };
 
@@ -55,6 +58,21 @@ export const getIssueTypes = (): IssueTypeConfig =>
     "unused-optional-dependencies": true,
     "unused-enum-members": true,
     "unused-class-members": true,
+    "unused-store-member": true,
+    "unused-server-action": true,
+    "unused-load-data-key": true,
+    "unused-component-prop": true,
+    "unused-component-emit": true,
+    "unused-component-input": true,
+    "unused-component-output": true,
+    "unused-svelte-event": true,
+    "unrendered-component": true,
+    "unprovided-inject": true,
+    "invalid-client-export": true,
+    "mixed-client-server-barrel": true,
+    "misplaced-directive": true,
+    "route-collision": true,
+    "dynamic-segment-name-conflict": true,
     "unresolved-imports": true,
     "unlisted-dependencies": true,
     "duplicate-exports": true,
@@ -63,6 +81,7 @@ export const getIssueTypes = (): IssueTypeConfig =>
     "circular-dependencies": true,
     "re-export-cycles": true,
     "boundary-violation": true,
+    "policy-violation": true,
     "stale-suppressions": true,
     "unused-catalog-entries": true,
     "unresolved-catalog-references": true,

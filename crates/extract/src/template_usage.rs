@@ -1,5 +1,7 @@
 use oxc_allocator::Allocator;
-use oxc_ast::ast::{BinaryOperator, Expression, ObjectPropertyKind, Statement};
+use oxc_ast::ast::{
+    BinaryOperator, CallExpression, Expression, ObjectExpression, ObjectPropertyKind, Statement,
+};
 use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
 use oxc_semantic::SemanticBuilder;
@@ -97,6 +99,38 @@ pub fn analyze_template_snippet_with_bound_targets(
     let parser_return = Parser::new(&allocator, &wrapped, SourceType::ts()).parse();
 
     let semantic_ret = SemanticBuilder::new().build(&parser_return.program);
+    let (used_bindings, unresolved_targets) = classify_unresolved_references(
+        &semantic_ret,
+        imported_bindings,
+        bound_targets,
+        allow_dollar_prefixed_refs,
+    );
+
+    if unresolved_targets.is_empty() {
+        return TemplateUsage::default();
+    }
+
+    let mut extractor = ModuleInfoExtractor::new();
+    extractor.visit_program(&parser_return.program);
+
+    build_template_usage(
+        used_bindings,
+        &unresolved_targets,
+        bound_targets,
+        allow_dollar_prefixed_refs,
+        extractor,
+    )
+}
+
+/// Split a parsed snippet's root unresolved references into the imported
+/// bindings actually used and the full set of remappable target names
+/// (imported bindings + bound targets, with optional `$`-prefix stripping).
+fn classify_unresolved_references(
+    semantic_ret: &oxc_semantic::SemanticBuilderReturn<'_>,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    allow_dollar_prefixed_refs: bool,
+) -> (FxHashSet<String>, FxHashSet<String>) {
     let mut used_bindings = FxHashSet::default();
     let mut unresolved_targets = FxHashSet::default();
     for name in semantic_ret
@@ -124,14 +158,18 @@ pub fn analyze_template_snippet_with_bound_targets(
             }
         }
     }
+    (used_bindings, unresolved_targets)
+}
 
-    if unresolved_targets.is_empty() {
-        return TemplateUsage::default();
-    }
-
-    let mut extractor = ModuleInfoExtractor::new();
-    extractor.visit_program(&parser_return.program);
-
+/// Build the [`TemplateUsage`] from the extracted member accesses / whole-object
+/// uses, remapping each object name through the resolved target set.
+fn build_template_usage(
+    used_bindings: FxHashSet<String>,
+    unresolved_targets: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    allow_dollar_prefixed_refs: bool,
+    extractor: ModuleInfoExtractor,
+) -> TemplateUsage {
     TemplateUsage {
         used_bindings,
         member_accesses: dedup_member_accesses(
@@ -141,7 +179,7 @@ pub fn analyze_template_snippet_with_bound_targets(
                 .filter_map(|access| {
                     remap_object_name(
                         &access.object,
-                        &unresolved_targets,
+                        unresolved_targets,
                         bound_targets,
                         allow_dollar_prefixed_refs,
                     )
@@ -159,7 +197,7 @@ pub fn analyze_template_snippet_with_bound_targets(
                 .filter_map(|name| {
                     remap_object_name(
                         &name,
-                        &unresolved_targets,
+                        unresolved_targets,
                         bound_targets,
                         allow_dollar_prefixed_refs,
                     )
@@ -269,7 +307,7 @@ fn with_parsed_template_expression<R>(
     if snippet.is_empty() {
         return None;
     }
-    let wrapped = format!("const __plow_template_sink = ({snippet});");
+    let wrapped = format!("const __f_tpl_sink = ({snippet});");
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, &wrapped, SourceType::ts()).parse();
     let Statement::VariableDeclaration(decl) = parser_return.program.body.first()? else {
@@ -326,21 +364,16 @@ fn collect_template_idents_into(expr: &Expression<'_>, out: &mut Vec<String>) {
             collect_template_idents_into(&member.object, out);
         }
         Expression::ComputedMemberExpression(member) => {
-            collect_template_idents_into(&member.object, out);
-            collect_template_idents_into(&member.expression, out);
+            collect_template_pair_idents(&member.object, &member.expression, out);
         }
         Expression::BinaryExpression(bin) => {
-            collect_template_idents_into(&bin.left, out);
-            collect_template_idents_into(&bin.right, out);
+            collect_template_pair_idents(&bin.left, &bin.right, out);
         }
         Expression::LogicalExpression(logical) => {
-            collect_template_idents_into(&logical.left, out);
-            collect_template_idents_into(&logical.right, out);
+            collect_template_pair_idents(&logical.left, &logical.right, out);
         }
         Expression::ConditionalExpression(cond) => {
-            collect_template_idents_into(&cond.test, out);
-            collect_template_idents_into(&cond.consequent, out);
-            collect_template_idents_into(&cond.alternate, out);
+            collect_template_conditional_idents(&cond.test, &cond.consequent, &cond.alternate, out);
         }
         Expression::SequenceExpression(seq) => {
             for expr in &seq.expressions {
@@ -359,21 +392,49 @@ fn collect_template_idents_into(expr: &Expression<'_>, out: &mut Vec<String>) {
             collect_template_idents_into(&unary.argument, out);
         }
         Expression::CallExpression(call) => {
-            collect_template_idents_into(&call.callee, out);
-            for arg in &call.arguments {
-                if let Some(arg_expr) = arg.as_expression() {
-                    collect_template_idents_into(arg_expr, out);
-                }
-            }
+            collect_template_call_idents(call, out);
         }
         Expression::ObjectExpression(obj) => {
-            for prop in &obj.properties {
-                if let ObjectPropertyKind::ObjectProperty(prop) = prop {
-                    collect_template_idents_into(&prop.value, out);
-                }
-            }
+            collect_template_object_idents(obj, out);
         }
         _ => {}
+    }
+}
+
+fn collect_template_pair_idents(
+    left: &Expression<'_>,
+    right: &Expression<'_>,
+    out: &mut Vec<String>,
+) {
+    collect_template_idents_into(left, out);
+    collect_template_idents_into(right, out);
+}
+
+fn collect_template_conditional_idents(
+    test: &Expression<'_>,
+    consequent: &Expression<'_>,
+    alternate: &Expression<'_>,
+    out: &mut Vec<String>,
+) {
+    collect_template_idents_into(test, out);
+    collect_template_idents_into(consequent, out);
+    collect_template_idents_into(alternate, out);
+}
+
+fn collect_template_call_idents(call: &CallExpression<'_>, out: &mut Vec<String>) {
+    collect_template_idents_into(&call.callee, out);
+    for arg in &call.arguments {
+        if let Some(arg_expr) = arg.as_expression() {
+            collect_template_idents_into(arg_expr, out);
+        }
+    }
+}
+
+fn collect_template_object_idents(obj: &ObjectExpression<'_>, out: &mut Vec<String>) {
+    for prop in &obj.properties {
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop {
+            collect_template_idents_into(&prop.value, out);
+        }
     }
 }
 
@@ -405,17 +466,34 @@ fn remap_object_name(
         }
         return Some(stripped.to_string());
     }
+    // unused-load-data-key Primitive C: the SvelteKit global page store read in a
+    // template, `$page.data.KEY` (Svelte 4 `$app/stores`) or `page.data.KEY`
+    // (Svelte 5 `$app/state`), arrives here as the dotted member object
+    // `$page.data` / `page.data` (the object of the outer `.KEY` access). The
+    // root-only logic above remaps `$page`/`page` but drops the `.data` suffix,
+    // so the consumed key is lost. Recover the canonical `page.data` object (the
+    // `$`-stripped form, matching how the root branch normalizes `$page` -> `page`)
+    // so the cross-file detector can see the project-wide `page.data.<key>`
+    // consumer channel. Scoped to the `page` store's `data` member only (gated on
+    // the Svelte dollar-ref path) to stay byte-identical for every other dotted
+    // template member object; `$page.url.pathname` etc. still map root-only.
+    if allow_dollar_prefixed_refs
+        && (name == "page.data" || name == "$page.data")
+        && unresolved_names.contains("page")
+    {
+        return Some("page.data".to_string());
+    }
     None
 }
 
 fn wrap_snippet(snippet: &str, kind: TemplateSnippetKind, locals: &[String]) -> String {
     let mut wrapped = String::new();
     if !locals.is_empty() {
-        wrapped.push_str("const __plow_local = undefined;\n");
+        wrapped.push_str("const __f_tpl_local = undefined;\n");
         for local in locals {
             wrapped.push_str("const ");
             wrapped.push_str(local);
-            wrapped.push_str(" = __plow_local;\n");
+            wrapped.push_str(" = __f_tpl_local;\n");
         }
     }
 
@@ -537,5 +615,91 @@ mod tests {
         assert_eq!(usage.member_accesses.len(), 1);
         assert_eq!(usage.member_accesses[0].object, "page");
         assert_eq!(usage.member_accesses[0].member, "url");
+    }
+
+    // unused-load-data-key Primitive C: the SvelteKit global page store read in a
+    // template recovers the nested `page.data.<key>` member access.
+
+    #[test]
+    fn svelte4_page_store_data_key_recovers_nested_member() {
+        let usage = analyze_template_snippet(
+            "$page.data.user",
+            TemplateSnippetKind::Expression,
+            &bindings(&["page"]),
+            &[],
+            true,
+        );
+
+        assert!(
+            usage
+                .member_accesses
+                .iter()
+                .any(|a| a.object == "page.data" && a.member == "user"),
+            "`$page.data.user` should recover `page.data.user`, got: {:?}",
+            usage.member_accesses
+        );
+    }
+
+    #[test]
+    fn svelte5_page_state_data_key_recovers_nested_member() {
+        let usage = analyze_template_snippet(
+            "page.data.session",
+            TemplateSnippetKind::Expression,
+            &bindings(&["page"]),
+            &[],
+            true,
+        );
+
+        assert!(
+            usage
+                .member_accesses
+                .iter()
+                .any(|a| a.object == "page.data" && a.member == "session"),
+            "`page.data.session` should recover `page.data.session`, got: {:?}",
+            usage.member_accesses
+        );
+    }
+
+    #[test]
+    fn page_store_non_data_member_stays_root_only() {
+        // `$page.url.pathname` must keep mapping to root `page.url` -> `{page, url}`;
+        // only the `data` channel recovers the nested key. Regression guard for the
+        // existing store-ref behavior.
+        let usage = analyze_template_snippet(
+            "$page.url.pathname",
+            TemplateSnippetKind::Expression,
+            &bindings(&["page"]),
+            &[],
+            true,
+        );
+
+        assert!(
+            !usage.member_accesses.iter().any(|a| a.object == "page.url"),
+            "`$page.url` must not recover a nested member, got: {:?}",
+            usage.member_accesses
+        );
+    }
+
+    #[test]
+    fn page_data_nested_recovery_is_svelte_only() {
+        // Vue templates pass allow_dollar_prefixed_refs=false; the `page` store is
+        // SvelteKit-specific, so `page.data.x` must NOT recover the nested member
+        // in a Vue context (root `{page, data}` is still credited).
+        let usage = analyze_template_snippet(
+            "page.data.x",
+            TemplateSnippetKind::Expression,
+            &bindings(&["page"]),
+            &[],
+            false,
+        );
+
+        assert!(
+            !usage
+                .member_accesses
+                .iter()
+                .any(|a| a.object == "page.data"),
+            "Vue context must not recover `page.data`, got: {:?}",
+            usage.member_accesses
+        );
     }
 }

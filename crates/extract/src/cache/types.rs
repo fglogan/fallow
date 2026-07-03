@@ -169,6 +169,11 @@ use crate::MemberKind;
 /// miss those synthetic `member_accesses` and surface false
 /// `unused-class-member` findings.
 ///
+/// Bumped to 116 for issue #1302: suppression comments and `@expected-unused`
+/// tags now carry optional human-authored reasons. Pre-116 entries lack those
+/// reasons, so `require-suppression-reason` would report false missing-reason
+/// findings until files are re-extracted.
+///
 /// Bumped to 117 for issue #955: Vue SFC script-side Nuxt UI icon strings now
 /// populate `iconify_icon_names`, allowing declared `@iconify-json/*`
 /// collections used through values like `icon: 'i-simple-icons-github'` to be
@@ -388,22 +393,352 @@ use crate::MemberKind;
 /// `has_emit_whole_object_use` abstain flags, so a warm cache from 159 would
 /// report zero unused-component-emit findings.
 ///
-/// Bumped to 161 for the `unused-server-action` detector: the suppression token
-/// `unused-server-action` is now a known `IssueKind` (discriminant 40). A warm
-/// cache from 160 stored that marker in `unknown_suppression_kinds` (it was an
-/// unrecognized token then), so reading it would leave a suppressed action
-/// unsuppressed (false `unused-server-action` finding) AND report the consumed
-/// marker as a stale suppression. Invalidating the cache forces a re-parse that
-/// routes the token to `suppressions` with the now-known discriminant.
-pub(super) const CACHE_VERSION: u32 = 161;
+/// Bumped to 162 for `unused-load-data-key` Primitive A: a destructure off the
+/// SvelteKit `data` prop local (`const { user } = data`) now emits `data.<key>`
+/// member accesses (rest element records a whole-object use). A warm cache from
+/// 161 lacks those accesses, so the cross-file load-data-key join would miss the
+/// consumed keys.
+///
+/// Bumped to 163 for `unused-load-data-key` Primitive B: a SvelteKit route
+/// component (`+page.svelte` / `+layout.svelte`) now credits the `data` prop as
+/// a template-visible root, so `{data.x}` / `{#each data.items as i}` markup
+/// reads emit `data.<key>` member accesses. A warm cache from 162 lacks those
+/// template-side accesses, so the cross-file load-data-key join would miss keys
+/// consumed only in markup.
+///
+/// Bumped to 164 for `unused-load-data-key` Primitive C: a SvelteKit global
+/// page-store read in a template (`{$page.data.KEY}` / `{page.data.KEY}`) now
+/// recovers the nested `page.data.<key>` member access (the template scanner
+/// previously dropped the key, keeping only `page.data`). A warm cache from 163
+/// lacks those project-wide global-store accesses.
+///
+/// Bumped (origin/main) for the `unused-load-data-key` detector: SvelteKit
+/// page-load producers now harvest `load_return_keys` + `has_unharvestable_load`,
+/// and every file records `has_load_data_whole_use` (the FP-1 whole-`data` pass
+/// signal). A warm cache from 164 lacks all three.
+///
+/// Bumped (origin/main) for the typed-`data` template fix: a SvelteKit route
+/// component whose `data` prop is typed (`export let data: PageData`) no longer
+/// remaps its template `data.<key>` accesses onto the generated `$types` alias,
+/// keeping them keyed on `data` for the load-data join. A warm cache carries the
+/// remapped (`PageData.<key>`) accesses and would miss real consumer reads.
+///
+/// Bumped (origin/main) for #550: CSS Module class extraction now derives its
+/// class set from a real CSS AST (lightningcss) for standard CSS, so warm caches
+/// written by the regex-only extractor can differ on escaped class names and
+/// malformed at-rule preludes.
+///
+/// Bumped (feat/react-health) for React/JSX structural extraction (Phase 0
+/// foundation): `.jsx`/`.tsx` files now record `component_functions`,
+/// `react_props`, `hook_uses`, and `render_edges`, so a warm cache lacks the
+/// React IR the later React-health phases consume.
+///
+/// Bumped (feat/react-health) for the React `unused-component-prop` arm
+/// (Phase 1): each `ComponentProp` gained a `component` field (the enclosing
+/// React component name) and `react_props[].used_in_script` is now populated
+/// from a used-in-body pass, so a warm cache carries props with an empty
+/// `component` and always-false usage.
+///
+/// Bumped (feat/react-health) for React-aware complexity (Phase 2):
+/// `FunctionComplexity` now carries `react_hook_count`, `react_jsx_max_depth`,
+/// and `react_prop_count` descriptive fields, and the cognitive metric folds
+/// deep JSX nesting, hook density, and prop count (recorded as `JsxDepth` /
+/// `HookDensity` / `PropCount` contributions). A warm cache carries the pre-fold
+/// cognitive scores and lacks the React descriptive counts until re-extraction.
+///
+/// Bumped (feat/react-health) for the prop-drilling forward signal (Phase 3):
+/// `RenderEdge` gained `attr_value_roots` / `has_complex_forward`,
+/// `ComponentFunction` gained `uses_clone_element` / `renders_provider` /
+/// `has_children_as_function`, and `ComponentProp` gained `used_outside_forward`.
+/// A warm cache lacks the per-render attribute-value roots and the
+/// per-component / per-prop forward classification the prop-drilling detector
+/// consumes.
+///
+/// Bumped to 170: `ComponentFunction` gained `is_pure_passthrough` (the
+/// thin-wrapper extraction flag), a new bitcode field on a cached struct
+/// persisted via `ModuleInfo`.
+///
+/// Bumped to 171 (feat/angular): Angular input/output IR
+/// (`angular_inputs` / `angular_outputs` on `ModuleInfo`) plus the
+/// `unused-component-input` / `unused-component-output` suppression tokens, and
+/// the Angular `{ ...this }` spread now records a whole-component abstain marker
+/// for the input/output detectors; a warm cache from 170 lacks the Angular IR
+/// and the abstain marker and would report zero input/output findings or
+/// false-flag spread-forwarded inputs/outputs.
+///
+/// Bumped to 172 (feat/vue-options-api-prop-emit): the Vue Options API
+/// (`export default { props, emits, ... }` / `defineComponent({ ... })`) in a
+/// non-setup `<script>` now harvests `component_props` / `component_emits` and
+/// the abstain flags the same way `<script setup>` does; a warm cache from 171
+/// lacks the Options-API prop/emit IR and would report zero findings on those
+/// components.
+///
+/// Bumped to 173 (feat/svelte-runes-extraction, W1.1): two `.svelte` extraction
+/// changes alter serialized module state. (1) Svelte 5's bare `<script module>`
+/// attribute is now recognized as module context (was treated as the instance
+/// script), so a warm cache wrongly scoped module-level declarations and credited the
+/// module script's imports as template-visible. (2) The Svelte 5 `$props()` rune
+/// is now harvested into `component_props` (reusing the Vue IR + abstain flags);
+/// a warm cache from 172 lacks the Svelte prop IR. (`<svelte:component>` /
+/// `<svelte:element>` / `<svelte:self>` were verified already credited by the
+/// existing attribute-value scan, so no template-scanner change rides this bump.)
+///
+/// Bumped to 174 (feat/svelte-dead-event): `.svelte` extraction now records
+/// `svelte_dispatched_events` (literal-arg `dispatch('<name>')` calls where
+/// `dispatch` is bound from `createEventDispatcher()`), `svelte_listened_events`
+/// (template `on:<name>` bindings on component tags), and `has_dynamic_dispatch`
+/// (a dynamic-dispatch / whole-`dispatch`-value abstain). A warm cache from 173
+/// lacks the dispatched/listened event IR and would report zero
+/// `unused-svelte-event` findings.
+///
+/// Bumped to 175 (feat/angular-unrendered-component, W4.2): Angular extraction
+/// now records `angular_component_selectors` (each `@Component({ selector })`
+/// value split into a list plus the class name + span), `angular_used_selectors`
+/// (custom element tags scanned from inline + external Angular templates), and
+/// `angular_entry_component_refs` (route `component:` / `loadComponent`,
+/// `bootstrapApplication` / `bootstrap: [...]` class references), and
+/// `has_dynamic_component_render` (a `ViewContainerRef.createComponent` /
+/// `*ngComponentOutlet` / `createComponent(<ident>)` project-wide abstain). A
+/// warm cache from 174 lacks the selector IR and would report zero Angular
+/// `unrendered-component` findings.
+///
+/// Bumped to 176 (feat/angular-unprovided-inject, W4.1): the `di_key_sites` set
+/// now carries Angular entries (`inject(TOKEN)` / `@Inject(TOKEN)` injects and
+/// `{ provide: TOKEN, ... }` provides via the new `DiFramework::Angular` variant),
+/// `has_dynamic_provide` is additionally set by `importProvidersFrom` /
+/// `makeEnvironmentProviders` / a `providers:` spread, and a tree-shakable
+/// `new InjectionToken(..., { factory } | { providedIn })` records a self-provide.
+/// A warm cache from 175 lacks the Angular DI sites and would report zero Angular
+/// `unprovided-inject` findings.
+///
+/// Bumped to 177 (feat/sfc-template-complexity): Vue and Svelte SFC
+/// `module.complexity` now carries a synthetic `<template>` `FunctionComplexity`
+/// entry computed from template control flow (`v-if`/`v-for`, `{#if}`/`{#each}`)
+/// plus bound-expression and interpolation complexity, mirroring Angular's
+/// existing `<template>` entry. The `FunctionComplexity` shape is unchanged (only
+/// an extra Vec element), so no size assertion changes. A warm cache from 176
+/// lacks the SFC `<template>` entry and would under-report SFC complexity until
+/// the file is re-parsed.
+///
+/// Bumped to 178 (feat/rsc-widen-inline-server-action): `ModuleInfo` now carries
+/// `inline_server_action_exports`, the export local names of exported functions /
+/// const-arrows whose body has an inline `"use server"` directive in a
+/// non-`"use server"` file. The `unused-server-action` reclassifier reads it to
+/// move a dead inline Server Action out of `unused-export`. A warm cache from 177
+/// lacks the field and would leave such dead inline actions categorized as
+/// `unused-export` until the file is re-parsed.
+///
+/// Bumped to 179 for issue #1270: Playwright fixture callbacks now record
+/// member uses reached through branch-selected local fixture aliases. Warm
+/// caches from 178 can miss those synthetic `member_accesses` and surface false
+/// `unused-class-member` findings.
+///
+/// Bumped to 180 for issue #1281: JSX nesting depth is now descriptive
+/// `react_jsx_max_depth` context only, so warm caches from 179 may carry stale
+/// cognitive scores and `JsxDepth` contribution entries for React components.
+///
+/// Bumped to 181 for issue #1282: Pinia `storeToRefs(useStore())` and
+/// `toRefs(useStore())` destructures now record store member accesses. Warm
+/// caches from 180 can miss those synthetic `member_accesses` and surface false
+/// `unused-store-member` findings.
+///
+/// Bumped (LLM-call sinks): the security sink argument collectors
+/// (`collect_arg_idents` / `collect_arg_source_paths`) now recurse into array
+/// elements (and the source-path collector into object properties), so taint
+/// riding an object-in-array argument (`messages: [{ content: userInput }]`, the
+/// canonical OpenAI / Anthropic chat shape) surfaces on `SinkSite.arg_idents` /
+/// `arg_source_paths`. Warm caches lack those captured identifiers and would
+/// miss source-backed candidates on the array-nested prompt shape.
+///
+/// Bumped for the Astro/Lit framework-health parity wave: Astro frontmatter now
+/// runs the `oxc_semantic` unused-binding pass (template-used names credited), so
+/// `.astro` modules carry populated `unused_import_bindings` /
+/// `value_referenced_import_bindings` instead of an empty (all-referenced) set;
+/// plus the Lit registered-tag / used-tag and Astro `<template>` complexity
+/// extraction fields. Warm caches mask the new `unused-export` /
+/// `unrendered-component` arms.
+///
+/// Bumped for the post-smoke-test FP fixes: standalone `.html` modules now
+/// populate `used_custom_element_tags` (a root `<my-app>` rendered only in
+/// `index.html` no longer false-flags), and imperative `createElement` capture
+/// widened to any receiver (`opts.document.createElement(...)`).
+///
+/// Bumped to 185 on merging the agentic-review branch into main: the LLM-call
+/// sink array recursion and the Astro/Lit parity wave land together, so warm
+/// caches from either side (183 or 184) must invalidate.
+///
+/// Bumped to 186 for the React typed-interface / `props.x` prop harvest: a
+/// component whose first param is a bare identifier typed by a same-file
+/// `interface`/`type` object literal (`(props: Props) => props.x`) now harvests
+/// the interface member names into `react_props` and credits `props.<name>`
+/// member-access usage, where warm caches from 185 recorded the component as
+/// `has_unharvestable_props` with no props.
+///
+/// Bumped to 187 for the React typed-prop harvest extension to
+/// `forwardRef<Ref, Props>((props, ref) => ...)`: the props type now resolves
+/// from the wrapper call's SECOND generic argument (a same-file
+/// `interface`/`type`) when the inner `props` param carries no annotation, so a
+/// generic-typed forwardRef component that warm caches from 186 recorded as
+/// `has_unharvestable_props` now harvests its `react_props` and credits
+/// `props.<name>` usage. The cached `ComponentProp` / `ComponentFunction` wire
+/// shape is unchanged; only which components populate it changes.
+///
+/// Bumped to 188: `HookUse` now carries the enclosing `component` name, so the
+/// descriptive per-component hook summary stays exact in multi-component files.
+/// A warm cache from 187 lacks the attribution field on persisted `hook_uses`.
+///
+/// Bumped to 189: `ModuleInfo`/`CachedModule` now carry typed semantic facts for
+/// Angular template member accesses alongside the older string payload entries.
+///
+/// Bumped to 190: `SemanticFact` now includes typed static-factory call member
+/// access facts alongside the older factory-call string payload entries.
+///
+/// Bumped to 191: `SemanticFact` now includes typed fluent-chain member access
+/// facts alongside the older fluent-chain string payload entries.
+///
+/// Bumped to 192: `SemanticFact` now includes typed Playwright fixture-use facts
+/// alongside the older fixture-use string payload entries.
+///
+/// Bumped to 193: `SemanticFact` now includes typed Playwright fixture definition
+/// facts alongside the older fixture-definition string payload entries.
+///
+/// Bumped to 194: `SemanticFact` now includes typed Playwright fixture alias
+/// facts alongside the older fixture-alias string payload entries.
+///
+/// Bumped to 195: `SemanticFact` now includes typed Playwright fixture type
+/// facts alongside the older fixture-type string payload entries.
+///
+/// Bumped to 196: `SemanticFact` now includes typed instance export binding
+/// facts alongside the older instance-export string payload entries.
+///
+/// Bumped to 197: factory-call member accesses are now persisted only as typed
+/// semantic facts; older cache payloads are reparsed by subsequent schema bumps.
+///
+/// Bumped to 198: fluent-chain member accesses are now persisted only as typed
+/// semantic facts; older cache payloads are reparsed by subsequent schema bumps.
+///
+/// Bumped to 199: constructor-rooted fluent-chain member accesses are now
+/// persisted only as typed semantic facts; older cache payloads are reparsed by
+/// subsequent schema bumps.
+///
+/// Bumped to 200: instance export bindings are now persisted only as typed
+/// semantic facts; older cache payloads are reparsed by subsequent schema bumps.
+///
+/// Bumped to 201: Playwright fixture-use member accesses are now persisted only
+/// as typed semantic facts; older cache payloads are reparsed by subsequent
+/// schema bumps.
+///
+/// Bumped to 202: Playwright fixture-definition member accesses are now
+/// persisted only as typed semantic facts; older cache payloads are reparsed by
+/// subsequent schema bumps.
+///
+/// Bumped to 203: Playwright fixture-alias member accesses are now persisted
+/// only as typed semantic facts; older cache payloads are reparsed by subsequent
+/// schema bumps.
+///
+/// Bumped to 204: Playwright fixture-type member accesses are now persisted
+/// only as typed semantic facts; older cache payloads are reparsed by subsequent
+/// schema bumps.
+///
+/// Bumped to 205: Angular template member accesses are now persisted only as
+/// typed semantic facts; older cache payloads are reparsed by subsequent schema
+/// bumps.
+///
+/// Bumped to 206: Angular `{ ...this }` spread abstains are now persisted as
+/// typed semantic facts; older cache payloads are reparsed by subsequent schema
+/// bumps.
+///
+/// Bumped to 207: dynamic custom-element render abstains are now persisted as
+/// typed semantic facts.
+///
+/// Bumped to 208: empty cached semantic facts are omitted from the persisted
+/// module payload. The in-memory `ModuleInfo` contract still exposes an empty
+/// vector, but warm caches from 207 carry the old eager `Vec` field shape.
+///
+/// Bumped to 209: pre-typed semantic payloads are no longer decoded from cached
+/// member accesses. Warm caches from 208 or earlier are reparsed so analyzers
+/// consume typed semantic facts only.
+///
+/// Bumped to 210 (issue #1489 Case 2): a param typed as a Pinia store
+/// (`ReturnType<typeof useFooStore>`, inline or aliased) now binds to the store
+/// factory, so `props.store.member` / `const { m } = props.store` emit factory
+/// `member_accesses` a 209 warm cache lacks.
+///
+/// Bumped to 211 (issue #1441, cross-module Part A): exported free-function
+/// factories now persist `exported_factory_returns`, and a consumer's
+/// `const x = importedFactory()` emits a typed `FactoryFnMemberAccess` semantic
+/// fact so `x.member` credits the returned class across module boundaries. A
+/// warm cache from 210 lacks both the new metadata and the added facts.
+///
+/// Bumped to 212 (issue #1489 Case 1): an inline `useFooStore().member` call
+/// with no bound local now emits a factory `member_access` so the member is
+/// credited; a 211 warm cache lacks it.
+///
+/// Bumped to 213 (issue #1641): Svelte template usage now credits
+/// `bind:`/`style:`/`class:` directive shorthands (`bind:open` =
+/// `bind:open={open}`) as references, so a prop used only via a shorthand
+/// directive sets `used_in_template`. A warm cache from 212 carries the stale
+/// (uncredited) prop-usage flags.
+///
+/// Bumped to 215 (issue #1638, GAP 2): a `new Class()` flowing DIRECTLY into a
+/// string-coercion position (template-literal interpolation, `String(...)`
+/// argument, or `+` with a string operand) now records a `Class.toString`
+/// member access, so an implicitly-coerced `toString` is credited instead of
+/// reported as an unused class member. A warm cache from 214 lacks the
+/// synthesized `toString` accesses.
+///
+/// Bumped to 216 (issue #1707): a Vue `v-for` loop variable iterating over a
+/// typed array / reactive array of a class (`v-for="(util) of utils"` where
+/// `utils` is `Util[]` / `computed(() => Util[])`) now types the item to its
+/// element class, so template member accesses on the item (`{{ util.getter }}`)
+/// credit the class. A warm cache from 215 carries the stale `.vue`
+/// `member_accesses` that lack the credited item-member accesses.
+///
+/// Bumped to 217 (issue #1707 follow-up): the same element-class inference now
+/// also types JS iteration bindings, `utils.map(u => u.getter)` / `.forEach` /
+/// `.filter` / etc. callback params and `for (const u of utils)` loop variables
+/// over a typed array / reactive array, so member accesses on the iteration
+/// variable credit the element class. A warm cache from 216 lacks the credited
+/// iteration-variable member accesses.
+///
+/// Bumped to 218 for issue #1711: a Vue `v-for` over a `props.<field>`
+/// member-expression source (where the prop is typed as an array of a class via
+/// `defineProps<{ items: Util[] }>()`) now types the loop item to the element
+/// class, so `.vue` `member_accesses` gain the credited item-member accesses a
+/// warm 217 cache lacks.
+///
+/// Bumped to 219 for issue #1712: an Angular `@for` / `*ngFor` loop variable
+/// over a component field typed as an array of a class (`utils: Util[]`) in an
+/// inline `template:` is typed to the element class, so inline-Angular-component
+/// `member_accesses` gain the remapped item-member accesses a warm 218 cache
+/// lacks.
+///
+/// Bumped to 220 for issue #1713: a `.map()` / `.forEach()` / `for...of`
+/// iteration binding in an Astro TEMPLATE `{...}` expression region (over a
+/// frontmatter-typed class array) now credits the element-class members, so
+/// `.astro` `member_accesses` gain the template-region item-member accesses a
+/// warm 219 cache lacks.
+pub(super) const CACHE_VERSION: u32 = 220;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
 ///
-/// Bumped to 5 for issue #1180: cached duplicate-analysis suppressions now
-/// preserve scoped rule-pack policy tokens instead of storing only a broad
-/// `IssueKind` discriminant.
-pub const DUPES_CACHE_VERSION: u32 = 5;
+/// Bumped to 6 for issue #1225: `ignoreImports` now excludes re-export barrels
+/// and top-level static CommonJS require binding declarations.
+///
+/// Bumped to 7: duplicate tokenization now includes CSS-family files plus
+/// Vue, Svelte, and Astro template/style regions. Warm caches from 6 can carry
+/// empty CSS streams or script-only SFC/Astro streams.
+///
+/// Bumped to 8: duplicate token hashes now include the active source namespace
+/// (`js`, `style`, or `markup`) so structurally similar code from unrelated
+/// formats does not form cross-format clone groups.
+///
+/// Bumped to 9: CSS-family / SFC `<style>` tokens are now value-canonicalized
+/// (zero-unit collapse `0px`/`0em`/`0%` -> `0`, hex-color expansion `#fff` ->
+/// `#ffffff`) so near-miss / value-drifted CSS clones match. Warm v8 caches carry
+/// the un-canonicalized CSS token stream and must invalidate.
+pub const DUPES_CACHE_VERSION: u32 = 9;
 
 /// Default maximum cache size (256 MB). Overridable per-project via
 /// `cache.maxSizeMb` in the config file or `PLOW_CACHE_MAX_SIZE` env var.
@@ -442,13 +777,13 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 936);
+assert_cached_type_size!(CachedModule, 1320);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
-assert_cached_type_size!(CachedSuppression, 64);
-assert_cached_type_size!(CachedUnknownSuppressionKind, 32);
-assert_cached_type_size!(CachedExport, 112);
+assert_cached_type_size!(CachedSuppression, 88);
+assert_cached_type_size!(CachedUnknownSuppressionKind, 56);
+assert_cached_type_size!(CachedExport, 136);
 assert_cached_type_size!(CachedImport, 96);
 assert_cached_type_size!(CachedDynamicImport, 88);
 assert_cached_type_size!(CachedRequireCall, 88);
@@ -456,6 +791,7 @@ assert_cached_type_size!(CachedReExport, 88);
 assert_cached_type_size!(CachedMember, 64);
 assert_cached_type_size!(CachedDynamicImportPattern, 56);
 assert_cached_type_size!(crate::MemberAccess, 48);
+assert_cached_type_size!(plow_types::extract::SemanticFact, 96);
 assert_cached_type_size!(plow_types::extract::CalleeUse, 32);
 assert_cached_type_size!(plow_types::extract::MisplacedDirectiveSite, 8);
 assert_cached_type_size!(plow_types::extract::SinkSite, 216);
@@ -463,15 +799,17 @@ assert_cached_type_size!(plow_types::extract::FunctionComplexity, 96);
 assert_cached_type_size!(plow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(plow_types::extract::FlagUse, 80);
 assert_cached_type_size!(plow_types::extract::ClassHeritageInfo, 96);
+assert_cached_type_size!(plow_types::extract::FactoryReturnExport, 48);
+assert_cached_type_size!(plow_types::extract::LoadReturnKey, 32);
 
 /// Cached data for a single module.
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct CachedModule {
     /// xxh3 hash of the file content.
     pub content_hash: u64,
-    /// File modification time (seconds since epoch) for fast cache validation.
+    /// File modification time in nanoseconds for fast cache validation.
     /// When mtime+size match the on-disk file, we skip reading file content entirely.
-    pub mtime_secs: u64,
+    pub mtime_ns: u64,
     /// File size in bytes for fast cache validation.
     pub file_size: u64,
     /// Seconds-since-epoch at the time this entry was last WRITTEN
@@ -493,11 +831,14 @@ pub struct CachedModule {
     /// `require()` specifiers.
     pub require_calls: Vec<CachedRequireCall>,
     /// Package names statically referenced through package path resolution.
-    pub package_path_references: Vec<String>,
+    pub package_path_references: Box<[String]>,
     /// Static member accesses (e.g., `Status.Active`).
     pub member_accesses: Vec<crate::MemberAccess>,
+    /// Typed semantic facts produced by extraction for cross-layer analysis.
+    /// `None` means no facts, which keeps the common warm-cache payload lean.
+    pub semantic_facts: Option<Box<[plow_types::extract::SemanticFact]>>,
     /// Identifiers used as whole objects (Object.values, for..in, spread, etc.).
-    pub whole_object_uses: Vec<String>,
+    pub whole_object_uses: Box<[String]>,
     /// Dynamic import patterns with partial static resolution.
     pub dynamic_import_patterns: Vec<CachedDynamicImportPattern>,
     /// Whether this module uses CJS exports.
@@ -524,6 +865,10 @@ pub struct CachedModule {
     pub flag_uses: Vec<plow_types::extract::FlagUse>,
     /// Heritage metadata for exported classes.
     pub class_heritage: Vec<plow_types::extract::ClassHeritageInfo>,
+    /// Exported free-function factories that provably return one class instance
+    /// (`export function useApi() { return new RESTApi() }`). Compacted to `None`
+    /// when empty so the common no-factory module pays no payload. See #1441 Part A.
+    pub exported_factory_returns: Option<Box<[plow_types::extract::FactoryReturnExport]>>,
     /// Angular `InjectionToken<Interface>` `(token, interface)` pairs (#920).
     pub injection_tokens: Vec<(String, String)>,
     /// Local type-capable declarations.
@@ -575,6 +920,10 @@ pub struct CachedModule {
     /// Round-trips so the `misplaced-directive` detector sees them on
     /// warm-cache loads.
     pub misplaced_directives: Vec<plow_types::extract::MisplacedDirectiveSite>,
+    /// Export local names of inline `"use server"` body Server Actions.
+    /// Round-trips so the `unused-server-action` reclassifier sees them on
+    /// warm-cache loads.
+    pub inline_server_action_exports: Vec<String>,
     /// Vue `provide`/`inject` and Svelte `setContext`/`getContext` key sites.
     /// Round-trips so the `unprovided-inject` detector sees them on warm-cache
     /// loads.
@@ -582,8 +931,9 @@ pub struct CachedModule {
     /// Whether the module had an unknowable-key provide. Round-trips so the
     /// `unprovided-inject` project-wide abstain holds on warm-cache loads.
     pub has_dynamic_provide: bool,
-    /// Vue `<script setup>` `defineProps` declared props. Round-trips so the
-    /// `unused-component-prop` detector sees them on warm-cache loads.
+    /// Vue `<script setup>` `defineProps` and Svelte 5 `$props()` declared props.
+    /// Round-trips so the `unused-component-prop` detector sees them on
+    /// warm-cache loads.
     pub component_props: Vec<plow_types::extract::ComponentProp>,
     /// Whether the template spreads `$attrs`/`$props`/`props` or the
     /// `defineProps` return is rest-destructured. Round-trips for the abstain.
@@ -598,6 +948,33 @@ pub struct CachedModule {
     /// Vue `<script setup>` `defineEmits` declared events. Round-trips so the
     /// `unused-component-emit` detector sees them on warm-cache loads.
     pub component_emits: Vec<plow_types::extract::ComponentEmit>,
+    /// Angular component/directive inputs (`@Input()` decorators and signal
+    /// `input()` / `model()` initializers). Round-trips so the
+    /// `unused-component-input` detector sees them on warm-cache loads.
+    pub angular_inputs: Vec<plow_types::extract::AngularInputMember>,
+    /// Angular component/directive outputs (`@Output()` decorators and signal
+    /// `output()` / `outputFromObservable()` initializers). Round-trips so the
+    /// `unused-component-output` detector sees them on warm-cache loads.
+    pub angular_outputs: Vec<plow_types::extract::AngularOutputMember>,
+    /// Angular `@Component` declarations with their `selector` value(s).
+    /// Round-trips so the Angular `unrendered-component` arm sees them on
+    /// warm-cache loads.
+    pub angular_component_selectors: Vec<plow_types::extract::AngularComponentSelector>,
+    /// Lit / web-component custom elements registered in this file. Round-trips so
+    /// the Lit `unrendered-component` arm sees them on warm-cache loads.
+    pub registered_custom_elements: Vec<plow_types::extract::RegisteredCustomElement>,
+    /// Custom-element tag names used (rendered) in this file's `html` templates.
+    /// Round-trips for the Lit `unrendered-component` rendered-tag union.
+    pub used_custom_element_tags: Vec<String>,
+    /// Custom element selector tags referenced in this file's Angular templates.
+    /// Round-trips for the Angular `unrendered-component` used-selector union.
+    pub angular_used_selectors: Vec<String>,
+    /// Angular route / bootstrap component class references. Round-trips for the
+    /// Angular `unrendered-component` entry-point abstain.
+    pub angular_entry_component_refs: Vec<String>,
+    /// Whether this file dynamically renders a component (project-wide abstain
+    /// signal for the Angular `unrendered-component` detector). Round-trips.
+    pub has_dynamic_component_render: bool,
     /// Whether `defineEmits` had an unharvestable argument. Round-trips for the
     /// abstain.
     pub has_unharvestable_emits: bool,
@@ -606,6 +983,44 @@ pub struct CachedModule {
     /// Whether the emit binding was used as a whole value. Round-trips for the
     /// abstain.
     pub has_emit_whole_object_use: bool,
+    /// SvelteKit `load()` return-object keys. Round-trips so the
+    /// `unused-load-data-key` detector sees them on warm-cache loads.
+    pub load_return_keys: Vec<plow_types::extract::LoadReturnKey>,
+    /// Whether this file's `load()` body could not be harvested safely.
+    /// Round-trips for the abstain.
+    pub has_unharvestable_load: bool,
+    /// Whether this file passes the whole `data` object opaquely. Round-trips
+    /// for the `unused-load-data-key` abstain.
+    pub has_load_data_whole_use: bool,
+    /// React/JSX component definitions. Round-trips so the React-health phases
+    /// see them on warm-cache loads.
+    pub component_functions: Vec<plow_types::extract::ComponentFunction>,
+    /// React component props. Round-trips so the React `unused-component-prop`
+    /// arm sees them on warm-cache loads.
+    pub react_props: Vec<plow_types::extract::ComponentProp>,
+    /// React hook call sites. Round-trips for the complexity-fold phase.
+    pub hook_uses: Vec<plow_types::extract::HookUse>,
+    /// React render edges (child name captured; resolution deferred to graph
+    /// build). Round-trips so the render graph survives a warm cache.
+    pub render_edges: Vec<plow_types::extract::RenderEdge>,
+    /// Svelte custom events dispatched via `dispatch('<name>')`. Round-trips so
+    /// the `unused-svelte-event` detector sees them on warm-cache loads.
+    pub svelte_dispatched_events: Vec<plow_types::extract::DispatchedEvent>,
+    /// Svelte template `on:<name>` listener names on component tags. Round-trips
+    /// so the project-wide listened set is correct on warm-cache loads.
+    pub svelte_listened_events: Vec<String>,
+    /// Whether a `dispatch(<nonLiteral>)` call or whole-`dispatch`-value use was
+    /// seen. Round-trips for the `unused-svelte-event` abstain.
+    pub has_dynamic_dispatch: bool,
+}
+
+impl CachedModule {
+    /// Source metadata fingerprint stored with this cache entry.
+    ///
+    #[must_use]
+    pub fn source_fingerprint(&self) -> plow_types::source_fingerprint::SourceFingerprint {
+        plow_types::source_fingerprint::SourceFingerprint::new(self.mtime_ns, self.file_size)
+    }
 }
 
 /// Cached namespace-object alias.
@@ -658,6 +1073,8 @@ pub struct CachedSuppression {
     /// Rule id for scoped policy suppressions. Empty for all other suppression
     /// targets.
     pub policy_rule_id: String,
+    /// Human-authored reason after `--`, when present.
+    pub reason: Option<String>,
 }
 
 /// Cached unknown suppression kind token (see #449).
@@ -669,6 +1086,8 @@ pub struct CachedUnknownSuppressionKind {
     pub is_file_level: bool,
     /// The verbatim token that did not parse.
     pub token: String,
+    /// Human-authored reason after `--`, when present.
+    pub reason: Option<String>,
 }
 
 /// Cached export data for a single export declaration.
@@ -687,6 +1106,8 @@ pub struct CachedExport {
     pub is_side_effect_used: bool,
     /// Visibility tag discriminant (0=None, 1=Public, 2=Internal, 3=Beta, 4=Alpha).
     pub visibility: u8,
+    /// Human-authored reason on `@expected-unused -- <reason>`, when present.
+    pub expected_unused_reason: Option<String>,
     /// The local binding name, if different.
     pub local_name: Option<String>,
     /// Byte offset of the export span start.

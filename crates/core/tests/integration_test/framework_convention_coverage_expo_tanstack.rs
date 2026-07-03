@@ -201,6 +201,145 @@ fn tanstack_router_prefix_and_ignore_patterns_stay_strict() {
 }
 
 #[test]
+fn tanstack_start_custom_route_file_ignore_prefix_keeps_dash_routes_live() {
+    let root = fixture_path("tanstack-router-custom-ignore-prefix");
+    let config = create_config(root.clone());
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
+
+    // With routeFileIgnorePrefix overridden to "__excluded__" via the vite
+    // tanstackStart({ router: { ... } }) call, the default "-" prefix is no
+    // longer ignored, so src/routes/-/me.tsx is a live route. Nothing reachable
+    // only through it should be flagged unused.
+    let unused_files = collect_unused_files(&root, &results);
+    for path in [
+        "src/routes/-/me.tsx",
+        "src/components/Me.tsx",
+        "src/services/profile.ts",
+    ] {
+        assert!(
+            !unused_files.iter().any(|unused| unused == path),
+            "{path} should be live once routeFileIgnorePrefix is overridden, unused files: {unused_files:?}"
+        );
+    }
+    // The configured ignore prefix still excludes its own files.
+    assert!(
+        unused_files
+            .iter()
+            .any(|unused| unused == "src/routes/__excluded__scratch.tsx"),
+        "the configured __excluded__ prefix should still be ignored, unused files: {unused_files:?}"
+    );
+
+    let unused_exports = collect_unused_exports(&root, &results);
+    for (path, export) in [
+        ("src/routes/-/me.tsx", "Route"),
+        ("src/routes/-/me.tsx", "loader"),
+        ("src/routes/-/me.tsx", "component"),
+    ] {
+        assert!(
+            !has_unused_export(&unused_exports, path, export),
+            "{path}:{export} should be framework-used on a live dash route, found: {unused_exports:?}"
+        );
+    }
+    // Ordinary helpers on a live route file are still reported.
+    assert!(
+        has_unused_export(&unused_exports, "src/routes/-/me.tsx", "unusedMeHelper"),
+        "ordinary helpers on a live route file should still be reported, found: {unused_exports:?}"
+    );
+}
+
+#[test]
+fn tanstack_router_vite_legacy_alias_honors_custom_ignore_prefix() {
+    let temp = tempdir().expect("create temp dir");
+    let root = temp.path();
+
+    write_project_file(
+        root,
+        "package.json",
+        r#"{
+  "dependencies": {
+    "@tanstack/react-router": "1.0.0",
+    "@tanstack/router-plugin": "1.0.0",
+    "vite": "1.0.0"
+  }
+}"#,
+    );
+    // Legacy TanStackRouterVite alias takes flat options (no `router` nesting).
+    write_project_file(
+        root,
+        "vite.config.ts",
+        r#"import { defineConfig } from "vite";
+import { TanStackRouterVite } from "@tanstack/router-plugin/vite";
+
+export default defineConfig({
+  plugins: [
+    TanStackRouterVite({
+      routeFileIgnorePrefix: "__excluded__"
+    })
+  ]
+});
+"#,
+    );
+    write_project_file(
+        root,
+        "src/routeTree.gen.ts",
+        r#"import { Route as dashRoute } from "./routes/-/me";
+
+export const routeTree = [dashRoute];
+"#,
+    );
+    write_project_file(root, "src/routes/-/me.tsx", "export const Route = {};\n");
+    write_project_file(
+        root,
+        "src/routes/__excluded__scratch.tsx",
+        "export const Route = {};\n",
+    );
+
+    let config = create_config(root.to_path_buf());
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
+    let unused_files = collect_unused_files(root, &results);
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path == "src/routes/-/me.tsx"),
+        "dash-prefixed route should stay live under the legacy alias override, unused files: {unused_files:?}"
+    );
+    assert!(
+        unused_files
+            .iter()
+            .any(|path| path == "src/routes/__excluded__scratch.tsx"),
+        "the configured __excluded__ prefix should be ignored under the legacy alias, unused files: {unused_files:?}"
+    );
+}
+
+#[test]
+fn tanstack_router_default_ignore_prefix_still_ignores_dash_files() {
+    let temp = tempdir().expect("create temp dir");
+    let root = temp.path();
+
+    write_project_file(
+        root,
+        "package.json",
+        r#"{
+  "dependencies": {
+    "@tanstack/react-router": "1.0.0"
+  }
+}"#,
+    );
+    write_project_file(root, "src/routes/index.tsx", "export const Route = {};\n");
+    write_project_file(root, "src/routes/-helper.tsx", "export const Route = {};\n");
+
+    let config = create_config(root.to_path_buf());
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
+    let unused_files = collect_unused_files(root, &results);
+    assert!(
+        unused_files
+            .iter()
+            .any(|path| path == "src/routes/-helper.tsx"),
+        "with no override the default \"-\" prefix must stay ignored, unused files: {unused_files:?}"
+    );
+}
+
+#[test]
 fn tanstack_router_generated_tree_route_exports_are_not_duplicate_exports() {
     let temp = tempdir().expect("create temp dir");
     let root = temp.path();
@@ -606,6 +745,10 @@ export const routes = rootRoute("root.tsx", [
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn tanstack_router_vite_plugin_inline_virtual_routes_are_covered() {
     let temp = tempdir().expect("create temp dir");
     let root = temp.path();

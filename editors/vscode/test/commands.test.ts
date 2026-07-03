@@ -13,6 +13,21 @@ let mockInstalledCli: string | null = null;
 let mockDownloadedCli: string | null = null;
 let mockExtensionVersion: string | null = null;
 let mockBinaryVersions: Readonly<Record<string, string | null>> = {};
+let mockConfigPathSetting = "";
+let mockResolvedConfigRoots: string[] = [];
+let mockComplexityBreakdownEnabled = false;
+let mockActiveTextEditor:
+  | {
+      readonly document: {
+        readonly uri: {
+          readonly scheme: string;
+          readonly fsPath: string;
+        };
+        readonly isDirty: boolean;
+        readonly save: () => Promise<boolean>;
+      };
+    }
+  | undefined;
 
 vi.mock("node:fs", () => ({
   existsSync: (p: string) => mockFiles.has(p),
@@ -23,6 +38,9 @@ vi.mock("vscode", () => ({
     Separator: -1,
   },
   window: {
+    get activeTextEditor() {
+      return mockActiveTextEditor;
+    },
     showWarningMessage: vi.fn(),
     showInformationMessage: vi.fn(),
     showErrorMessage: vi.fn(async () => undefined),
@@ -31,6 +49,17 @@ vi.mock("vscode", () => ({
   },
   workspace: {
     workspaceFolders: undefined,
+    getWorkspaceFolder: vi.fn((uri: { readonly fsPath: string }) => {
+      const workspace = mockWorkspace as {
+        readonly workspaceFolders:
+          | ReadonlyArray<{ readonly uri: { readonly fsPath: string } }>
+          | undefined;
+      };
+      return (
+        workspace.workspaceFolders?.find((folder) => uri.fsPath.startsWith(folder.uri.fsPath)) ??
+        undefined
+      );
+    }),
   },
   commands: {
     executeCommand: vi.fn(),
@@ -63,11 +92,16 @@ vi.mock("../src/config.js", () => ({
   getDuplicationThresholdOverride: () => undefined,
   getHealthHotspots: () => true,
   getHealthTopFindings: () => 20,
-  getComplexityBreakdownEnabled: () => false,
+  getComplexityBreakdownEnabled: () => mockComplexityBreakdownEnabled,
   getComplexityDecorationCap: () => 200,
   getIssueTypes: () => ({}),
   getChangedSince: () => "",
-  getResolvedConfigPath: () => "",
+  getResolvedConfigPath: (workspaceRoot?: string) => {
+    mockResolvedConfigRoots.push(workspaceRoot ?? "");
+    return mockConfigPathSetting && workspaceRoot
+      ? join(workspaceRoot, mockConfigPathSetting)
+      : mockConfigPathSetting;
+  },
   getWorkspaceScope: () => "",
 }));
 
@@ -75,6 +109,17 @@ vi.mock("../src/binary-utils.js", () => ({
   getExecutableExtension: () => "",
   findLocalBinary: (name: string) => (name === "plow" ? mockLocalBinary : null),
   findBinaryInPath: (name: string) => (name === "plow" ? mockPathBinary : null),
+  // Mirror the real sibling resolution against the mocked fs (mockFiles): the
+  // `plow` CLI sibling of a configured `plow.lspPath` is `<dir>/plow`.
+  resolveConfiguredBinaryPath: (configured: string, name: string) => {
+    const slash = configured.lastIndexOf("/");
+    const dir = slash >= 0 ? configured.slice(0, slash) : ".";
+    const sibling = `${dir}/${name}`;
+    if (mockFiles.has(configured) && configured.endsWith(`/${name}`)) {
+      return configured;
+    }
+    return mockFiles.has(sibling) ? sibling : null;
+  },
 }));
 
 vi.mock("../src/download.js", () => ({
@@ -90,6 +135,8 @@ import {
   execPlow,
   PlowExecError,
   findCliBinary,
+  buildInspectArgs,
+  runInspectActiveFile,
   resolveCliBinary,
   resolveCliForRun,
   runAnalysis,
@@ -104,6 +151,11 @@ const workspaceContext = {
     get: () => "",
   },
 } as unknown as vscode.ExtensionContext;
+
+beforeEach(() => {
+  mockConfigPathSetting = "";
+  mockResolvedConfigRoots = [];
+});
 
 const emptyCheck = {
   schema_version: 7,
@@ -181,6 +233,24 @@ const setWorkspaceRoot = (root: string | null): void => {
     workspaceFolders: ReadonlyArray<{ readonly uri: { readonly fsPath: string } }> | undefined;
   };
   workspace.workspaceFolders = root === null ? undefined : [{ uri: { fsPath: root } }];
+};
+
+interface ActiveEditorOptions {
+  readonly isDirty?: boolean;
+  readonly save?: () => Promise<boolean>;
+}
+
+const setActiveEditor = (fsPath: string | null, options: ActiveEditorOptions = {}): void => {
+  mockActiveTextEditor =
+    fsPath === null
+      ? undefined
+      : {
+          document: {
+            uri: { scheme: "file", fsPath },
+            isDirty: options.isDirty ?? false,
+            save: options.save ?? (() => Promise.resolve(true)),
+          },
+        };
 };
 
 const restoreMaxFileSizeEnv = (value: string | undefined): void => {
@@ -357,6 +427,7 @@ describe("resolveCliForRun", () => {
     mockDownloadedCli = null;
     mockExtensionVersion = "2.88.1";
     mockBinaryVersions = {};
+    mockComplexityBreakdownEnabled = false;
     vi.clearAllMocks();
   });
 
@@ -623,6 +694,264 @@ describe("runHealthAnalysis no-workspace gate (#902)", () => {
   });
 });
 
+describe("runInspectActiveFile", () => {
+  beforeEach(() => {
+    mockLspPath = "";
+    mockLocalBinary = null;
+    mockPathBinary = null;
+    mockInstalledCli = null;
+    mockDownloadedCli = null;
+    mockExtensionVersion = null;
+    mockBinaryVersions = {};
+    setWorkspaceRoot(null);
+    setActiveEditor(null);
+    vi.clearAllMocks();
+  });
+
+  it("runs inspect for the active file and writes the JSON bundle to the output channel", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "plow-vscode-inspect-"));
+    const script = join(dir, "plow-cli.js");
+    const filePath = join(dir, "src", "extension.ts");
+    const logPath = join(dir, "spawn.log");
+    const output = JSON.stringify({
+      kind: "inspect_target",
+      target: { type: "file", file: "src/extension.ts" },
+      identity: { file: "src/extension.ts" },
+      evidence: {},
+      warnings: [],
+    });
+    const outputChannel = {
+      appendLine: vi.fn(),
+      show: vi.fn(),
+    } as unknown as vscode.OutputChannel;
+
+    try {
+      await writeFile(
+        script,
+        [
+          "#!/usr/bin/env node",
+          'const fs = require("node:fs");',
+          `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args: process.argv.slice(2) }) + "\\n");`,
+          `process.stdout.write(${JSON.stringify(output)});`,
+        ].join("\n"),
+        "utf8",
+      );
+      await chmod(script, 0o755);
+
+      mockPathBinary = script;
+      setWorkspaceRoot(dir);
+      setActiveEditor(filePath);
+
+      const result = await runInspectActiveFile(workspaceContext, outputChannel);
+      const calls = await readSpawnLog(logPath);
+
+      expect(result?.kind).toBe("inspect_target");
+      expect(calls[0]?.args).toEqual([
+        "inspect",
+        "--file",
+        "src/extension.ts",
+        "--format",
+        "json",
+        "--quiet",
+      ]);
+      expect(outputChannel.appendLine).toHaveBeenCalledWith("Plow inspect: src/extension.ts");
+      expect(outputChannel.show).toHaveBeenCalled();
+    } finally {
+      setWorkspaceRoot(null);
+      setActiveEditor(null);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("forwards inspect production false as --no-production", () => {
+    expect(
+      buildInspectArgs({
+        filePath: "src/extension.ts",
+        production: false,
+        workspace: "app",
+        configPath: "/repo/.plowrc.json",
+      }),
+    ).toEqual([
+      "inspect",
+      "--file",
+      "src/extension.ts",
+      "--format",
+      "json",
+      "--quiet",
+      "--workspace",
+      "app",
+      "--no-production",
+      "--config",
+      "/repo/.plowrc.json",
+    ]);
+  });
+
+  it("resolves relative inspect config paths from the active editor workspace root", async () => {
+    const firstRoot = await mkdtemp(join(tmpdir(), "plow-vscode-root-a-"));
+    const secondRoot = await mkdtemp(join(tmpdir(), "plow-vscode-root-b-"));
+    const script = join(secondRoot, "plow-cli.js");
+    const filePath = join(secondRoot, "src", "extension.ts");
+    const logPath = join(secondRoot, "spawn.log");
+
+    try {
+      await writeFile(
+        script,
+        [
+          "#!/usr/bin/env node",
+          'const fs = require("node:fs");',
+          `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args: process.argv.slice(2) }) + "\\n");`,
+          'process.stdout.write(\'{"kind":"inspect_target","warnings":[]}\');',
+        ].join("\n"),
+        "utf8",
+      );
+      await chmod(script, 0o755);
+
+      mockPathBinary = script;
+      mockConfigPathSetting = ".config/plow.json";
+      const workspace = mockWorkspace as {
+        workspaceFolders: ReadonlyArray<{ readonly uri: { readonly fsPath: string } }>;
+      };
+      workspace.workspaceFolders = [
+        { uri: { fsPath: firstRoot } },
+        { uri: { fsPath: secondRoot } },
+      ];
+      setActiveEditor(filePath);
+
+      await expect(runInspectActiveFile(workspaceContext)).resolves.not.toBeNull();
+      const calls = await readSpawnLog(logPath);
+
+      expect(mockResolvedConfigRoots).toContain(secondRoot);
+      expect(calls[0]?.args).toContain(join(secondRoot, ".config/plow.json"));
+    } finally {
+      setWorkspaceRoot(null);
+      setActiveEditor(null);
+      await rm(firstRoot, { recursive: true, force: true });
+      await rm(secondRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("retries inspect with the managed CLI when the resolved CLI rejects the subcommand", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "plow-vscode-inspect-managed-"));
+    const staleScript = join(dir, "stale-plow.js");
+    const managedScript = join(dir, "managed-plow.js");
+    const filePath = join(dir, "src", "extension.ts");
+    const logPath = join(dir, "spawn.log");
+    const outputChannel = {
+      appendLine: vi.fn(),
+      show: vi.fn(),
+    } as unknown as vscode.OutputChannel;
+
+    try {
+      await writeFile(
+        staleScript,
+        [
+          "#!/usr/bin/env node",
+          'process.stderr.write("error: unrecognized subcommand \\"inspect\\"\\n");',
+          "process.exit(2);",
+        ].join("\n"),
+        "utf8",
+      );
+      await writeFile(
+        managedScript,
+        [
+          "#!/usr/bin/env node",
+          'const fs = require("node:fs");',
+          `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args: process.argv.slice(2) }) + "\\n");`,
+          'process.stdout.write(\'{"kind":"inspect_target","warnings":[]}\');',
+        ].join("\n"),
+        "utf8",
+      );
+      await chmod(staleScript, 0o755);
+      await chmod(managedScript, 0o755);
+
+      mockPathBinary = staleScript;
+      mockInstalledCli = managedScript;
+      setWorkspaceRoot(dir);
+      setActiveEditor(filePath);
+
+      const result = await runInspectActiveFile(workspaceContext, outputChannel);
+      const calls = await readSpawnLog(logPath);
+
+      expect(result?.kind).toBe("inspect_target");
+      expect(calls).toHaveLength(1);
+      expect(outputChannel.appendLine).toHaveBeenCalledWith(
+        "Plow: resolved CLI does not support inspect; switched to the managed CLI.",
+      );
+    } finally {
+      setWorkspaceRoot(null);
+      setActiveEditor(null);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("saves a dirty active file before running inspect", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "plow-vscode-inspect-save-"));
+    const script = join(dir, "plow-cli.js");
+    const filePath = join(dir, "src", "extension.ts");
+    const logPath = join(dir, "spawn.log");
+    const save = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+
+    try {
+      await writeFile(
+        script,
+        [
+          "#!/usr/bin/env node",
+          'const fs = require("node:fs");',
+          `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args: process.argv.slice(2) }) + "\\n");`,
+          'process.stdout.write(\'{"kind":"inspect_target","warnings":[]}\');',
+        ].join("\n"),
+        "utf8",
+      );
+      await chmod(script, 0o755);
+
+      mockPathBinary = script;
+      setWorkspaceRoot(dir);
+      setActiveEditor(filePath, { isDirty: true, save });
+
+      const result = await runInspectActiveFile(workspaceContext);
+      const calls = await readSpawnLog(logPath);
+
+      expect(save).toHaveBeenCalledOnce();
+      expect(result?.kind).toBe("inspect_target");
+      expect(calls[0]?.args).toContain("src/extension.ts");
+    } finally {
+      setWorkspaceRoot(null);
+      setActiveEditor(null);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not run inspect when saving a dirty active file fails", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "plow-vscode-inspect-save-fail-"));
+    const script = join(dir, "plow-cli.js");
+    const filePath = join(dir, "src", "extension.ts");
+    const logPath = join(dir, "spawn.log");
+    const save = vi.fn<() => Promise<boolean>>().mockResolvedValue(false);
+
+    try {
+      await writeFile(script, "#!/usr/bin/env node\n", "utf8");
+      await chmod(script, 0o755);
+
+      mockPathBinary = script;
+      setWorkspaceRoot(dir);
+      setActiveEditor(filePath, { isDirty: true, save });
+
+      const result = await runInspectActiveFile(workspaceContext);
+
+      expect(result).toBeNull();
+      expect(save).toHaveBeenCalledOnce();
+      expect(mockWindow.showWarningMessage).toHaveBeenCalledWith(
+        "Plow inspect cancelled because src/extension.ts could not be saved.",
+      );
+      await expect(readSpawnLog(logPath)).rejects.toThrow();
+    } finally {
+      setWorkspaceRoot(null);
+      setActiveEditor(null);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("runHealthAnalysis return type (envelope reachable)", () => {
   beforeEach(() => {
     mockLspPath = "";
@@ -632,6 +961,7 @@ describe("runHealthAnalysis return type (envelope reachable)", () => {
     mockDownloadedCli = null;
     mockExtensionVersion = null;
     mockBinaryVersions = {};
+    mockComplexityBreakdownEnabled = false;
     setWorkspaceRoot(null);
     resetHealthNoWorkspaceWarning();
     vi.clearAllMocks();
@@ -675,6 +1005,54 @@ describe("runHealthAnalysis return type (envelope reachable)", () => {
       expect(report?.version).toBe("9.9.9-test");
       expect(report?.next_steps?.[0]?.id).toBe("health-clean");
     } finally {
+      setWorkspaceRoot(null);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("retries without complexity breakdown when an older CLI rejects the flag", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "plow-vscode-health-old-cli-"));
+    const script = join(dir, "plow-cli.js");
+    const logPath = join(dir, "spawn.log");
+    const output = JSON.stringify({
+      schema_version: 7,
+      version: "9.9.9-test",
+      elapsed_ms: 12,
+      findings: [],
+      summary: {},
+      next_steps: [],
+    });
+
+    try {
+      await writeFile(
+        script,
+        [
+          "#!/usr/bin/env node",
+          "const fs = require('node:fs');",
+          `fs.appendFileSync(${JSON.stringify(logPath)}, process.argv.slice(2).join(' ') + '\\n');`,
+          "if (process.argv.includes('--complexity-breakdown')) {",
+          "  console.error(\"error: unexpected argument '--complexity-breakdown' found\");",
+          "  process.exit(2);",
+          "}",
+          `process.stdout.write(${JSON.stringify(output)});`,
+        ].join("\n"),
+        "utf8",
+      );
+      await chmod(script, 0o755);
+
+      mockPathBinary = script;
+      mockComplexityBreakdownEnabled = true;
+      setWorkspaceRoot(dir);
+
+      const report = await runHealthAnalysis(workspaceContext);
+      expect(report?.version).toBe("9.9.9-test");
+
+      const calls = (await readFile(logPath, "utf8")).trim().split("\n");
+      expect(calls).toHaveLength(2);
+      expect(calls[0]).toContain("--complexity-breakdown");
+      expect(calls[1]).not.toContain("--complexity-breakdown");
+    } finally {
+      mockComplexityBreakdownEnabled = false;
       setWorkspaceRoot(null);
       await rm(dir, { recursive: true, force: true });
     }

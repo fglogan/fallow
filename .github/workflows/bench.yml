@@ -9,6 +9,7 @@ on:
       - 'Cargo.lock'
       - 'rust-toolchain.toml'
       - '.github/workflows/bench.yml'
+      - '.github/actions/setup-rust/**'
   push:
     branches: [main]
     paths:
@@ -17,70 +18,99 @@ on:
       - 'Cargo.lock'
       - 'rust-toolchain.toml'
       - '.github/workflows/bench.yml'
+      - '.github/actions/setup-rust/**'
   workflow_dispatch:
 
 concurrency:
   group: bench-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-permissions: {}
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-C debuginfo=1 -C strip=none -g --cfg codspeed"
 
 jobs:
   benchmark:
-    name: Performance regression check
+    name: CodSpeed fast simulation (${{ matrix.label }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
+      id-token: write
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: core analysis
+            cache_key: core-analysis
+            package: plow-core
+            bench: analysis
+          - label: programmatic commands
+            cache_key: programmatic-commands
+            package: plow-benchmarks
+            bench: programmatic_commands
+          - label: representative sources
+            cache_key: representative-sources
+            package: plow-benchmarks
+            bench: representative_sources
+          - label: scaling analysis
+            cache_key: scaling-analysis
+            package: plow-core
+            bench: scaling_analysis
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-rust
         with:
-          cache-key: bench
+          cache-key: bench-${{ matrix.cache_key }}
 
-      - name: Run benchmarks
-        # Only run the `analysis` bench target (not `large_analysis` which
-        # contains 5000+ file benchmarks that take 5+ minutes each).
-        run: cargo bench --bench analysis -- --output-format bencher | tee bench-output.txt
-
-      - name: Store benchmark result
-        uses: ./.github/actions/store-benchmark
+      - name: Install cargo-codspeed
+        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2.82.2
         with:
-          name: Plow Benchmarks
-          tool: cargo
-          output-file-path: bench-output.txt
-          data-dir: bench
-          alert-threshold: '150%'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          continue-on-error: ${{ github.event_name == 'pull_request' }}
+          tool: cargo-codspeed@4.7.0
 
-      - name: Deploy dashboard
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          # Save the dashboard page before switching branches
-          cp .github/pages/index.html /tmp/dashboard-index.html
+      - name: Build benchmark shard
+        # Keep PR feedback focused: the full main/manual job uploads the slower suite.
+        run: cargo codspeed build -p ${{ matrix.package }} --bench ${{ matrix.bench }} --features codspeed
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Run benchmark shard
+        uses: CodSpeedHQ/action@63f3e98b61959fe67f146a3ff022e4136fe9bb9c # v4.17.6
+        with:
+          mode: simulation
+          run: cargo codspeed run -p ${{ matrix.package }} --bench ${{ matrix.bench }}
 
-          # Fetch latest gh-pages (benchmark-action may have just pushed)
-          git fetch origin gh-pages
+  benchmark-full:
+    name: CodSpeed full simulation (large analysis)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
-          # Use worktree to avoid losing the main checkout
-          git worktree add /tmp/gh-pages origin/gh-pages
-          cd /tmp/gh-pages
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: bench-large-analysis
 
-          cp /tmp/dashboard-index.html index.html
-          git add index.html
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: update dashboard index.html"
-            git push origin HEAD:gh-pages
-          fi
+      - name: Install cargo-codspeed
+        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2.82.2
+        with:
+          tool: cargo-codspeed@4.7.0
 
-          cd "$GITHUB_WORKSPACE"
-          git worktree remove /tmp/gh-pages
+      - name: Build large benchmark shard
+        run: cargo codspeed build -p plow-core --bench large_analysis --features codspeed
+
+      - name: Run large benchmark shard
+        uses: CodSpeedHQ/action@63f3e98b61959fe67f146a3ff022e4136fe9bb9c # v4.17.6
+        with:
+          mode: simulation
+          run: cargo codspeed run -p plow-core --bench large_analysis

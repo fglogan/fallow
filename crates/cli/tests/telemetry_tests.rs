@@ -213,6 +213,7 @@ fn inspect_event_output(
         .env_remove("PLOW_AGENT_SOURCE")
         .env_remove("PLOW_INTEGRATION_SURFACE")
         .env_remove("PLOW_MCP_TOOL")
+        .env_remove("PLOW_API_KEY")
         .env("PLOW_TELEMETRY", "inspect")
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path().join(".config"))
@@ -404,6 +405,61 @@ fn write_security_project(dir: &Path) {
         "import express from 'express';\nconst app = express();\napp.post('/run', (req, res) => {\n  eval(req.body.code);\n  res.send('ok');\n});\n",
     )
     .expect("write security source");
+}
+
+/// Write a one-candidate file plus a verdict file (with `verdict` applied to the
+/// single candidate) into `dir`, returning their absolute paths. Used by the
+/// `plow security survivors` find-state regression tests (issue #1650).
+fn write_survivor_inputs(dir: &Path, verdict: &str) -> (String, String) {
+    let candidates = dir.join("candidates.json");
+    let verdicts = dir.join("verdicts.json");
+    let candidate_doc = serde_json::json!({
+        "kind": "security",
+        "security_findings": [{
+            "finding_id": "sec-a",
+            "kind": "tainted-sink",
+            "category": "ssrf",
+            "path": "src/a.ts",
+            "line": 1,
+            "col": 0,
+            "evidence": "test evidence",
+            "severity": "high",
+            "trace": [],
+            "actions": [],
+            "candidate": {
+                "sink": { "path": "src/a.ts", "line": 1, "col": 0, "category": "ssrf" },
+                "boundary": { "client_server": false, "cross_module": false }
+            }
+        }]
+    });
+    fs::write(&candidates, candidate_doc.to_string()).expect("write candidates");
+    let verdict_doc = serde_json::json!([{
+        "schema_version": "plow-security-verdict/v1",
+        "finding_id": "sec-a",
+        "verdict": verdict
+    }]);
+    fs::write(&verdicts, verdict_doc.to_string()).expect("write verdicts");
+    (
+        candidates.to_string_lossy().to_string(),
+        verdicts.to_string_lossy().to_string(),
+    )
+}
+
+/// Write a project containing two environment-variable feature flags so
+/// `plow flags` surfaces findings (issue #1650 follow-up find-state coverage).
+fn write_flags_project(dir: &Path) {
+    let src = dir.join("src");
+    fs::create_dir_all(&src).expect("create src");
+    fs::write(
+        dir.join("package.json"),
+        "{\n  \"name\": \"flags-fixture\"\n}\n",
+    )
+    .expect("write package.json");
+    fs::write(
+        src.join("index.ts"),
+        "export function f(): number {\n  if (process.env.FEATURE_NEW_CHECKOUT === \"true\") {\n    return 1;\n  }\n  if (process.env.FEATURE_BETA_BANNER) {\n    return 2;\n  }\n  return 0;\n}\n",
+    )
+    .expect("write flags source");
 }
 
 #[test]
@@ -783,10 +839,41 @@ fn health_coverage_flag_reports_runtime_coverage_mode_without_path() {
     );
     assert_eq!(event["workflow"].as_str(), Some("health"));
     assert_eq!(event["analysis_mode"].as_str(), Some("runtime_coverage"));
+    assert_eq!(event["failure_reason"].as_str(), Some("analysis"));
     assert!(
         !event.to_string().contains("missing-coverage.json"),
         "telemetry event must not include raw coverage paths"
     );
+}
+
+#[test]
+fn cloud_runtime_missing_api_key_sets_auth_failure_reason() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &[
+            "coverage",
+            "analyze",
+            "--cloud",
+            "--repo",
+            "owner/repo",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 3,
+        "missing API key should fail before network: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("runtime_coverage_setup"));
+    assert_eq!(event["analysis_mode"].as_str(), Some("production_coverage"));
+    assert_eq!(event["failure_reason"].as_str(), Some("auth"));
 }
 
 #[test]
@@ -805,6 +892,192 @@ fn security_on_clean_project_sets_findings_present_false() {
     assert_eq!(event["outcome"].as_str(), Some("success"));
     assert_eq!(event["findings_present"].as_bool(), Some(false));
     assert_eq!(event["result_count_bucket"].as_str(), Some("0"));
+}
+
+#[test]
+fn security_blind_spots_sets_findings_present() {
+    // Regression for issue #1650: `security blind-spots` emits a `security`
+    // workflow event but historically never noted find-state, so findings_present
+    // serialized as null. This fixture has no unresolved callees, so a correct
+    // run reports findings_present=false (the key is present, not null).
+    let dir = tempfile::tempdir().expect("temp project");
+    write_security_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &["security", "blind-spots", "--format", "json", "--quiet"],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "security blind-spots should exit 0: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("security"));
+    assert_eq!(event["outcome"].as_str(), Some("success"));
+    assert!(
+        !event["findings_present"].is_null(),
+        "security blind-spots must populate findings_present, not leave it null"
+    );
+    assert_eq!(event["findings_present"].as_bool(), Some(false));
+}
+
+#[test]
+fn security_survivors_with_survivor_sets_findings_present_true() {
+    // Regression for issue #1650: `security survivors` emitted a `security` event
+    // with findings_present=null. A retained (survivor) candidate is actionable
+    // output, so the run must report findings_present=true.
+    let dir = tempfile::tempdir().expect("temp project");
+    write_security_project(dir.path());
+    let (candidates, verdicts) = write_survivor_inputs(dir.path(), "survivor");
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &[
+            "security",
+            "survivors",
+            "--candidates",
+            &candidates,
+            "--verdicts",
+            &verdicts,
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "security survivors should exit 0: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("security"));
+    assert_eq!(event["outcome"].as_str(), Some("success"));
+    assert_eq!(
+        event["findings_present"].as_bool(),
+        Some(true),
+        "a retained survivor candidate must report findings_present=true"
+    );
+}
+
+#[test]
+fn security_survivors_all_dismissed_sets_findings_present_false() {
+    // Pins the false branch and the decouple-from-candidates semantics: a run
+    // whose verifier dismissed every candidate surfaced nothing actionable, so
+    // findings_present is false (present, not null).
+    let dir = tempfile::tempdir().expect("temp project");
+    write_security_project(dir.path());
+    let (candidates, verdicts) = write_survivor_inputs(dir.path(), "dismissed");
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &[
+            "security",
+            "survivors",
+            "--candidates",
+            &candidates,
+            "--verdicts",
+            &verdicts,
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "security survivors should exit 0: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("security"));
+    assert!(
+        !event["findings_present"].is_null(),
+        "security survivors must populate findings_present even when all dismissed"
+    );
+    assert_eq!(event["findings_present"].as_bool(), Some(false));
+}
+
+#[test]
+fn security_survivors_needs_human_review_sets_findings_present_true() {
+    // Pins the additive `needs_human_review` term in the survivors find-state: a
+    // candidate the verifier routes to human review is retained (non-dismissed)
+    // and must report findings_present=true even with zero outright survivors.
+    let dir = tempfile::tempdir().expect("temp project");
+    write_security_project(dir.path());
+    let (candidates, verdicts) = write_survivor_inputs(dir.path(), "needs-human-review");
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &[
+            "security",
+            "survivors",
+            "--candidates",
+            &candidates,
+            "--verdicts",
+            &verdicts,
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "security survivors should exit 0: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("security"));
+    assert_eq!(
+        event["findings_present"].as_bool(),
+        Some(true),
+        "a needs-human-review candidate must report findings_present=true"
+    );
+}
+
+#[test]
+fn flags_with_findings_sets_findings_present_true() {
+    // Regression for the issue #1650 follow-up: `plow flags` emits a
+    // `code_quality_review` workflow event (the same label as combined `plow`,
+    // which populates findings_present) but historically never noted find-state,
+    // so its findings_present serialized as null. The fixture surfaces two
+    // feature flags, so a correct run reports findings_present=true.
+    let dir = tempfile::tempdir().expect("temp project");
+    write_flags_project(dir.path());
+
+    let (event, output) =
+        inspect_event_output(dir.path(), &["flags", "--format", "json", "--quiet"], &[]);
+
+    assert_eq!(output.code, 0, "flags should exit 0: {}", output.stderr);
+    assert_eq!(event["workflow"].as_str(), Some("code_quality_review"));
+    assert_eq!(event["outcome"].as_str(), Some("success"));
+    assert_eq!(
+        event["findings_present"].as_bool(),
+        Some(true),
+        "flags surfacing feature flags must report findings_present=true"
+    );
+}
+
+#[test]
+fn flags_on_clean_project_sets_findings_present_false() {
+    // The false branch: a project with no feature flags must still populate
+    // findings_present (false), never leave it null.
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+
+    let (event, output) =
+        inspect_event_output(dir.path(), &["flags", "--format", "json", "--quiet"], &[]);
+
+    assert_eq!(output.code, 0, "flags should exit 0: {}", output.stderr);
+    assert_eq!(event["workflow"].as_str(), Some("code_quality_review"));
+    assert!(
+        !event["findings_present"].is_null(),
+        "flags must populate findings_present, not leave it null"
+    );
+    assert_eq!(event["findings_present"].as_bool(), Some(false));
 }
 
 #[test]

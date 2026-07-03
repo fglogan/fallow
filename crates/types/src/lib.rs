@@ -13,8 +13,14 @@
     )
 )]
 
+/// Typed audit cache-key inputs.
+pub mod audit_cache;
+/// Shared churn output contracts.
+pub mod churn;
 /// File discovery types: discovered files, file IDs, and entry points.
 pub mod discover;
+/// Shared duplicate-code output contracts.
+pub mod duplicates;
 /// JSON-output envelope and utility types: `SchemaVersion`, `ToolVersion`,
 /// `ElapsedMs`, `AuditIntroduced`, plus the shared `Meta`, `BaselineDeltas`,
 /// `BaselineMatch`, `RegressionResult`, `EntryPoints`, and `CheckSummary`
@@ -24,6 +30,9 @@ pub mod discover;
 pub mod envelope;
 /// Module extraction types: exports, imports, re-exports, and member info.
 pub mod extract;
+/// Shared issue-type contract metadata used by CLI, LSP, MCP, and suppression
+/// helpers.
+pub mod issue_meta;
 /// Machine-readable manifest of the plow MCP server's tools, shared by
 /// `plow schema` and the telemetry tool-name allowlist; kept in sync with
 /// the live tool router by a drift test in `crates/mcp`.
@@ -45,6 +54,8 @@ pub mod output;
 /// is `None` when serialized directly from Rust. The `schemars::JsonSchema`
 /// derive is gated per-struct on the `schema` feature.
 pub mod output_dead_code;
+/// Shared output-format selector used by CLI, config, output, and API layers.
+pub mod output_format;
 /// Per-action types attached to health findings, hotspots, refactoring
 /// targets, and coverage-gap entries. Separated from the generic
 /// `IssueAction` tree in the `output` module so the health-specific
@@ -59,5 +70,17 @@ pub mod path_util;
 pub mod results;
 /// Custom serde serializers for cross-platform path output.
 pub mod serde_path;
+/// Shared source-file freshness metadata used by cache invalidation.
+pub mod source_fingerprint;
 /// Inline suppression comment types and issue kind definitions.
 pub mod suppress;
+/// Trace output contracts shared by core, engine, CLI, API, and MCP.
+pub mod trace;
+/// Symbol-level trace-chain output contracts.
+pub mod trace_chain;
+/// Workspace and source-discovery diagnostic data types
+/// (`WorkspaceDiagnostic`, `WorkspaceDiagnosticKind`). Re-exported by
+/// `plow-config` for back-compat; embedded directly by `plow-output` so
+/// `workspace_diagnostics[]` keeps its typed JSON schema. The
+/// `schemars::JsonSchema` derive is gated on the `schema` feature.
+pub mod workspace;

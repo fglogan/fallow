@@ -5,7 +5,7 @@ import type {
   HandleDiagnosticsSignature,
   ProvideDiagnosticSignature,
   vsdiag,
-} from "vscode-languageclient/node.js";
+} from "vscode-languageclient/node";
 import type { DiagnosticSeveritySetting } from "./types.js";
 
 const STATE_KEY = "plow.diagnosticFilter.v1";
@@ -46,7 +46,26 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   { code: "unused-enum-member", label: "Unused Enum Members" },
   { code: "unused-class-member", label: "Unused Class Members" },
   { code: "unused-store-member", label: "Unused Store Members" },
+  { code: "unused-server-action", label: "Unused Server Actions" },
+  { code: "unused-load-data-key", label: "Unused Load Data Keys" },
+  { code: "unused-component-prop", label: "Unused Component Props" },
+  { code: "unused-component-emit", label: "Unused Component Emits" },
+  { code: "unused-component-input", label: "Unused Component Inputs" },
+  { code: "unused-component-output", label: "Unused Component Outputs" },
+  { code: "unused-svelte-event", label: "Unused Svelte Events" },
+  { code: "unrendered-component", label: "Unrendered Components" },
   { code: "unprovided-inject", label: "Unprovided Injects" },
+  { code: "invalid-client-export", label: "Invalid Client Exports" },
+  {
+    code: "mixed-client-server-barrel",
+    label: "Mixed Client/Server Barrels",
+  },
+  { code: "misplaced-directive", label: "Misplaced Directives" },
+  { code: "route-collision", label: "Route Collisions" },
+  {
+    code: "dynamic-segment-name-conflict",
+    label: "Dynamic Segment Name Conflicts",
+  },
   { code: "unresolved-import", label: "Unresolved Imports" },
   { code: "unlisted-dependency", label: "Unlisted Dependencies" },
   { code: "duplicate-export", label: "Duplicate Exports" },
@@ -55,8 +74,11 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   { code: "circular-dependency", label: "Circular Dependencies" },
   { code: "re-export-cycle", label: "Re-Export Cycles" },
   { code: "boundary-violation", label: "Boundary Violations" },
+  { code: "policy-violation", label: "Policy Violations" },
   { code: "stale-suppression", label: "Stale Suppressions" },
+  { code: "missing-suppression-reason", label: "Missing Suppression Reasons" },
   { code: "unused-catalog-entry", label: "Unused Catalog Entries" },
+  { code: "empty-catalog-group", label: "Empty Catalog Groups" },
   {
     code: "unresolved-catalog-reference",
     label: "Unresolved Catalog References",
@@ -136,6 +158,9 @@ interface FilterClient {
 }
 
 type DiagnosticSeverityGetter = () => DiagnosticSeveritySetting;
+
+const uriFromDiagnosticDocument = (document: vscode.TextDocument | vscode.Uri): vscode.Uri =>
+  "uri" in document ? document.uri : document;
 
 /** LSP diagnostics get tagged with `source: "plow"` (see
  *  `crates/lsp/src/diagnostics/*.rs`). Anything else flows through
@@ -450,6 +475,7 @@ export class DiagnosticFilter {
     if (!result) {
       return result;
     }
+    this.client?.diagnostics?.set(uriFromDiagnosticDocument(document), []);
     if (result.kind !== "full") {
       return result;
     }

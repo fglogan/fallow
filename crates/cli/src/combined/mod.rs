@@ -1,11 +1,11 @@
 use std::process::ExitCode;
 use std::time::Instant;
 
-use plow_config::OutputFormat;
+use plow_config::{DuplicatesConfig, OutputFormat};
 
 use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions, DupesResult};
-use crate::health::{HealthOptions, HealthResult, SortBy};
+use crate::health::{HealthOptions, HealthResult};
 use crate::regression;
 use crate::report;
 use crate::{AnalysisKind, load_config_for_analysis};
@@ -100,6 +100,7 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
         trace_export: None,
         trace_file: None,
         trace_dependency: None,
+        impact_closure: None,
         performance: opts.performance,
     };
     let check_opts = build_combined_check_options(opts, &filters, &trace_opts);
@@ -274,20 +275,41 @@ fn run_combined_dupes(
     opts: &CombinedOptions<'_>,
     check_result: Option<&CheckResult>,
 ) -> Result<Option<DupesResult>, ExitCode> {
-    let dupes_cfg = load_config_for_analysis(
+    let dupes_cfg = load_combined_dupes_config(opts)?;
+    let dupes_opts = build_combined_dupes_options(opts, &dupes_cfg);
+    let dupes_files = shared_dupes_files(opts, check_result);
+
+    let dupes_run = if let Some(files) = dupes_files {
+        crate::dupes::execute_dupes_with_files(&dupes_opts, files)
+    } else {
+        crate::dupes::execute_dupes(&dupes_opts)
+    };
+    dupes_run.map(Some)
+}
+
+fn load_combined_dupes_config(opts: &CombinedOptions<'_>) -> Result<DuplicatesConfig, ExitCode> {
+    Ok(load_config_for_analysis(
         opts.root,
         opts.config_path,
-        opts.output,
-        opts.no_cache,
-        opts.threads,
-        opts.production_dupes
-            .or_else(|| opts.production.then_some(true)),
-        opts.quiet,
+        crate::ConfigLoadOptions {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production_override: opts
+                .production_dupes
+                .or_else(|| opts.production.then_some(true)),
+            quiet: opts.quiet,
+        },
         plow_config::ProductionAnalysis::Dupes,
     )?
-    .duplicates;
+    .duplicates)
+}
 
-    let dupes_opts = DupesOptions {
+fn build_combined_dupes_options<'a>(
+    opts: &'a CombinedOptions<'a>,
+    dupes_cfg: &DuplicatesConfig,
+) -> DupesOptions<'a> {
+    DupesOptions {
         root: opts.root,
         config_path: opts.config_path,
         output: opts.output,
@@ -327,26 +349,24 @@ fn run_combined_dupes(
         summary: opts.summary,
         group_by: opts.group_by,
         performance: false,
-    };
+    }
+}
 
+fn shared_dupes_files(
+    opts: &CombinedOptions<'_>,
+    check_result: Option<&CheckResult>,
+) -> Option<Vec<plow_engine::DiscoveredFile>> {
     let check_production = opts.production_dead_code.unwrap_or(opts.production);
     let health_production = opts.production_health.unwrap_or(opts.production);
     let dupes_production = opts.production_dupes.unwrap_or(opts.production);
     let share_files_with_dupes = opts.run_health
         && check_production == health_production
         && check_production == dupes_production;
-    let dupes_files = if share_files_with_dupes {
+    if share_files_with_dupes {
         check_result.and_then(|r| r.shared_parse.as_ref().map(|sp| sp.files.clone()))
     } else {
         None
-    };
-
-    let dupes_run = if let Some(files) = dupes_files {
-        crate::dupes::execute_dupes_with_files(&dupes_opts, files)
-    } else {
-        crate::dupes::execute_dupes(&dupes_opts)
-    };
-    dupes_run.map(Some)
+    }
 }
 
 fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
@@ -357,11 +377,9 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         no_cache: opts.no_cache,
         threads: opts.threads,
         quiet: opts.quiet,
-        max_cyclomatic: None,
-        max_cognitive: None,
-        max_crap: None,
+        thresholds: plow_engine::HealthThresholdOverrides::default(),
         top: None,
-        sort: SortBy::Cyclomatic,
+        sort: plow_engine::HealthSort::Cyclomatic,
         production: opts.production_health.unwrap_or(opts.production),
         production_override: opts.production_health,
         changed_since: opts.changed_since,
@@ -372,7 +390,6 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         baseline: None,
         save_baseline: None,
         complexity: true,
-        complexity_breakdown: false,
         file_scores: true,
         coverage_gaps: false,
         config_activates_coverage_gaps: false,
@@ -380,12 +397,13 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         ownership: false,
         ownership_emails: None,
         targets: true,
+        css: false,
         force_full: false,
         score_only_output: false,
         enforce_coverage_gap_gate: false,
         effort: None,
         score: opts.score || opts.trend,
-        min_score: None,
+        gates: plow_engine::HealthGateOptions::default(),
         since: None,
         min_commits: None,
         explain: opts.explain,
@@ -394,14 +412,15 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
             .save_snapshot
             .map(|opt| std::path::PathBuf::from(opt.as_deref().unwrap_or_default())),
         trend: opts.trend,
-        group_by: opts.group_by,
-        coverage: opts.coverage,
-        coverage_root: opts.coverage_root,
+        coverage_inputs: plow_engine::HealthCoverageInputs {
+            coverage: opts.coverage,
+            coverage_root: opts.coverage_root,
+        },
         performance: opts.performance,
-        min_severity: None,
-        report_only: false,
         runtime_coverage: None,
         churn_file: opts.churn_file,
+        complexity_breakdown: false,
+        group_by: opts.group_by.map(Into::into),
     }
 }
 

@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 use std::path::Path;
 
 use plow_config::OutputFormat;
-use plow_core::results::UnusedDependency;
+use plow_types::results::UnusedDependency;
 
 use super::plan::{CapturedHashes, FixPlan};
 
@@ -10,93 +10,120 @@ use super::plan::{CapturedHashes, FixPlan};
 ///
 /// `hashes` is accepted for signature uniformity; `package.json` files are
 /// re-read and reparsed here, so the hash check is a no-op.
-pub(super) fn apply_dependency_fixes(
-    root: &Path,
-    results: &plow_core::results::AnalysisResults,
-    hashes: &CapturedHashes,
-    plan: &mut FixPlan,
-    output: OutputFormat,
-    dry_run: bool,
-    fixes: &mut Vec<serde_json::Value>,
-) {
-    let _ = hashes; // see doc above
+pub(super) struct DependencyFixInput<'a> {
+    pub(super) root: &'a Path,
+    pub(super) results: &'a plow_types::results::AnalysisResults,
+    pub(super) hashes: &'a CapturedHashes,
+    pub(super) plan: &'a mut FixPlan,
+    pub(super) output: OutputFormat,
+    pub(super) dry_run: bool,
+    pub(super) fixes: &'a mut Vec<serde_json::Value>,
+}
 
-    if results.unused_dependencies.is_empty()
-        && results.unused_dev_dependencies.is_empty()
-        && results.unused_optional_dependencies.is_empty()
+pub(super) fn apply_dependency_fixes(input: &mut DependencyFixInput<'_>) {
+    let _ = input.hashes; // see doc above
+
+    if input.results.unused_dependencies.is_empty()
+        && input.results.unused_dev_dependencies.is_empty()
+        && input.results.unused_optional_dependencies.is_empty()
     {
         return;
     }
 
     let mut deps_by_pkg: FxHashMap<&Path, Vec<(&str, &str)>> = FxHashMap::default();
-    for dep in &results.unused_dependencies {
+    for dep in &input.results.unused_dependencies {
         queue_dependency_removal(&mut deps_by_pkg, &dep.dep, "dependencies");
     }
-    for dep in &results.unused_dev_dependencies {
+    for dep in &input.results.unused_dev_dependencies {
         queue_dependency_removal(&mut deps_by_pkg, &dep.dep, "devDependencies");
     }
-    for dep in &results.unused_optional_dependencies {
+    for dep in &input.results.unused_optional_dependencies {
         queue_dependency_removal(&mut deps_by_pkg, &dep.dep, "optionalDependencies");
     }
 
-    let _ = root; // root was previously used to construct the path; now deps carry their own path
+    let _ = input.root; // root was previously used to construct the path; now deps carry their own path
 
-    for (pkg_path, removals) in &deps_by_pkg {
-        if let Ok(content) = std::fs::read_to_string(pkg_path)
-            && let Ok(mut pkg_value) = serde_json::from_str::<serde_json::Value>(&content)
+    for (&pkg_path, removals) in &deps_by_pkg {
+        process_package_dependency_removals(input, pkg_path, removals.as_slice());
+    }
+}
+
+/// Read, edit, and (when not dry-run) stage one `package.json` for the
+/// queued dependency removals targeting it. Pushes a fix entry per removed
+/// package and corrects `applied` to false on a serialization failure.
+fn process_package_dependency_removals(
+    input: &mut DependencyFixInput<'_>,
+    pkg_path: &Path,
+    removals: &[(&str, &str)],
+) {
+    let Ok(content) = std::fs::read_to_string(pkg_path) else {
+        return;
+    };
+    let Ok(mut pkg_value) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return;
+    };
+
+    let mut changed = false;
+    for &(package_name, location) in removals {
+        if let Some(deps) = pkg_value.get_mut(location)
+            && let Some(obj) = deps.as_object_mut()
+            && obj.remove(package_name).is_some()
         {
-            let mut changed = false;
-
-            for &(package_name, location) in removals {
-                if let Some(deps) = pkg_value.get_mut(location)
-                    && let Some(obj) = deps.as_object_mut()
-                    && obj.remove(package_name).is_some()
-                {
-                    if dry_run {
-                        if !matches!(output, OutputFormat::Json) {
-                            eprintln!(
-                                "Would remove `{package_name}` from {location} in {}",
-                                pkg_path.display()
-                            );
-                        }
-                        fixes.push(serde_json::json!({
-                            "type": "remove_dependency",
-                            "package": package_name,
-                            "location": location,
-                            "file": pkg_path.display().to_string(),
-                        }));
-                    } else {
-                        changed = true;
-                        fixes.push(serde_json::json!({
-                            "type": "remove_dependency",
-                            "package": package_name,
-                            "location": location,
-                            "file": pkg_path.display().to_string(),
-                            "applied": true,
-                            "__target": pkg_path.display().to_string(),
-                        }));
-                    }
+            if input.dry_run {
+                if !matches!(input.output, OutputFormat::Json) {
+                    eprintln!(
+                        "Would remove `{package_name}` from {location} in {}",
+                        pkg_path.display()
+                    );
                 }
+                input.fixes.push(serde_json::json!({
+                    "type": "remove_dependency",
+                    "package": package_name,
+                    "location": location,
+                    "file": pkg_path.display().to_string(),
+                }));
+            } else {
+                changed = true;
+                input.fixes.push(serde_json::json!({
+                    "type": "remove_dependency",
+                    "package": package_name,
+                    "location": location,
+                    "file": pkg_path.display().to_string(),
+                    "applied": true,
+                    "__target": pkg_path.display().to_string(),
+                }));
             }
+        }
+    }
 
-            if changed && !dry_run {
-                match serde_json::to_string_pretty(&pkg_value) {
-                    Ok(new_json) => {
-                        let pkg_content = new_json + "\n";
-                        plan.stage(pkg_path.to_path_buf(), pkg_content.into_bytes());
-                    }
-                    Err(e) => {
-                        eprintln!("Error: failed to serialize {}: {e}", pkg_path.display());
-                        for entry in fixes.iter_mut() {
-                            let matches = entry
-                                .get("__target")
-                                .and_then(|v| v.as_str())
-                                .is_some_and(|t| t == pkg_path.display().to_string());
-                            if matches {
-                                entry["applied"] = serde_json::json!(false);
-                            }
-                        }
-                    }
+    if changed && !input.dry_run {
+        stage_package_dependency_edit(input, pkg_path, &pkg_value);
+    }
+}
+
+/// Serialize the edited `package.json` value and stage it for write, or
+/// flip the corresponding fix entries to `applied: false` on failure.
+fn stage_package_dependency_edit(
+    input: &mut DependencyFixInput<'_>,
+    pkg_path: &Path,
+    pkg_value: &serde_json::Value,
+) {
+    match serde_json::to_string_pretty(pkg_value) {
+        Ok(new_json) => {
+            let pkg_content = new_json + "\n";
+            input
+                .plan
+                .stage(pkg_path.to_path_buf(), pkg_content.into_bytes());
+        }
+        Err(e) => {
+            eprintln!("Error: failed to serialize {}: {e}", pkg_path.display());
+            for entry in input.fixes.iter_mut() {
+                let matches = entry
+                    .get("__target")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|t| t == pkg_path.display().to_string());
+                if matches {
+                    entry["applied"] = serde_json::json!(false);
                 }
             }
         }
@@ -122,14 +149,22 @@ mod tests {
 
     fn run_fix_deps(
         root: &Path,
-        results: &plow_core::results::AnalysisResults,
+        results: &plow_types::results::AnalysisResults,
         output: OutputFormat,
         dry_run: bool,
         fixes: &mut Vec<serde_json::Value>,
     ) -> bool {
         let mut plan = FixPlan::new();
         let hashes = CapturedHashes::default();
-        apply_dependency_fixes(root, results, &hashes, &mut plan, output, dry_run, fixes);
+        apply_dependency_fixes(&mut DependencyFixInput {
+            root,
+            results,
+            hashes: &hashes,
+            plan: &mut plan,
+            output,
+            dry_run,
+            fixes,
+        });
         if dry_run {
             return false;
         }
@@ -145,11 +180,11 @@ mod tests {
             r#"{"dependencies": {"lodash": "^4.0.0"}, "devDependencies": {"jest": "^29.0.0"}}"#;
         std::fs::write(&pkg_path, original).unwrap();
 
-        let mut results = plow_core::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_types::output_dead_code::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
-                location: plow_core::results::DependencyLocation::Dependencies,
+                location: plow_types::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 5,
                 used_in_workspaces: Vec::new(),
@@ -176,11 +211,11 @@ mod tests {
         )
         .unwrap();
 
-        let mut results = plow_core::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_types::output_dead_code::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
-                location: plow_core::results::DependencyLocation::Dependencies,
+                location: plow_types::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 5,
                 used_in_workspaces: Vec::new(),
@@ -210,11 +245,11 @@ mod tests {
         )
         .unwrap();
 
-        let mut results = plow_core::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_types::output_dead_code::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash-es".into(),
-                location: plow_core::results::DependencyLocation::Dependencies,
+                location: plow_types::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 5,
                 used_in_workspaces: vec![root.join("packages/consumer")],
@@ -237,7 +272,7 @@ mod tests {
     fn dependency_fix_empty_results_returns_early() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let results = plow_core::results::AnalysisResults::default();
+        let results = plow_types::results::AnalysisResults::default();
         let mut fixes = Vec::new();
         let had_error = run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
         assert!(!had_error);
@@ -255,15 +290,17 @@ mod tests {
         )
         .unwrap();
 
-        let mut results = plow_core::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         results.unused_dev_dependencies.push(
-            plow_core::results::UnusedDevDependencyFinding::with_actions(UnusedDependency {
-                package_name: "jest".into(),
-                location: plow_core::results::DependencyLocation::DevDependencies,
-                path: pkg_path.clone(),
-                line: 3,
-                used_in_workspaces: Vec::new(),
-            }),
+            plow_types::output_dead_code::UnusedDevDependencyFinding::with_actions(
+                UnusedDependency {
+                    package_name: "jest".into(),
+                    location: plow_types::results::DependencyLocation::DevDependencies,
+                    path: pkg_path.clone(),
+                    line: 3,
+                    used_in_workspaces: Vec::new(),
+                },
+            ),
         );
 
         let mut fixes = Vec::new();
@@ -291,15 +328,17 @@ mod tests {
         )
         .unwrap();
 
-        let mut results = plow_core::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         results.unused_optional_dependencies.push(
-            plow_core::results::UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-                package_name: "sharp".into(),
-                location: plow_core::results::DependencyLocation::OptionalDependencies,
-                path: pkg_path.clone(),
-                line: 3,
-                used_in_workspaces: Vec::new(),
-            }),
+            plow_types::output_dead_code::UnusedOptionalDependencyFinding::with_actions(
+                UnusedDependency {
+                    package_name: "sharp".into(),
+                    location: plow_types::results::DependencyLocation::OptionalDependencies,
+                    path: pkg_path.clone(),
+                    line: 3,
+                    used_in_workspaces: Vec::new(),
+                },
+            ),
         );
 
         let mut fixes = Vec::new();
@@ -324,24 +363,26 @@ mod tests {
         )
         .unwrap();
 
-        let mut results = plow_core::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_types::output_dead_code::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
-                location: plow_core::results::DependencyLocation::Dependencies,
+                location: plow_types::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 3,
                 used_in_workspaces: Vec::new(),
             }),
         );
         results.unused_dev_dependencies.push(
-            plow_core::results::UnusedDevDependencyFinding::with_actions(UnusedDependency {
-                package_name: "jest".into(),
-                location: plow_core::results::DependencyLocation::DevDependencies,
-                path: pkg_path.clone(),
-                line: 5,
-                used_in_workspaces: Vec::new(),
-            }),
+            plow_types::output_dead_code::UnusedDevDependencyFinding::with_actions(
+                UnusedDependency {
+                    package_name: "jest".into(),
+                    location: plow_types::results::DependencyLocation::DevDependencies,
+                    path: pkg_path.clone(),
+                    line: 5,
+                    used_in_workspaces: Vec::new(),
+                },
+            ),
         );
 
         let mut fixes = Vec::new();
@@ -364,11 +405,11 @@ mod tests {
         let pkg_path = root.join("package.json");
         std::fs::write(&pkg_path, r#"{"dependencies": {"lodash": "^4.0.0"}}"#).unwrap();
 
-        let mut results = plow_core::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_types::output_dead_code::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
-                location: plow_core::results::DependencyLocation::Dependencies,
+                location: plow_types::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 3,
                 used_in_workspaces: Vec::new(),
@@ -393,11 +434,11 @@ mod tests {
         let original = r#"{"dependencies": {"react": "^18.0.0"}}"#;
         std::fs::write(&pkg_path, original).unwrap();
 
-        let mut results = plow_core::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_types::output_dead_code::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "nonexistent".into(),
-                location: plow_core::results::DependencyLocation::Dependencies,
+                location: plow_types::results::DependencyLocation::Dependencies,
                 path: pkg_path,
                 line: 3,
                 used_in_workspaces: Vec::new(),
@@ -419,11 +460,11 @@ mod tests {
         let original = r#"{"dependencies": {"lodash": "^4.0.0"}}"#;
         std::fs::write(&pkg_path, original).unwrap();
 
-        let mut results = plow_core::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_types::output_dead_code::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
-                location: plow_core::results::DependencyLocation::Dependencies,
+                location: plow_types::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 3,
                 used_in_workspaces: Vec::new(),
@@ -445,11 +486,11 @@ mod tests {
         let pkg_path = root.join("package.json");
         std::fs::write(&pkg_path, "not valid json").unwrap();
 
-        let mut results = plow_core::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_types::output_dead_code::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
-                location: plow_core::results::DependencyLocation::Dependencies,
+                location: plow_types::results::DependencyLocation::Dependencies,
                 path: pkg_path,
                 line: 3,
                 used_in_workspaces: Vec::new(),
@@ -469,11 +510,11 @@ mod tests {
         let root = dir.path();
         let pkg_path = root.join("package.json"); // Does not exist
 
-        let mut results = plow_core::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_types::output_dead_code::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
-                location: plow_core::results::DependencyLocation::Dependencies,
+                location: plow_types::results::DependencyLocation::Dependencies,
                 path: pkg_path,
                 line: 3,
                 used_in_workspaces: Vec::new(),
@@ -495,11 +536,11 @@ mod tests {
         let original = r#"{"name": "test"}"#;
         std::fs::write(&pkg_path, original).unwrap();
 
-        let mut results = plow_core::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_types::output_dead_code::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
-                location: plow_core::results::DependencyLocation::Dependencies,
+                location: plow_types::results::DependencyLocation::Dependencies,
                 path: pkg_path,
                 line: 3,
                 used_in_workspaces: Vec::new(),
@@ -524,11 +565,11 @@ mod tests {
         )
         .unwrap();
 
-        let mut results = plow_core::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_types::output_dead_code::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
-                location: plow_core::results::DependencyLocation::Dependencies,
+                location: plow_types::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 3,
                 used_in_workspaces: Vec::new(),

@@ -12,9 +12,9 @@ name = "plow-lsp"
 path = "src/main.rs"
 
 [dependencies]
-plow-core = { workspace = true }
+plow-api = { workspace = true }
 plow-config = { workspace = true }
-globset = { workspace = true }
+plow-types = { workspace = true }
 ls-types = { workspace = true }
 tower-lsp-server = { workspace = true }
 serde = { workspace = true }

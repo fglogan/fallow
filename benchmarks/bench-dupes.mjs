@@ -13,6 +13,16 @@ const runSynthetic = args.includes("--synthetic") || !hasFilter;
 const runRealWorld = args.includes("--real-world") || !hasFilter;
 const RUNS = parseInt(args.find((a) => a.startsWith("--runs="))?.split("=")[1] ?? "5");
 const WARMUP = parseInt(args.find((a) => a.startsWith("--warmup="))?.split("=")[1] ?? "2");
+const projectsArg = args.find((a) => a.startsWith("--projects="))?.split("=")[1];
+const projectFilter = projectsArg
+  ? new Set(
+      projectsArg
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    )
+  : null;
+const JS_WEB_FORMATS = "typescript,javascript,tsx,jsx";
 
 console.log("Building plow (release)...");
 const buildResult = spawnSync("cargo", ["build", "--release"], {
@@ -28,6 +38,18 @@ const plowBin = join(rootDir, "target", "release", "plow");
 const jscpdBin = join(__dirname, "node_modules", ".bin", "jscpd");
 if (!existsSync(jscpdBin)) {
   console.error("jscpd not found. Run: cd benchmarks && npm install");
+  process.exit(1);
+}
+
+const packageLock = JSON.parse(readFileSync(join(__dirname, "package-lock.json"), "utf8"));
+const actualJscpdPackage = JSON.parse(
+  readFileSync(join(__dirname, "node_modules", "jscpd", "package.json"), "utf8"),
+);
+const expectedJscpdVersion = packageLock.packages?.["node_modules/jscpd"]?.version;
+if (expectedJscpdVersion && actualJscpdPackage.version !== expectedJscpdVersion) {
+  console.error(
+    `jscpd version mismatch: node_modules has ${actualJscpdPackage.version}, package-lock expects ${expectedJscpdVersion}. Run: npm ci --prefix benchmarks`,
+  );
   process.exit(1);
 }
 
@@ -176,6 +198,18 @@ function fmtMem(bytes) {
   return mb < 1024 ? `${mb.toFixed(1)} MB` : `${(mb / 1024).toFixed(2)} GB`;
 }
 
+function relativeSpeed(plowMedian, jscpdMedian) {
+  if (plowMedian <= jscpdMedian) {
+    return `plow ${formatMultiplier(jscpdMedian / plowMedian)}`;
+  }
+
+  return `jscpd ${formatMultiplier(plowMedian / jscpdMedian)}`;
+}
+
+function formatMultiplier(value) {
+  return `${value.toFixed(1)}x`;
+}
+
 function benchmarkProject(name, dir) {
   const files = countSourceFiles(dir);
   console.log(`### ${name} (${files} source files)\n`);
@@ -189,7 +223,7 @@ function benchmarkProject(name, dir) {
     "--reporters",
     "json",
     "--format",
-    "typescript,javascript",
+    JS_WEB_FORMATS,
     "--output",
     jscpdReportDir,
     "--min-tokens",
@@ -238,7 +272,7 @@ function benchmarkProject(name, dir) {
 
   const fsCold = stats(fTimesCold),
     js = stats(jTimes);
-  const speedup = js.median / fsCold.median;
+  const relative = relativeSpeed(fsCold.median, js.median);
 
   console.table([
     {
@@ -247,7 +281,7 @@ function benchmarkProject(name, dir) {
       Mean: fmt(fsCold.mean),
       Median: fmt(fsCold.median),
       Max: fmt(fsCold.max),
-      Speedup: `${speedup.toFixed(1)}x`,
+      Relative: relative,
       Memory: fmtMem(fPeakRss),
       "Clone Groups": fClones.groups,
       "Dup %": `${fClones.pct}%`,
@@ -258,7 +292,7 @@ function benchmarkProject(name, dir) {
       Mean: fmt(js.mean),
       Median: fmt(js.median),
       Max: fmt(js.max),
-      Speedup: "1.0x",
+      Relative: relative,
       Memory: fmtMem(jPeakRss),
       "Clone Groups": jClones.groups,
       "Dup %": `${jClones.pct}%`,
@@ -267,7 +301,7 @@ function benchmarkProject(name, dir) {
   console.log(`  plow: [${fTimesCold.map((t) => t.toFixed(0)).join(", ")}]`);
   console.log(`  jscpd:  [${jTimes.map((t) => t.toFixed(0)).join(", ")}]\n`);
 
-  return { name, files, plow: fsCold, jscpd: js, speedup, fClones, jClones, fPeakRss, jPeakRss };
+  return { name, files, plow: fsCold, jscpd: js, relative, fClones, jClones, fPeakRss, jPeakRss };
 }
 
 const results = [];
@@ -281,8 +315,10 @@ if (runSynthetic) {
     const order = ["tiny", "small", "medium", "large", "xlarge"];
     for (const p of readdirSync(d)
       .filter((x) => existsSync(join(d, x, "package.json")))
-      .toSorted((a, b) => order.indexOf(a) - order.indexOf(b)))
+      .toSorted((a, b) => order.indexOf(a) - order.indexOf(b))) {
+      if (projectFilter && !projectFilter.has(p)) continue;
       results.push(benchmarkProject(p, join(d, p)));
+    }
   }
 }
 
@@ -294,8 +330,10 @@ if (runRealWorld) {
     console.log("--- Real-World Projects (Duplication) ---\n");
     for (const p of readdirSync(d)
       .filter((x) => existsSync(join(d, x, "package.json")))
-      .toSorted())
+      .toSorted()) {
+      if (projectFilter && !projectFilter.has(p)) continue;
       results.push(benchmarkProject(p, join(d, p)));
+    }
   }
 }
 
@@ -305,16 +343,13 @@ if (results.length > 0) {
     results.map((r) => ({
       Project: r.name,
       Files: r.files,
-      "Plow (median)": fmt(r.plow.median),
+      "Plow cold (median)": fmt(r.plow.median),
       "jscpd (median)": fmt(r.jscpd.median),
-      Speedup: `${r.speedup.toFixed(1)}x`,
+      "Faster tool": r.relative,
       "Plow RSS": fmtMem(r.fPeakRss),
       "jscpd RSS": fmtMem(r.jPeakRss),
       "Plow clones": r.fClones.groups,
       "jscpd clones": r.jClones.groups,
     })),
-  );
-  console.log(
-    `Average speedup: ${(results.reduce((s, r) => s + r.speedup, 0) / results.length).toFixed(1)}x faster\n`,
   );
 }

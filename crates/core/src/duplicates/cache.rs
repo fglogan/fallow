@@ -1,11 +1,11 @@
 //! Persistent token cache for duplication analysis.
 
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
 use bitcode::{Decode, Encode};
 use oxc_span::Span;
 use plow_config::ResolvedNormalization;
+use plow_types::source_fingerprint::SourceFingerprint;
 use plow_types::suppress::{PolicyRuleSuppression, SuppressionTarget};
 use rustc_hash::FxHashMap;
 use tempfile::NamedTempFile;
@@ -17,6 +17,13 @@ use crate::cache::DUPES_CACHE_VERSION;
 use crate::suppress::{IssueKind, Suppression};
 
 const MAX_DUPES_CACHE_SIZE: usize = 512 * 1024 * 1024;
+
+/// Extracted token payload cached for one file.
+pub(super) struct TokenPayload<'a> {
+    pub(super) hashed_tokens: &'a [HashedToken],
+    pub(super) file_tokens: &'a FileTokens,
+    pub(super) suppressions: &'a [Suppression],
+}
 
 #[derive(Debug, Encode, Decode)]
 struct CacheStore {
@@ -36,6 +43,12 @@ struct CachedTokenFile {
     source: String,
     line_count: u64,
     suppressions: Vec<CachedSuppression>,
+}
+
+impl CachedTokenFile {
+    fn source_fingerprint(&self) -> SourceFingerprint {
+        SourceFingerprint::new(self.mtime_ns, self.file_size)
+    }
 }
 
 #[derive(Debug, Clone, Encode, Decode)]
@@ -126,12 +139,20 @@ impl TokenCache {
         metadata: &std::fs::Metadata,
         mode: TokenCacheMode,
     ) -> Option<TokenCacheEntry> {
+        self.get_by_fingerprint(path, SourceFingerprint::from_metadata(metadata), mode)
+    }
+
+    fn get_by_fingerprint(
+        &self,
+        path: &Path,
+        fingerprint: SourceFingerprint,
+        mode: TokenCacheMode,
+    ) -> Option<TokenCacheEntry> {
+        if !fingerprint.has_known_mtime() {
+            return None;
+        }
         let entry = self.store.entries.get(&cache_key(path))?;
-        let (mtime_ns, file_size) = metadata_key(metadata);
-        if entry.mtime_ns != mtime_ns
-            || entry.file_size != file_size
-            || entry.normalization_hash != mode.hash
-        {
+        if entry.source_fingerprint() != fingerprint || entry.normalization_hash != mode.hash {
             return None;
         }
         Some(entry.to_entry())
@@ -142,20 +163,17 @@ impl TokenCache {
         path: &Path,
         metadata: &std::fs::Metadata,
         mode: TokenCacheMode,
-        hashed_tokens: &[HashedToken],
-        file_tokens: &FileTokens,
-        suppressions: &[Suppression],
+        payload: &TokenPayload<'_>,
     ) {
-        let (mtime_ns, file_size) = metadata_key(metadata);
+        let fingerprint = SourceFingerprint::from_metadata(metadata);
         self.store.entries.insert(
             cache_key(path),
             CachedTokenFile::from_tokens(
-                mtime_ns,
-                file_size,
+                fingerprint,
                 mode.hash,
-                hashed_tokens,
-                file_tokens,
-                suppressions,
+                payload.hashed_tokens,
+                payload.file_tokens,
+                payload.suppressions,
             ),
         );
         self.dirty = true;
@@ -215,16 +233,15 @@ impl CacheStore {
 
 impl CachedTokenFile {
     fn from_tokens(
-        mtime_ns: u64,
-        file_size: u64,
+        fingerprint: SourceFingerprint,
         normalization_hash: u64,
         hashed_tokens: &[HashedToken],
         file_tokens: &FileTokens,
         suppressions: &[Suppression],
     ) -> Self {
         Self {
-            mtime_ns,
-            file_size,
+            mtime_ns: fingerprint.mtime_ns,
+            file_size: fingerprint.file_size,
             normalization_hash,
             hashed_tokens: hashed_tokens
                 .iter()
@@ -241,44 +258,16 @@ impl CachedTokenFile {
             token_spans: file_tokens
                 .tokens
                 .iter()
-                .map(|token| CachedSpan {
-                    start: token.span.start,
-                    end: token.span.end,
-                })
+                .map(|token| cached_span(token.span))
                 .collect(),
             atomic_invocation_spans: file_tokens
                 .atomic_invocation_spans
                 .iter()
-                .map(|span| CachedSpan {
-                    start: span.start,
-                    end: span.end,
-                })
+                .map(|span| cached_span(*span))
                 .collect(),
             source: file_tokens.source.clone(),
             line_count: file_tokens.line_count as u64,
-            suppressions: suppressions
-                .iter()
-                .map(|suppression| {
-                    let (kind, policy_pack, policy_rule_id) = match &suppression.target {
-                        None => (0, String::new(), String::new()),
-                        Some(SuppressionTarget::Issue(kind)) => {
-                            (kind.to_discriminant(), String::new(), String::new())
-                        }
-                        Some(SuppressionTarget::PolicyRule(target)) => (
-                            IssueKind::PolicyViolation.to_discriminant(),
-                            target.pack.clone(),
-                            target.rule_id.clone(),
-                        ),
-                    };
-                    CachedSuppression {
-                        line: suppression.line,
-                        comment_line: suppression.comment_line,
-                        kind,
-                        policy_pack,
-                        policy_rule_id,
-                    }
-                })
-                .collect(),
+            suppressions: suppressions.iter().map(cached_suppression).collect(),
         }
     }
 
@@ -330,6 +319,7 @@ impl CachedTokenFile {
                     line: suppression.line,
                     comment_line: suppression.comment_line,
                     target,
+                    reason: None,
                 }
             })
             .collect();
@@ -341,21 +331,39 @@ impl CachedTokenFile {
     }
 }
 
-fn cache_key(path: &Path) -> String {
-    path.to_string_lossy().into_owned()
+/// Convert an oxc [`Span`] into its cache-serializable form.
+const fn cached_span(span: Span) -> CachedSpan {
+    CachedSpan {
+        start: span.start,
+        end: span.end,
+    }
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "filesystem mtimes used for cache invalidation fit in u64 nanoseconds for supported dates"
-)]
-fn metadata_key(metadata: &std::fs::Metadata) -> (u64, u64) {
-    let mtime_ns = metadata
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(SystemTime::UNIX_EPOCH).ok())
-        .map_or(0, |duration| duration.as_nanos() as u64);
-    (mtime_ns, metadata.len())
+/// Convert a [`Suppression`] into its cache-serializable form, flattening the
+/// target into a discriminant plus optional policy pack/rule strings.
+fn cached_suppression(suppression: &Suppression) -> CachedSuppression {
+    let (kind, policy_pack, policy_rule_id) = match &suppression.target {
+        None => (0, String::new(), String::new()),
+        Some(SuppressionTarget::Issue(kind)) => {
+            (kind.to_discriminant(), String::new(), String::new())
+        }
+        Some(SuppressionTarget::PolicyRule(target)) => (
+            IssueKind::PolicyViolation.to_discriminant(),
+            target.pack.clone(),
+            target.rule_id.clone(),
+        ),
+    };
+    CachedSuppression {
+        line: suppression.line,
+        comment_line: suppression.comment_line,
+        kind,
+        policy_pack,
+        policy_rule_id,
+    }
+}
+
+fn cache_key(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
 }
 
 #[cfg(test)]
@@ -404,9 +412,11 @@ mod tests {
             file,
             metadata,
             mode,
-            &entry.hashed_tokens,
-            &entry.file_tokens,
-            &entry.suppressions,
+            &TokenPayload {
+                hashed_tokens: &entry.hashed_tokens,
+                file_tokens: &entry.file_tokens,
+                suppressions: &entry.suppressions,
+            },
         );
     }
 
@@ -519,8 +529,7 @@ mod tests {
         store.entries.insert(
             cache_key(&file),
             CachedTokenFile::from_tokens(
-                metadata_key(&metadata).0,
-                metadata.len(),
+                SourceFingerprint::from_metadata(&metadata),
                 mode().hash,
                 &entry.hashed_tokens,
                 &entry.file_tokens,
@@ -531,5 +540,50 @@ mod tests {
 
         let loaded = TokenCache::load(dir.path());
         assert!(loaded.get(&file, &metadata, mode()).is_none());
+    }
+
+    #[test]
+    fn token_cache_misses_when_cached_mtime_changes() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("src.ts");
+        std::fs::write(&file, "const value = 1;\n").expect("write source");
+        let metadata = std::fs::metadata(&file).expect("metadata");
+
+        let mut cache = TokenCache::load(dir.path());
+        let entry = entry("const value = 1;\n");
+        insert_entry(&mut cache, &file, &metadata, mode(), &entry);
+        let cached = cache
+            .store
+            .entries
+            .get_mut(&cache_key(&file))
+            .expect("cached token entry");
+        cached.mtime_ns = cached.mtime_ns.saturating_add(1);
+
+        assert!(cache.get(&file, &metadata, mode()).is_none());
+    }
+
+    #[test]
+    fn token_cache_misses_when_mtime_is_unknown() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("src.ts");
+        std::fs::write(&file, "const value = 1;\n").expect("write source");
+        let metadata = std::fs::metadata(&file).expect("metadata");
+
+        let mut cache = TokenCache::load(dir.path());
+        let entry = entry("const value = 1;\n");
+        insert_entry(&mut cache, &file, &metadata, mode(), &entry);
+        let cached = cache
+            .store
+            .entries
+            .get_mut(&cache_key(&file))
+            .expect("cached token entry");
+        cached.mtime_ns = 0;
+
+        let unknown_mtime = SourceFingerprint::new(0, metadata.len());
+        assert!(
+            cache
+                .get_by_fingerprint(&file, unknown_mtime, mode())
+                .is_none()
+        );
     }
 }

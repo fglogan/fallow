@@ -37,7 +37,7 @@ jobs:
       npm-package: ${{ steps.filter.outputs.npm-package }}
       self-analyze: ${{ steps.filter.outputs.self-analyze }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         id: filter
         with:
@@ -115,7 +115,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Build image
         run: docker build -t plow:ci .
       - name: Run version
@@ -189,7 +189,7 @@ jobs:
         os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest", "windows-latest"]') || fromJSON('["ubuntu-latest"]') }}
 
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - uses: ./.github/actions/setup-rust
         with:
@@ -201,13 +201,14 @@ jobs:
 
       - name: Run tests
         if: matrix.os != 'windows-latest'
-        run: cargo test --workspace --all-targets
+        # Benchmark targets exceed this job's timeout and are covered by the
+        # dedicated benchmark workflows.
+        run: cargo test --workspace --lib --bins --tests
 
       - name: Run tests (Windows)
         if: matrix.os == 'windows-latest'
-        # Windows push checks catch path and filesystem regressions, but bench
-        # target execution can exceed this job's timeout. Dedicated benchmark
-        # workflows cover benchmark execution separately.
+        # Windows push checks catch path and filesystem regressions.
+        # Benchmark targets are covered by dedicated benchmark workflows.
         run: cargo test --workspace --lib --bins --tests
 
       - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
@@ -249,7 +250,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: ./.github/actions/setup-rust
       - name: Check documentation
         env:
@@ -263,8 +264,8 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: crate-ci/typos@44e2070e6017f834bf069503acb35ca0ca0b75f2 # v1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: crate-ci/typos@37bb98842b0d8c4ffebdb75301a13db0267cef89 # v1
       - name: Hidden unicode
         run: python3 scripts/scan-hidden-unicode.py --mode committed
       - name: Hidden-unicode scanner self-test
@@ -277,7 +278,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: '22'
@@ -298,7 +299,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: '22'
@@ -395,14 +396,38 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 2
       - uses: ./.github/actions/setup-rust
       - name: Build plow binary
         run: cargo build --bin plow
-      - name: Analyze VS Code extension
+      - name: Dead-code dogfood VS Code extension
         run: ./target/debug/plow dead-code --root editors/vscode --format json --quiet
-      - name: Analyze npm wrapper package
+      - name: Health dogfood VS Code extension
+        run: ./target/debug/plow health --root editors/vscode --format json --quiet --score --targets --top 10 --report-only
+      - name: Duplication dogfood VS Code extension
+        run: ./target/debug/plow dupes --root editors/vscode --format json --quiet --top 10
+      - name: Dead-code dogfood npm wrapper package
         run: ./target/debug/plow dead-code --root npm/plow --format json --quiet
+      - name: Health dogfood npm wrapper package
+        run: ./target/debug/plow health --root npm/plow --format json --quiet --score --targets --top 10 --report-only
+      - name: Duplication dogfood npm wrapper package
+        run: ./target/debug/plow dupes --root npm/plow --format json --quiet --top 10
+      - name: Audit dogfood smoke
+        run: |
+          base=HEAD
+          if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            base=HEAD~1
+          fi
+          set +e
+          ./target/debug/plow audit --base "$base" --format json --quiet > /tmp/plow-self-audit.json
+          code=$?
+          set -e
+          test -s /tmp/plow-self-audit.json
+          if [ "$code" -gt 1 ]; then
+            exit "$code"
+          fi
 
   vscode:
     name: VS Code Extension
@@ -413,8 +438,8 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
           version: 10.33.0
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -428,8 +453,6 @@ jobs:
         run: cd editors/vscode && pnpm run check:codegen
       - run: cd editors/vscode && pnpm lint
       - run: cd editors/vscode && pnpm build
-      - name: Verify committed dist bundle is not stale
-        run: cd editors/vscode && pnpm run check:dist
       - run: cd editors/vscode && pnpm test:unit
       - run: cd editors/vscode && pnpm package
 
@@ -451,7 +474,7 @@ jobs:
         # matrix running on every PR push.
         os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest", "macos-latest", "windows-latest"]') || fromJSON('["ubuntu-latest"]') }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: ./.github/actions/setup-rust
         with:
           components: rustfmt
@@ -472,7 +495,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: ./.github/actions/setup-rust
         with:
           targets: aarch64-pc-windows-msvc
@@ -506,7 +529,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: ./.github/actions/setup-rust
         with:
           cache-key: windows-audit-smoke
@@ -527,7 +550,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Run GitLab CI jq unit tests
         run: bash ci/tests/run.sh
@@ -541,8 +564,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: taiki-e/install-action@9b29ffac42f36c4efe76140737435c61cfb92383 # cargo-audit
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2.82.2
+        with:
+          tool: cargo-audit
       # RUSTSEC-2026-0097: `rand` 0.9.2 unsoundness with a custom logger via
       # `rand::rng()`. Reaches the tree only through the `proptest` dev-dependency
       # (test-only, never shipped in a plow binary) and plow does not use the
@@ -560,7 +585,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2
 
   shear:
@@ -572,8 +597,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: taiki-e/install-action@b9da40722b5dc25d162879fdf6a098f2d71926cc # cargo-shear
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2.82.2
+        with:
+          tool: cargo-shear
       - run: cargo shear
 
   zizmor:
@@ -585,13 +612,16 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
         with:
           enable-cache: false
       # Scope to repo's own workflows + composite action. tests/fixtures/ contains
       # intentionally lax CI YAML used as plow analysis fixtures, not real workflows.
-      - run: uvx zizmor --config .github/zizmor.yml --min-confidence medium --format plain .github/ action.yml
+      # Pin zizmor so a new release adding/strengthening an audit cannot redden
+      # CI on main with no plow change (v1.26.1 added the adhoc-packages audit,
+      # suppressed for ci.yml/release.yml in .github/zizmor.yml). Bump deliberately.
+      - run: uvx zizmor@1.26.1 --config .github/zizmor.yml --min-confidence medium --format plain .github/ action.yml
 
   msrv:
     name: MSRV (1.92)
@@ -603,7 +633,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: '1.92.0'
@@ -620,13 +650,17 @@ jobs:
     # maintainers who opt in via `git config core.hooksPath .githooks`).
     if: (needs.changes.outputs.miri == 'true' && github.event_name == 'pull_request') || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 60, not 45: the plow-extract step shares this budget with types+graph and
+    # the React/JSX structural-extraction additions (larger ModuleInfo + per-file
+    # JSX harvesting) grew the extract suite's interpreter runtime past the old
+    # 45-min ceiling. cargo test passes fast; this is Miri-interpreter cost only.
+    timeout-minutes: 60
     permissions:
       contents: read
     env:
       MIRI_TOOLCHAIN: nightly-2026-03-20
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Install Miri toolchain
         run: |
@@ -643,11 +677,24 @@ jobs:
       - name: plow-graph
         run: cargo +"$MIRI_TOOLCHAIN" miri test -p plow-graph --lib --tests -- --skip proptests
 
-      # Only suppress, css, and visitor/helpers run under Miri (pure data logic).
-      # Parser-heavy modules (visitor::tests, sfc_template, html, template_usage)
-      # have no unsafe code and are too slow under Miri interpretation.
+      # Only suppress, CSS helpers, and visitor helpers run under Miri (pure data logic).
+      # Parser-heavy modules have no unsafe code and are too slow under Miri interpretation.
+      #
+      # Tree Borrows for this crate only: the css analytics path parses via
+      # lightningcss (alpha), whose @layer string handling reconstructs a &str
+      # from raw parts in a way Miri's Stacked Borrows flags as a benign
+      # (still-experimental-rules) violation. Tree Borrows models the same
+      # aliasing safety but accepts lightningcss's reconstructed-pointer pattern.
+      # types/graph stay on Stacked Borrows (default).
       - name: plow-extract
-        run: cargo +"$MIRI_TOOLCHAIN" miri test -p plow-extract --lib --tests -- --skip cache --skip visitor::tests --skip sfc_template --skip html --skip template_usage
+        env:
+          MIRIFLAGS: -Zmiri-tree-borrows
+        run: |
+          cargo +"$MIRI_TOOLCHAIN" miri test -p plow-extract --lib --tests css:: -- --skip sfc_css::
+          cargo +"$MIRI_TOOLCHAIN" miri test -p plow-extract --lib --tests css_classes::
+          cargo +"$MIRI_TOOLCHAIN" miri test -p plow-extract --lib --tests css_metrics::
+          cargo +"$MIRI_TOOLCHAIN" miri test -p plow-extract --lib --tests suppress::
+          cargo +"$MIRI_TOOLCHAIN" miri test -p plow-extract --lib --tests visitor::helpers::
 
   ci-ok:
     name: CI

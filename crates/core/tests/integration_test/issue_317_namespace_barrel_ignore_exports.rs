@@ -25,6 +25,7 @@ fn make_config(
         ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
+        unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
         duplicates: plow_config::DuplicatesConfig::default(),
         health: plow_config::HealthConfig::default(),
         rules: RulesConfig::default(),

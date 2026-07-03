@@ -5,7 +5,7 @@
   "version": "2.48.1",
   "packageManager": "pnpm@10.33.0",
   "publisher": "plow-rs",
-  "license": "LicenseRef-Tempext-Commercial",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/fglogan/genesis-plow",
@@ -87,6 +87,11 @@
         "command": "plow.analyzeSecurity",
         "title": "Plow: Scan for Security Candidates",
         "icon": "$(shield)"
+      },
+      {
+        "command": "plow.inspectActiveFile",
+        "title": "Plow: Inspect Active File",
+        "icon": "$(inspect)"
       },
       {
         "command": "plow.selectWorkspace",
@@ -225,6 +230,21 @@
             "unused-optional-dependencies": true,
             "unused-enum-members": true,
             "unused-class-members": true,
+            "unused-store-member": true,
+            "unused-server-action": true,
+            "unused-load-data-key": true,
+            "unused-component-prop": true,
+            "unused-component-emit": true,
+            "unused-component-input": true,
+            "unused-component-output": true,
+            "unused-svelte-event": true,
+            "unrendered-component": true,
+            "unprovided-inject": true,
+            "invalid-client-export": true,
+            "mixed-client-server-barrel": true,
+            "misplaced-directive": true,
+            "route-collision": true,
+            "dynamic-segment-name-conflict": true,
             "unresolved-imports": true,
             "unlisted-dependencies": true,
             "duplicate-exports": true,
@@ -233,6 +253,7 @@
             "circular-dependencies": true,
             "re-export-cycles": true,
             "boundary-violation": true,
+            "policy-violation": true,
             "stale-suppressions": true,
             "unused-catalog-entries": true,
             "unresolved-catalog-references": true,
@@ -268,6 +289,51 @@
             "unused-class-members": {
               "type": "boolean"
             },
+            "unused-store-member": {
+              "type": "boolean"
+            },
+            "unused-server-action": {
+              "type": "boolean"
+            },
+            "unused-load-data-key": {
+              "type": "boolean"
+            },
+            "unused-component-prop": {
+              "type": "boolean"
+            },
+            "unused-component-emit": {
+              "type": "boolean"
+            },
+            "unused-component-input": {
+              "type": "boolean"
+            },
+            "unused-component-output": {
+              "type": "boolean"
+            },
+            "unused-svelte-event": {
+              "type": "boolean"
+            },
+            "unrendered-component": {
+              "type": "boolean"
+            },
+            "unprovided-inject": {
+              "type": "boolean"
+            },
+            "invalid-client-export": {
+              "type": "boolean"
+            },
+            "mixed-client-server-barrel": {
+              "type": "boolean"
+            },
+            "misplaced-directive": {
+              "type": "boolean"
+            },
+            "route-collision": {
+              "type": "boolean"
+            },
+            "dynamic-segment-name-conflict": {
+              "type": "boolean"
+            },
             "unresolved-imports": {
               "type": "boolean"
             },
@@ -290,6 +356,9 @@
               "type": "boolean"
             },
             "boundary-violation": {
+              "type": "boolean"
+            },
+            "policy-violation": {
               "type": "boolean"
             },
             "stale-suppressions": {
@@ -777,7 +846,6 @@
   "scripts": {
     "codegen:types": "node ./scripts/codegen-types.mjs",
     "check:codegen": "node ./scripts/codegen-types.mjs --check",
-    "check:dist": "node ./scripts/check-dist-drift.mjs",
     "prebuild": "pnpm run codegen:types",
     "build": "rolldown -c",
     "watch": "rolldown -c --watch",
@@ -791,20 +859,20 @@
     "publish:ovsx": "ovsx publish --no-dependencies"
   },
   "dependencies": {
-    "vscode-languageclient": "9.0.1",
-    "vscode-languageserver-protocol": "3.17.5"
+    "vscode-languageclient": "10.0.0",
+    "vscode-languageserver-protocol": "3.18.1"
   },
   "devDependencies": {
-    "@types/node": "25.9.1",
+    "@types/node": "26.0.0",
     "@types/vscode": "1.96.0",
     "@types/mocha": "10.0.10",
-    "@vscode/test-electron": "2.5.2",
+    "@vscode/test-electron": "3.0.0",
     "@vscode/vsce": "3.9.2",
     "json-schema-to-typescript": "15.0.4",
     "mocha": "11.7.6",
-    "rolldown": "1.1.0",
-    "ovsx": "1.0.0",
+    "rolldown": "1.1.2",
+    "ovsx": "1.0.1",
     "typescript": "6.0.3",
-    "vitest": "4.1.8"
+    "vitest": "4.1.9"
   }
 }

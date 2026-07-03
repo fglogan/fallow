@@ -8,9 +8,11 @@ use std::path::Path;
 #[allow(clippy::wildcard_imports, reason = "many LSP types used")]
 use ls_types::*;
 
-use plow_core::results::AnalysisResults;
+use plow_api::EditorAnalysisResults as AnalysisResults;
 
 use crate::diagnostics::FIRST_LINE_RANGE;
+
+const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
 
 /// Return true if `c` is a JS / TS identifier character.
 ///
@@ -113,7 +115,89 @@ fn declares_export_name(line_content: &str, prefix: &str, expected_name: &str) -
     leading_identifier(after_keywords) == expected_name
 }
 
+/// Typed input for unused export quick-fix code actions.
+#[derive(Clone, Copy)]
+pub struct RemoveExportActionInput<'a> {
+    pub results: &'a AnalysisResults,
+    pub file_path: &'a Path,
+    pub uri: &'a Uri,
+    pub cursor_range: &'a Range,
+    pub file_lines: &'a [&'a str],
+}
+
+impl<'a> RemoveExportActionInput<'a> {
+    #[must_use]
+    pub const fn new(
+        results: &'a AnalysisResults,
+        file_path: &'a Path,
+        uri: &'a Uri,
+        cursor_range: &'a Range,
+        file_lines: &'a [&'a str],
+    ) -> Self {
+        Self {
+            results,
+            file_path,
+            uri,
+            cursor_range,
+            file_lines,
+        }
+    }
+}
+
 /// Build quick-fix code actions for unused exports (remove the `export` keyword).
+pub fn build_remove_export_actions(input: RemoveExportActionInput<'_>) -> Vec<CodeActionOrCommand> {
+    let RemoveExportActionInput {
+        results,
+        file_path,
+        uri,
+        cursor_range,
+        file_lines,
+    } = input;
+    let mut actions = Vec::new();
+
+    let exports_iter = results.unused_exports.iter().map(|f| &f.export);
+    let types_iter = results.unused_types.iter().map(|f| &f.export);
+    for (exports, msg_prefix) in [
+        (
+            Box::new(exports_iter)
+                as Box<dyn Iterator<Item = &plow_api::editor_results::UnusedExport>>,
+            "Export",
+        ),
+        (
+            Box::new(types_iter)
+                as Box<dyn Iterator<Item = &plow_api::editor_results::UnusedExport>>,
+            "Type export",
+        ),
+    ] {
+        for export in exports {
+            if let Some(action) =
+                remove_export_action(export, msg_prefix, file_path, uri, cursor_range, file_lines)
+            {
+                actions.push(action);
+            }
+        }
+    }
+
+    actions
+}
+
+#[cfg(test)]
+fn build_remove_export_actions_for_test(
+    results: &AnalysisResults,
+    file_path: &Path,
+    uri: &Uri,
+    cursor_range: &Range,
+    file_lines: &[&str],
+) -> Vec<CodeActionOrCommand> {
+    build_remove_export_actions(RemoveExportActionInput::new(
+        results,
+        file_path,
+        uri,
+        cursor_range,
+        file_lines,
+    ))
+}
+
 #[expect(
     clippy::disallowed_types,
     reason = "serde JSON deserialization produces std HashMap"
@@ -122,109 +206,112 @@ fn declares_export_name(line_content: &str, prefix: &str, expected_name: &str) -
     clippy::cast_possible_truncation,
     reason = "identifier/indent lengths are bounded by source size"
 )]
-pub fn build_remove_export_actions(
-    results: &AnalysisResults,
+fn remove_export_action(
+    export: &plow_api::editor_results::UnusedExport,
+    msg_prefix: &str,
     file_path: &Path,
     uri: &Uri,
     cursor_range: &Range,
     file_lines: &[&str],
-) -> Vec<CodeActionOrCommand> {
-    let mut actions = Vec::new();
-
-    let exports_iter = results.unused_exports.iter().map(|f| &f.export);
-    let types_iter = results.unused_types.iter().map(|f| &f.export);
-    for (exports, msg_prefix) in [
-        (
-            Box::new(exports_iter) as Box<dyn Iterator<Item = &plow_core::results::UnusedExport>>,
-            "Export",
-        ),
-        (
-            Box::new(types_iter) as Box<dyn Iterator<Item = &plow_core::results::UnusedExport>>,
-            "Type export",
-        ),
-    ] {
-        for export in exports {
-            if export.path != file_path {
-                continue;
-            }
-
-            let export_line = export.line.saturating_sub(1);
-
-            if export_line < cursor_range.start.line || export_line > cursor_range.end.line {
-                continue;
-            }
-
-            let line_content = file_lines.get(export_line as usize).copied().unwrap_or("");
-            let trimmed = line_content.trim_start();
-            let indent_len = line_content.len() - trimmed.len();
-
-            let prefix_to_remove = if trimmed.starts_with("export default ") {
-                Some("export default ")
-            } else if trimmed.starts_with("export ") {
-                Some("export ")
-            } else {
-                None
-            };
-
-            let Some(prefix) = prefix_to_remove else {
-                continue;
-            };
-
-            if prefix != "export default "
-                && !declares_export_name(line_content, prefix, &export.export_name)
-            {
-                continue;
-            }
-
-            let title = format!("Remove unused export `{}`", export.export_name);
-            let mut changes = HashMap::new();
-
-            let edit = TextEdit {
-                range: Range {
-                    start: Position {
-                        line: export_line,
-                        character: indent_len as u32,
-                    },
-                    end: Position {
-                        line: export_line,
-                        character: (indent_len + prefix.len()) as u32,
-                    },
+) -> Option<CodeActionOrCommand> {
+    let (export_line, indent_len, prefix) =
+        remove_export_span(export, file_path, cursor_range, file_lines)?;
+    let mut changes = HashMap::new();
+    changes.insert(
+        uri.clone(),
+        vec![TextEdit {
+            range: Range {
+                start: Position {
+                    line: export_line,
+                    character: indent_len as u32,
                 },
-                new_text: String::new(),
-            };
+                end: Position {
+                    line: export_line,
+                    character: (indent_len + prefix.len()) as u32,
+                },
+            },
+            new_text: String::new(),
+        }],
+    );
 
-            changes.insert(uri.clone(), vec![edit]);
+    Some(CodeActionOrCommand::CodeAction(CodeAction {
+        title: format!("Remove unused export `{}`", export.export_name),
+        kind: Some(CodeActionKind::QUICKFIX),
+        edit: Some(WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        }),
+        diagnostics: Some(vec![remove_export_diagnostic(
+            export,
+            msg_prefix,
+            export_line,
+        )]),
+        ..Default::default()
+    }))
+}
 
-            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title,
-                kind: Some(CodeActionKind::QUICKFIX),
-                edit: Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    ..Default::default()
-                }),
-                diagnostics: Some(vec![Diagnostic {
-                    range: Range {
-                        start: Position {
-                            line: export_line,
-                            character: export.col,
-                        },
-                        end: Position {
-                            line: export_line,
-                            character: export.col + export.export_name.len() as u32,
-                        },
-                    },
-                    severity: Some(DiagnosticSeverity::HINT),
-                    source: Some("plow".to_string()),
-                    message: format!("{msg_prefix} '{}' is unused", export.export_name),
-                    tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-                    ..Default::default()
-                }]),
-                ..Default::default()
-            }));
-        }
+fn remove_export_span(
+    export: &plow_api::editor_results::UnusedExport,
+    file_path: &Path,
+    cursor_range: &Range,
+    file_lines: &[&str],
+) -> Option<(u32, usize, &'static str)> {
+    if export.path != file_path {
+        return None;
+    }
+    let export_line = export.line.saturating_sub(1);
+    if export_line < cursor_range.start.line || export_line > cursor_range.end.line {
+        return None;
     }
 
-    actions
+    let line_content = file_lines.get(export_line as usize).copied().unwrap_or("");
+    let trimmed = line_content.trim_start();
+    let indent_len = line_content.len() - trimmed.len();
+    let prefix = export_prefix_to_remove(trimmed)?;
+    if prefix != "export default "
+        && !declares_export_name(line_content, prefix, &export.export_name)
+    {
+        return None;
+    }
+    Some((export_line, indent_len, prefix))
+}
+
+fn export_prefix_to_remove(trimmed: &str) -> Option<&'static str> {
+    if trimmed.starts_with("export default ") {
+        Some("export default ")
+    } else if trimmed.starts_with("export ") {
+        Some("export ")
+    } else {
+        None
+    }
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "identifier lengths are bounded by source size"
+)]
+fn remove_export_diagnostic(
+    export: &plow_api::editor_results::UnusedExport,
+    msg_prefix: &str,
+    export_line: u32,
+) -> Diagnostic {
+    Diagnostic {
+        range: Range {
+            start: Position {
+                line: export_line,
+                character: export.col,
+            },
+            end: Position {
+                line: export_line,
+                character: export.col + export.export_name.len() as u32,
+            },
+        },
+        severity: Some(DiagnosticSeverity::HINT),
+        source: Some("plow".to_string()),
+        message: format!("{msg_prefix} '{}' is unused", export.export_name),
+        tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+        ..Default::default()
+    }
 }
 
 /// Build quick-fix code actions for unused pnpm catalog entries
@@ -241,7 +328,7 @@ pub fn build_remove_export_actions(
 /// entry line's indent (covers object-form entries such as
 /// `react:\n    specifier: ^18.2.0`).
 ///
-/// The `root` parameter is required because `UnusedCatalogEntry.path` is
+/// The `root` input field is required because `UnusedCatalogEntry.path` is
 /// stored project-root-relative; `Uri::from_file_path` would silently
 /// reject the relative path and the action would never appear.
 ///
@@ -251,17 +338,44 @@ pub fn build_remove_export_actions(
 /// the deletion range consistent with what the user actually sees in
 /// their editor, even when there are unsaved edits to the YAML file.
 /// Empty `file_lines` short-circuits the function with no actions.
-#[expect(
-    clippy::disallowed_types,
-    reason = "WorkspaceEdit.changes is typed as std::collections::HashMap by ls-types"
-)]
+#[derive(Clone, Copy)]
+pub struct CatalogEntryActionInput<'a> {
+    pub results: &'a AnalysisResults,
+    pub root: &'a Path,
+    pub uri: &'a Uri,
+    pub cursor_range: &'a Range,
+    pub file_lines: &'a [&'a str],
+}
+
+impl<'a> CatalogEntryActionInput<'a> {
+    #[must_use]
+    pub const fn new(
+        results: &'a AnalysisResults,
+        root: &'a Path,
+        uri: &'a Uri,
+        cursor_range: &'a Range,
+        file_lines: &'a [&'a str],
+    ) -> Self {
+        Self {
+            results,
+            root,
+            uri,
+            cursor_range,
+            file_lines,
+        }
+    }
+}
+
 pub fn build_remove_catalog_entry_actions(
-    results: &AnalysisResults,
-    root: &Path,
-    uri: &Uri,
-    cursor_range: &Range,
-    file_lines: &[&str],
+    input: CatalogEntryActionInput<'_>,
 ) -> Vec<CodeActionOrCommand> {
+    let CatalogEntryActionInput {
+        results,
+        root,
+        uri,
+        cursor_range,
+        file_lines,
+    } = input;
     let mut actions = Vec::new();
 
     if file_lines.is_empty() {
@@ -270,108 +384,176 @@ pub fn build_remove_catalog_entry_actions(
 
     for entry in &results.unused_catalog_entries {
         let entry = &entry.entry;
-        if !entry.hardcoded_consumers.is_empty() {
-            continue;
-        }
-
-        let Some(entry_uri) = Uri::from_file_path(root.join(&entry.path)) else {
+        let Some((entry_line, start_idx, end_idx)) =
+            catalog_entry_delete_span(entry, root, uri, cursor_range, file_lines)
+        else {
             continue;
         };
-        if entry_uri != *uri {
-            continue;
-        }
-
-        let entry_line = entry.line.saturating_sub(1);
-        if entry_line < cursor_range.start.line || entry_line > cursor_range.end.line {
-            continue;
-        }
-
-        let start_idx = entry_line as usize;
-        if start_idx >= file_lines.len() {
-            continue;
-        }
-        let end_idx = compute_catalog_deletion_end(file_lines, start_idx);
-        if !line_matches_catalog_key(file_lines[start_idx], &entry.entry_name) {
-            continue;
-        }
-
-        let title = if entry.catalog_name == "default" {
-            format!("Remove unused catalog entry `{}`", entry.entry_name)
-        } else {
-            format!(
-                "Remove unused catalog entry `{}` from `{}`",
-                entry.entry_name, entry.catalog_name
-            )
-        };
-
-        let mut changes = HashMap::new();
-        let mut edits = vec![TextEdit {
-            range: Range {
-                start: Position {
-                    line: start_idx as u32,
-                    character: 0,
-                },
-                end: Position {
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "line index is bounded by source size"
-                    )]
-                    line: end_idx as u32,
-                    character: 0,
-                },
-            },
-            new_text: String::new(),
-        }];
-
-        if let Some(parent_edit) =
-            build_parent_rewrite_edit(file_lines, start_idx, end_idx, &entry.catalog_name)
-        {
-            edits.push(parent_edit);
-        }
-        changes.insert(uri.clone(), edits);
-
-        let diagnostic_message = if entry.catalog_name == "default" {
-            format!(
-                "Unused catalog entry: '{}' is not referenced by any workspace package",
-                entry.entry_name
-            )
-        } else {
-            format!(
-                "Unused catalog entry: '{}' in catalog '{}' is not referenced by any workspace package",
-                entry.entry_name, entry.catalog_name
-            )
-        };
-
-        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-            title,
-            kind: Some(CodeActionKind::QUICKFIX),
-            edit: Some(WorkspaceEdit {
-                changes: Some(changes),
-                ..Default::default()
-            }),
-            diagnostics: Some(vec![Diagnostic {
-                range: Range {
-                    start: Position {
-                        line: entry_line,
-                        character: 0,
-                    },
-                    end: Position {
-                        line: entry_line,
-                        character: u32::MAX,
-                    },
-                },
-                severity: Some(DiagnosticSeverity::WARNING),
-                source: Some("plow".to_string()),
-                code: Some(NumberOrString::String("unused-catalog-entry".to_string())),
-                message: diagnostic_message,
-                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-                ..Default::default()
-            }]),
-            ..Default::default()
-        }));
+        actions.push(remove_catalog_entry_action(
+            entry, uri, file_lines, entry_line, start_idx, end_idx,
+        ));
     }
 
     actions
+}
+
+#[cfg(test)]
+fn build_remove_catalog_entry_actions_for_test(
+    results: &AnalysisResults,
+    root: &Path,
+    uri: &Uri,
+    cursor_range: &Range,
+    file_lines: &[&str],
+) -> Vec<CodeActionOrCommand> {
+    build_remove_catalog_entry_actions(CatalogEntryActionInput::new(
+        results,
+        root,
+        uri,
+        cursor_range,
+        file_lines,
+    ))
+}
+
+fn catalog_entry_delete_span(
+    entry: &plow_api::editor_results::UnusedCatalogEntry,
+    root: &Path,
+    uri: &Uri,
+    cursor_range: &Range,
+    file_lines: &[&str],
+) -> Option<(u32, usize, usize)> {
+    if !entry.hardcoded_consumers.is_empty() {
+        return None;
+    }
+    if !is_pnpm_catalog_source(&entry.path) {
+        return None;
+    }
+
+    let entry_uri = Uri::from_file_path(root.join(&entry.path))?;
+    if entry_uri != *uri {
+        return None;
+    }
+
+    let entry_line = entry.line.saturating_sub(1);
+    if entry_line < cursor_range.start.line || entry_line > cursor_range.end.line {
+        return None;
+    }
+
+    let start_idx = entry_line as usize;
+    if start_idx >= file_lines.len() {
+        return None;
+    }
+    if !line_matches_catalog_key(file_lines[start_idx], &entry.entry_name) {
+        return None;
+    }
+
+    Some((
+        entry_line,
+        start_idx,
+        compute_catalog_deletion_end(file_lines, start_idx),
+    ))
+}
+
+#[expect(
+    clippy::disallowed_types,
+    reason = "WorkspaceEdit.changes is typed as std::collections::HashMap by ls-types"
+)]
+fn remove_catalog_entry_action(
+    entry: &plow_api::editor_results::UnusedCatalogEntry,
+    uri: &Uri,
+    file_lines: &[&str],
+    entry_line: u32,
+    start_idx: usize,
+    end_idx: usize,
+) -> CodeActionOrCommand {
+    let title = catalog_entry_action_title(entry);
+    let mut changes = HashMap::new();
+    let mut edits = vec![TextEdit {
+        range: Range {
+            start: Position {
+                line: start_idx as u32,
+                character: 0,
+            },
+            end: Position {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "line index is bounded by source size"
+                )]
+                line: end_idx as u32,
+                character: 0,
+            },
+        },
+        new_text: String::new(),
+    }];
+
+    if let Some(parent_edit) =
+        build_parent_rewrite_edit(file_lines, start_idx, end_idx, &entry.catalog_name)
+    {
+        edits.push(parent_edit);
+    }
+    changes.insert(uri.clone(), edits);
+
+    CodeActionOrCommand::CodeAction(CodeAction {
+        title,
+        kind: Some(CodeActionKind::QUICKFIX),
+        edit: Some(WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        }),
+        diagnostics: Some(vec![catalog_entry_diagnostic(entry, entry_line)]),
+        ..Default::default()
+    })
+}
+
+/// Build the `unused-catalog-entry` diagnostic linked to the removal action.
+fn catalog_entry_diagnostic(
+    entry: &plow_api::editor_results::UnusedCatalogEntry,
+    entry_line: u32,
+) -> Diagnostic {
+    Diagnostic {
+        range: Range {
+            start: Position {
+                line: entry_line,
+                character: 0,
+            },
+            end: Position {
+                line: entry_line,
+                character: u32::MAX,
+            },
+        },
+        severity: Some(DiagnosticSeverity::WARNING),
+        source: Some("plow".to_string()),
+        code: Some(NumberOrString::String("unused-catalog-entry".to_string())),
+        message: catalog_entry_diagnostic_message(entry),
+        tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+        ..Default::default()
+    }
+}
+
+fn catalog_entry_action_title(entry: &plow_api::editor_results::UnusedCatalogEntry) -> String {
+    if entry.catalog_name == "default" {
+        format!("Remove unused catalog entry `{}`", entry.entry_name)
+    } else {
+        format!(
+            "Remove unused catalog entry `{}` from `{}`",
+            entry.entry_name, entry.catalog_name
+        )
+    }
+}
+
+fn catalog_entry_diagnostic_message(
+    entry: &plow_api::editor_results::UnusedCatalogEntry,
+) -> String {
+    if entry.catalog_name == "default" {
+        format!(
+            "Unused catalog entry: '{}' is not referenced by any workspace package",
+            entry.entry_name
+        )
+    } else {
+        format!(
+            "Unused catalog entry: '{}' in catalog '{}' is not referenced by any workspace package",
+            entry.entry_name, entry.catalog_name
+        )
+    }
 }
 
 /// Build quick-fix code actions for empty pnpm catalog groups (delete the
@@ -392,17 +574,44 @@ pub fn build_remove_catalog_entry_actions(
 /// passing the buffer in mirrors the sibling so the deletion range
 /// matches what the user sees in their editor when there are unsaved
 /// edits.
-#[expect(
-    clippy::disallowed_types,
-    reason = "WorkspaceEdit.changes is typed as std::collections::HashMap by ls-types"
-)]
+#[derive(Clone, Copy)]
+pub struct EmptyCatalogGroupActionInput<'a> {
+    pub results: &'a AnalysisResults,
+    pub root: &'a Path,
+    pub uri: &'a Uri,
+    pub cursor_range: &'a Range,
+    pub file_lines: &'a [&'a str],
+}
+
+impl<'a> EmptyCatalogGroupActionInput<'a> {
+    #[must_use]
+    pub const fn new(
+        results: &'a AnalysisResults,
+        root: &'a Path,
+        uri: &'a Uri,
+        cursor_range: &'a Range,
+        file_lines: &'a [&'a str],
+    ) -> Self {
+        Self {
+            results,
+            root,
+            uri,
+            cursor_range,
+            file_lines,
+        }
+    }
+}
+
 pub fn build_remove_empty_catalog_group_actions(
-    results: &AnalysisResults,
-    root: &Path,
-    uri: &Uri,
-    cursor_range: &Range,
-    file_lines: &[&str],
+    input: EmptyCatalogGroupActionInput<'_>,
 ) -> Vec<CodeActionOrCommand> {
+    let EmptyCatalogGroupActionInput {
+        results,
+        root,
+        uri,
+        cursor_range,
+        file_lines,
+    } = input;
     let mut actions = Vec::new();
 
     if file_lines.is_empty() {
@@ -411,87 +620,131 @@ pub fn build_remove_empty_catalog_group_actions(
 
     for group in &results.empty_catalog_groups {
         let group = &group.group;
-        let Some(group_uri) = Uri::from_file_path(root.join(&group.path)) else {
+        let Some(group_line) =
+            empty_catalog_group_delete_line(group, root, uri, cursor_range, file_lines)
+        else {
             continue;
         };
-        if group_uri != *uri {
-            continue;
-        }
-
-        let group_line = group.line.saturating_sub(1);
-        if group_line < cursor_range.start.line || group_line > cursor_range.end.line {
-            continue;
-        }
-
-        let start_idx = group_line as usize;
-        if start_idx >= file_lines.len() {
-            continue;
-        }
-        if !line_matches_catalog_key(file_lines[start_idx], &group.catalog_name) {
-            continue;
-        }
-
-        let title = format!("Remove empty catalog group `{}`", group.catalog_name);
-
-        let mut changes = HashMap::new();
-        let edits = vec![TextEdit {
-            range: Range {
-                start: Position {
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "line index is bounded by source size"
-                    )]
-                    line: start_idx as u32,
-                    character: 0,
-                },
-                end: Position {
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "line index is bounded by source size"
-                    )]
-                    line: (start_idx + 1) as u32,
-                    character: 0,
-                },
-            },
-            new_text: String::new(),
-        }];
-        changes.insert(uri.clone(), edits);
-
-        let diagnostic_message = format!(
-            "Empty catalog group: '{}' has no entries",
-            group.catalog_name
-        );
-
-        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-            title,
-            kind: Some(CodeActionKind::QUICKFIX),
-            edit: Some(WorkspaceEdit {
-                changes: Some(changes),
-                ..Default::default()
-            }),
-            diagnostics: Some(vec![Diagnostic {
-                range: Range {
-                    start: Position {
-                        line: group_line,
-                        character: 0,
-                    },
-                    end: Position {
-                        line: group_line,
-                        character: u32::MAX,
-                    },
-                },
-                severity: Some(DiagnosticSeverity::WARNING),
-                source: Some("plow".to_string()),
-                code: Some(NumberOrString::String("empty-catalog-group".to_string())),
-                message: diagnostic_message,
-                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-                ..Default::default()
-            }]),
-            ..Default::default()
-        }));
+        actions.push(remove_empty_catalog_group_action(group, uri, group_line));
     }
 
     actions
+}
+
+#[cfg(test)]
+fn build_remove_empty_catalog_group_actions_for_test(
+    results: &AnalysisResults,
+    root: &Path,
+    uri: &Uri,
+    cursor_range: &Range,
+    file_lines: &[&str],
+) -> Vec<CodeActionOrCommand> {
+    build_remove_empty_catalog_group_actions(EmptyCatalogGroupActionInput::new(
+        results,
+        root,
+        uri,
+        cursor_range,
+        file_lines,
+    ))
+}
+
+/// Validate that an empty-catalog-group finding still anchors to a matching
+/// header line within the cursor range, returning the 0-based line to delete.
+fn empty_catalog_group_delete_line(
+    group: &plow_api::editor_results::EmptyCatalogGroup,
+    root: &Path,
+    uri: &Uri,
+    cursor_range: &Range,
+    file_lines: &[&str],
+) -> Option<u32> {
+    if !is_pnpm_catalog_source(&group.path) {
+        return None;
+    }
+    let group_uri = Uri::from_file_path(root.join(&group.path))?;
+    if group_uri != *uri {
+        return None;
+    }
+
+    let group_line = group.line.saturating_sub(1);
+    if group_line < cursor_range.start.line || group_line > cursor_range.end.line {
+        return None;
+    }
+
+    let start_idx = group_line as usize;
+    if start_idx >= file_lines.len() {
+        return None;
+    }
+    if !line_matches_catalog_key(file_lines[start_idx], &group.catalog_name) {
+        return None;
+    }
+
+    Some(group_line)
+}
+
+/// Build the single-line deletion code action for an empty catalog group.
+#[expect(
+    clippy::disallowed_types,
+    reason = "WorkspaceEdit.changes is typed as std::collections::HashMap by ls-types"
+)]
+fn remove_empty_catalog_group_action(
+    group: &plow_api::editor_results::EmptyCatalogGroup,
+    uri: &Uri,
+    group_line: u32,
+) -> CodeActionOrCommand {
+    let title = format!("Remove empty catalog group `{}`", group.catalog_name);
+
+    let mut changes = HashMap::new();
+    let edits = vec![TextEdit {
+        range: Range {
+            start: Position {
+                line: group_line,
+                character: 0,
+            },
+            end: Position {
+                line: group_line + 1,
+                character: 0,
+            },
+        },
+        new_text: String::new(),
+    }];
+    changes.insert(uri.clone(), edits);
+
+    let diagnostic_message = format!(
+        "Empty catalog group: '{}' has no entries",
+        group.catalog_name
+    );
+
+    CodeActionOrCommand::CodeAction(CodeAction {
+        title,
+        kind: Some(CodeActionKind::QUICKFIX),
+        edit: Some(WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        }),
+        diagnostics: Some(vec![Diagnostic {
+            range: Range {
+                start: Position {
+                    line: group_line,
+                    character: 0,
+                },
+                end: Position {
+                    line: group_line,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::WARNING),
+            source: Some("plow".to_string()),
+            code: Some(NumberOrString::String("empty-catalog-group".to_string())),
+            message: diagnostic_message,
+            tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+            ..Default::default()
+        }]),
+        ..Default::default()
+    })
+}
+
+fn is_pnpm_catalog_source(path: &Path) -> bool {
+    path == Path::new(PNPM_WORKSPACE_FILE)
 }
 
 /// Anchored match for a catalog key on its declared line. Handles
@@ -581,7 +834,7 @@ fn build_parent_rewrite_edit(
                     clippy::cast_possible_truncation,
                     reason = "header length is bounded by source size"
                 )]
-                character: header.len() as u32,
+                character: header.encode_utf16().count() as u32,
             },
         },
         new_text,
@@ -648,13 +901,40 @@ fn parent_has_other_children(
     false
 }
 
+/// Typed input for unused file delete quick-fix code actions.
+#[derive(Clone, Copy)]
+pub struct DeleteFileActionInput<'a> {
+    pub results: &'a AnalysisResults,
+    pub file_path: &'a Path,
+    pub uri: &'a Uri,
+    pub cursor_range: &'a Range,
+}
+
+impl<'a> DeleteFileActionInput<'a> {
+    #[must_use]
+    pub const fn new(
+        results: &'a AnalysisResults,
+        file_path: &'a Path,
+        uri: &'a Uri,
+        cursor_range: &'a Range,
+    ) -> Self {
+        Self {
+            results,
+            file_path,
+            uri,
+            cursor_range,
+        }
+    }
+}
+
 /// Build quick-fix code actions for unused files (delete the file).
-pub fn build_delete_file_actions(
-    results: &AnalysisResults,
-    file_path: &Path,
-    uri: &Uri,
-    cursor_range: &Range,
-) -> Vec<CodeActionOrCommand> {
+pub fn build_delete_file_actions(input: DeleteFileActionInput<'_>) -> Vec<CodeActionOrCommand> {
+    let DeleteFileActionInput {
+        results,
+        file_path,
+        uri,
+        cursor_range,
+    } = input;
     let mut actions = Vec::new();
 
     for file in &results.unused_files {
@@ -701,11 +981,28 @@ pub fn build_delete_file_actions(
 }
 
 #[cfg(test)]
+fn build_delete_file_actions_for_test(
+    results: &AnalysisResults,
+    file_path: &Path,
+    uri: &Uri,
+    cursor_range: &Range,
+) -> Vec<CodeActionOrCommand> {
+    build_delete_file_actions(DeleteFileActionInput::new(
+        results,
+        file_path,
+        uri,
+        cursor_range,
+    ))
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use plow_core::results::{UnusedExport, UnusedFile, UnusedFileFinding, UnusedTypeFinding};
+    use plow_api::editor_results::{
+        UnusedExport, UnusedFile, UnusedFileFinding, UnusedTypeFinding,
+    };
 
     fn test_root() -> PathBuf {
         if cfg!(windows) {
@@ -733,8 +1030,8 @@ mod tests {
         name: &str,
         line: u32,
         col: u32,
-    ) -> plow_core::results::UnusedExportFinding {
-        plow_core::results::UnusedExportFinding::with_actions(UnusedExport {
+    ) -> plow_api::editor_results::UnusedExportFinding {
+        plow_api::editor_results::UnusedExportFinding::with_actions(UnusedExport {
             path: path.to_path_buf(),
             export_name: name.to_string(),
             is_type_only: false,
@@ -760,7 +1057,8 @@ mod tests {
         let results = AnalysisResults::default();
         let lines = vec!["export const foo = 1;"];
 
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
         assert!(actions.is_empty());
     }
 
@@ -777,8 +1075,13 @@ mod tests {
             .push(make_unused_export(&file_a, "foo", 1, 7));
 
         let lines = vec!["export const foo = 1;"];
-        let actions =
-            build_remove_export_actions(&results, &file_b, &uri_b, &make_range(0, 10), &lines);
+        let actions = build_remove_export_actions_for_test(
+            &results,
+            &file_b,
+            &uri_b,
+            &make_range(0, 10),
+            &lines,
+        );
         assert!(actions.is_empty());
     }
 
@@ -794,7 +1097,8 @@ mod tests {
             .push(make_unused_export(&file, "bar", 5, 7));
 
         let lines = vec!["line0", "line1", "line2", "line3", "export const bar = 2;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 2), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 2), &lines);
         assert!(actions.is_empty());
     }
 
@@ -810,7 +1114,8 @@ mod tests {
             .push(make_unused_export(&file, "foo", 1, 13));
 
         let lines = vec!["export const foo = 42;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
 
         assert_eq!(actions.len(), 1);
         let ca = unwrap_code_action(&actions[0]);
@@ -838,7 +1143,8 @@ mod tests {
             .push(make_unused_export(&file, "default", 1, 0));
 
         let lines = vec!["export default function App() {}"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
 
         assert_eq!(actions.len(), 1);
         let ca = unwrap_code_action(&actions[0]);
@@ -867,7 +1173,8 @@ mod tests {
             "    export function helper() {}", // 4 spaces indent
             "}",
         ];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(1, 1), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(1, 1), &lines);
 
         assert_eq!(actions.len(), 1);
         let ca = unwrap_code_action(&actions[0]);
@@ -900,7 +1207,8 @@ mod tests {
             }));
 
         let lines = vec!["export type MyType = string;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
 
         assert_eq!(actions.len(), 1);
         let ca = unwrap_code_action(&actions[0]);
@@ -936,7 +1244,8 @@ mod tests {
             }));
 
         let lines = vec!["export const foo = 1;", "export type Bar = string;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 1), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 1), &lines);
 
         assert_eq!(actions.len(), 2);
 
@@ -964,7 +1273,8 @@ mod tests {
             .push(make_unused_export(&file, "foo", 1, 0));
 
         let lines = vec!["const foo = 1;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
         assert!(
             actions.is_empty(),
             "Should skip exports where line doesn't start with 'export'"
@@ -983,7 +1293,8 @@ mod tests {
             .push(make_unused_export(&file, "x", 0, 7));
 
         let lines = vec!["export const x = 1;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
 
         assert_eq!(actions.len(), 1);
     }
@@ -1010,7 +1321,8 @@ mod tests {
             "export function b() {}",
             "export function c() {}",
         ];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 2), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 2), &lines);
 
         assert_eq!(actions.len(), 3);
         for action in &actions {
@@ -1043,7 +1355,8 @@ mod tests {
             "const also_used = false;",
             "export const c = 3;",
         ];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(2, 2), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(2, 2), &lines);
 
         assert_eq!(actions.len(), 1);
         let ca = unwrap_code_action(&actions[0]);
@@ -1062,7 +1375,8 @@ mod tests {
             .push(make_unused_export(&file, "myLongExport", 1, 13));
 
         let lines = vec!["export const myLongExport = 42;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
 
         assert_eq!(actions.len(), 1);
         let ca = unwrap_code_action(&actions[0]);
@@ -1086,7 +1400,8 @@ mod tests {
             .push(make_unused_export(&file, "x", 1, 0));
 
         let lines: Vec<&str> = vec![];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
         assert!(actions.is_empty());
     }
 
@@ -1102,7 +1417,8 @@ mod tests {
             .push(make_unused_export(&file, "val", 1, 0));
 
         let lines = vec!["\t\texport const val = 1;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
 
         assert_eq!(actions.len(), 1);
         let ca = unwrap_code_action(&actions[0]);
@@ -1119,7 +1435,7 @@ mod tests {
         let uri = Uri::from_file_path(&file).unwrap();
         let results = AnalysisResults::default();
 
-        let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 10));
+        let actions = build_delete_file_actions_for_test(&results, &file, &uri, &make_range(0, 10));
         assert!(actions.is_empty());
     }
 
@@ -1135,7 +1451,8 @@ mod tests {
             .unused_files
             .push(UnusedFileFinding::with_actions(UnusedFile { path: file_a }));
 
-        let actions = build_delete_file_actions(&results, &file_b, &uri_b, &make_range(0, 10));
+        let actions =
+            build_delete_file_actions_for_test(&results, &file_b, &uri_b, &make_range(0, 10));
         assert!(actions.is_empty());
     }
 
@@ -1152,7 +1469,7 @@ mod tests {
                 path: file.clone(),
             }));
 
-        let actions = build_delete_file_actions(&results, &file, &uri, &make_range(1, 5));
+        let actions = build_delete_file_actions_for_test(&results, &file, &uri, &make_range(1, 5));
         assert!(actions.is_empty());
     }
 
@@ -1169,7 +1486,7 @@ mod tests {
                 path: file.clone(),
             }));
 
-        let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 0));
+        let actions = build_delete_file_actions_for_test(&results, &file, &uri, &make_range(0, 0));
 
         assert_eq!(actions.len(), 1);
         let ca = unwrap_code_action(&actions[0]);
@@ -1191,7 +1508,7 @@ mod tests {
                 path: file.clone(),
             }));
 
-        let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 0));
+        let actions = build_delete_file_actions_for_test(&results, &file, &uri, &make_range(0, 0));
         let ca = unwrap_code_action(&actions[0]);
 
         let doc_changes = ca.edit.as_ref().unwrap().document_changes.as_ref().unwrap();
@@ -1226,7 +1543,7 @@ mod tests {
                 path: file.clone(),
             }));
 
-        let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 0));
+        let actions = build_delete_file_actions_for_test(&results, &file, &uri, &make_range(0, 0));
         let ca = unwrap_code_action(&actions[0]);
 
         let diags = ca.diagnostics.as_ref().unwrap();
@@ -1257,7 +1574,7 @@ mod tests {
                 path: file.clone(),
             }));
 
-        let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 50));
+        let actions = build_delete_file_actions_for_test(&results, &file, &uri, &make_range(0, 50));
         assert_eq!(actions.len(), 1);
     }
 
@@ -1279,7 +1596,7 @@ mod tests {
                 path: file.clone(),
             }));
 
-        let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 0));
+        let actions = build_delete_file_actions_for_test(&results, &file, &uri, &make_range(0, 0));
         assert_eq!(actions.len(), 2);
     }
 
@@ -1302,8 +1619,9 @@ mod tests {
         let lines = vec!["export function helper() {}"];
         let cursor = make_range(0, 0);
 
-        let export_actions = build_remove_export_actions(&results, &file, &uri, &cursor, &lines);
-        let delete_actions = build_delete_file_actions(&results, &file, &uri, &cursor);
+        let export_actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &cursor, &lines);
+        let delete_actions = build_delete_file_actions_for_test(&results, &file, &uri, &cursor);
 
         assert_eq!(export_actions.len(), 1);
         assert_eq!(delete_actions.len(), 1);
@@ -1314,7 +1632,7 @@ mod tests {
         assert!(delete_ca.title.contains("Delete"));
     }
 
-    use plow_core::results::{UnusedCatalogEntry, UnusedCatalogEntryFinding};
+    use plow_api::editor_results::{UnusedCatalogEntry, UnusedCatalogEntryFinding};
 
     fn make_catalog_entry(
         name: &str,
@@ -1322,10 +1640,26 @@ mod tests {
         line: u32,
         consumers: Vec<PathBuf>,
     ) -> UnusedCatalogEntryFinding {
+        make_catalog_entry_in_file(
+            name,
+            catalog,
+            PathBuf::from("pnpm-workspace.yaml"),
+            line,
+            consumers,
+        )
+    }
+
+    fn make_catalog_entry_in_file(
+        name: &str,
+        catalog: &str,
+        path: PathBuf,
+        line: u32,
+        consumers: Vec<PathBuf>,
+    ) -> UnusedCatalogEntryFinding {
         UnusedCatalogEntryFinding::with_actions(UnusedCatalogEntry {
             entry_name: name.to_string(),
             catalog_name: catalog.to_string(),
-            path: PathBuf::from("pnpm-workspace.yaml"),
+            path,
             line,
             hardcoded_consumers: consumers,
         })
@@ -1342,7 +1676,7 @@ mod tests {
         let results = AnalysisResults::default();
         let lines = vec!["catalog:", "  is-even: ^1.0.0"];
 
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1363,7 +1697,7 @@ mod tests {
             .push(make_catalog_entry("is-even", "default", 2, vec![]));
 
         let lines = vec!["catalog:", "  is-even: ^1.0.0"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1391,11 +1725,46 @@ mod tests {
         ));
 
         let lines = vec!["catalog:", "  react: ^18.2.0"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
             &make_range(1, 1),
+            &lines,
+        );
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn catalog_action_skips_bun_package_json_catalog_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let uri = Uri::from_file_path(dir.path().join("package.json")).unwrap();
+
+        let mut results = AnalysisResults::default();
+        results
+            .unused_catalog_entries
+            .push(make_catalog_entry_in_file(
+                "unused",
+                "default",
+                PathBuf::from("package.json"),
+                4,
+                vec![],
+            ));
+
+        let lines = vec![
+            "{",
+            "  \"workspaces\": {",
+            "    \"catalog\": {",
+            "      \"unused\": \"^1.0.0\"",
+            "    }",
+            "  }",
+            "}",
+        ];
+        let actions = build_remove_catalog_entry_actions_for_test(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(3, 3),
             &lines,
         );
         assert!(actions.is_empty());
@@ -1418,7 +1787,7 @@ mod tests {
             "    publishConfig: {}",
             "  is-even: ^1.0.0",
         ];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1447,7 +1816,7 @@ mod tests {
             .push(make_catalog_entry("is-even", "default", 2, vec![]));
 
         let lines = vec!["catalog:", "  different-entry: ^2.0.0"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1468,7 +1837,7 @@ mod tests {
             .push(make_catalog_entry("react", "default", 2, vec![]));
 
         let lines = vec!["catalog:", "  react-native: ^0.73.0"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1492,7 +1861,7 @@ mod tests {
             .push(make_catalog_entry("react", "default", 2, vec![]));
 
         let lines = vec!["catalog:", "  description: react fork"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1513,7 +1882,7 @@ mod tests {
             .push(make_catalog_entry("@scope/foo", "default", 2, vec![]));
 
         let lines = vec!["catalog:", "  \"@scope/foo\": ^1.0.0"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1534,7 +1903,7 @@ mod tests {
             .push(make_catalog_entry("is-even", "default", 3, vec![]));
 
         let lines = vec!["catalog:", "  is-odd: ^1.0.0", "  is-even: ^1.0.0"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1555,7 +1924,7 @@ mod tests {
             .push(make_catalog_entry("react", "react17", 3, vec![]));
 
         let lines = vec!["catalogs:", "  react17:", "    react: ^17.0.2"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1582,7 +1951,7 @@ mod tests {
             .push(make_catalog_entry("react", "react17", 3, vec![]));
 
         let lines = vec!["catalogs:", "  react17:", "    react: ^17.0.2"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1607,6 +1976,38 @@ mod tests {
     }
 
     #[test]
+    fn catalog_action_parent_rewrite_uses_utf16_character_offsets() {
+        let dir = tempfile::tempdir().unwrap();
+        let uri = workspace_yaml_uri(&dir);
+
+        let mut results = AnalysisResults::default();
+        results
+            .unused_catalog_entries
+            .push(make_catalog_entry("react", "日本", 3, vec![]));
+
+        let lines = vec!["catalogs:", "  \"日本\":", "    react: ^17.0.2"];
+        let actions = build_remove_catalog_entry_actions_for_test(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(2, 2),
+            &lines,
+        );
+
+        assert_eq!(actions.len(), 1);
+        let ca = unwrap_code_action(&actions[0]);
+        let changes = ca.edit.as_ref().unwrap().changes.as_ref().unwrap();
+        let edits = changes.get(&uri).unwrap();
+        assert_eq!(edits.len(), 2);
+        assert_eq!(edits[1].range.start.character, 0);
+        assert_eq!(
+            edits[1].range.end.character,
+            lines[1].encode_utf16().count() as u32
+        );
+        assert_eq!(edits[1].new_text, "  \"日本\": {}");
+    }
+
+    #[test]
     fn catalog_action_no_parent_rewrite_when_siblings_remain() {
         let dir = tempfile::tempdir().unwrap();
         let uri = workspace_yaml_uri(&dir);
@@ -1622,7 +2023,7 @@ mod tests {
             "    react: ^17.0.2",
             "    react-dom: ^17.0.2",
         ];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1652,7 +2053,7 @@ mod tests {
             .push(make_catalog_entry("is-even", "default", 2, vec![]));
 
         let lines = vec!["catalog:", "  is-even: ^1.0.0"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1690,12 +2091,16 @@ mod tests {
         assert_eq!(compute_catalog_deletion_end(&lines, 1), 4);
     }
 
-    use plow_core::results::{EmptyCatalogGroup, EmptyCatalogGroupFinding};
+    use plow_api::editor_results::{EmptyCatalogGroup, EmptyCatalogGroupFinding};
 
     fn make_empty_group(name: &str, line: u32) -> EmptyCatalogGroupFinding {
+        make_empty_group_in_file(name, PathBuf::from("pnpm-workspace.yaml"), line)
+    }
+
+    fn make_empty_group_in_file(name: &str, path: PathBuf, line: u32) -> EmptyCatalogGroupFinding {
         EmptyCatalogGroupFinding::with_actions(EmptyCatalogGroup {
             catalog_name: name.to_string(),
-            path: PathBuf::from("pnpm-workspace.yaml"),
+            path,
             line,
         })
     }
@@ -1711,7 +2116,7 @@ mod tests {
             .push(make_empty_group("legacy", 3));
 
         let lines = vec!["catalogs:", "  react17: {}", "  legacy:"];
-        let actions = build_remove_empty_catalog_group_actions(
+        let actions = build_remove_empty_catalog_group_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1746,6 +2151,37 @@ mod tests {
     }
 
     #[test]
+    fn empty_catalog_group_action_skips_bun_package_json_groups() {
+        let dir = tempfile::tempdir().unwrap();
+        let uri = Uri::from_file_path(dir.path().join("package.json")).unwrap();
+
+        let mut results = AnalysisResults::default();
+        results.empty_catalog_groups.push(make_empty_group_in_file(
+            "empty",
+            PathBuf::from("package.json"),
+            4,
+        ));
+
+        let lines = vec![
+            "{",
+            "  \"workspaces\": {",
+            "    \"catalogs\": {",
+            "      \"empty\": {}",
+            "    }",
+            "  }",
+            "}",
+        ];
+        let actions = build_remove_empty_catalog_group_actions_for_test(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(3, 3),
+            &lines,
+        );
+        assert!(actions.is_empty());
+    }
+
+    #[test]
     fn empty_catalog_group_action_skips_when_uri_mismatch() {
         let dir = tempfile::tempdir().unwrap();
         let other_uri = Uri::from_file_path(dir.path().join("not-the-workspace.yaml")).unwrap();
@@ -1756,7 +2192,7 @@ mod tests {
             .push(make_empty_group("legacy", 3));
 
         let lines = vec!["catalogs:", "  react17: {}", "  legacy:"];
-        let actions = build_remove_empty_catalog_group_actions(
+        let actions = build_remove_empty_catalog_group_actions_for_test(
             &results,
             dir.path(),
             &other_uri,
@@ -1777,7 +2213,7 @@ mod tests {
             .push(make_empty_group("legacy", 3));
 
         let lines = vec!["catalogs:", "  react17: {}", "  legacy:"];
-        let actions = build_remove_empty_catalog_group_actions(
+        let actions = build_remove_empty_catalog_group_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1801,7 +2237,7 @@ mod tests {
             .push(make_empty_group("react17", 2));
 
         let lines = vec!["catalogs:", "  react18:"];
-        let actions = build_remove_empty_catalog_group_actions(
+        let actions = build_remove_empty_catalog_group_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1825,7 +2261,7 @@ mod tests {
             .push(make_empty_group("@scope/legacy", 2));
 
         let lines = vec!["catalogs:", "  \"@scope/legacy\":"];
-        let actions = build_remove_empty_catalog_group_actions(
+        let actions = build_remove_empty_catalog_group_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1851,7 +2287,7 @@ mod tests {
             .push(make_empty_group("legacy", 3));
 
         let lines = vec!["catalogs:", "  react17:", "  legacy:"];
-        let actions = build_remove_empty_catalog_group_actions(
+        let actions = build_remove_empty_catalog_group_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1877,7 +2313,7 @@ mod tests {
             .empty_catalog_groups
             .push(make_empty_group("legacy", 3));
 
-        let actions = build_remove_empty_catalog_group_actions(
+        let actions = build_remove_empty_catalog_group_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1898,7 +2334,8 @@ mod tests {
             7,
         ));
         let lines = vec!["const foo = 1;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
         assert!(
             actions.is_empty(),
             "expected zero actions when live line lacks export prefix",
@@ -1916,7 +2353,8 @@ mod tests {
             7,
         ));
         let lines = vec!["export const foobar = 1;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
         assert!(
             actions.is_empty(),
             "expected zero actions when cached name only matches as a substring",
@@ -1934,7 +2372,8 @@ mod tests {
             7,
         ));
         let lines = vec!["export const bar = foo;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
         assert!(
             actions.is_empty(),
             "expected zero actions when cached name appears as a value, not a declaration",
@@ -1952,7 +2391,8 @@ mod tests {
             9,
         ));
         let lines = vec!["export { foo } from './bar';"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
         assert!(
             actions.is_empty(),
             "expected zero actions on re-export blocks (action's output would be a syntax error)",
@@ -1970,7 +2410,8 @@ mod tests {
             7,
         ));
         let lines = vec!["export const foo = 1;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
         assert_eq!(
             actions.len(),
             1,

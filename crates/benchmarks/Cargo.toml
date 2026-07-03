@@ -1,0 +1,31 @@
+[package]
+name = "plow-benchmarks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+publish = false
+description = "CodSpeed benchmark suites for plow"
+
+[[bench]]
+name = "programmatic_commands"
+harness = false
+
+[[bench]]
+name = "representative_sources"
+harness = false
+
+[dev-dependencies]
+criterion2 = { workspace = true }
+plow-api = { workspace = true }
+plow-core = { workspace = true }
+plow-types = { workspace = true }
+tempfile = { workspace = true }
+
+[features]
+codspeed = ["criterion2/codspeed"]
+
+[lints]
+workspace = true

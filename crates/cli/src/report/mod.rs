@@ -18,10 +18,13 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use plow_api::DuplicationGrouping;
 use plow_config::{OutputFormat, RulesConfig, Severity};
-use plow_core::duplicates::DuplicationReport;
-use plow_core::results::AnalysisResults;
-use plow_core::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace, PipelineTimings};
+use plow_types::duplicates::DuplicationReport;
+use plow_types::results::AnalysisResults;
+use plow_types::trace::{
+    CloneTrace, DependencyTrace, ExportTrace, FileTrace, ImpactClosureTrace, PipelineTimings,
+};
 
 use crate::report::sink::outln;
 
@@ -31,7 +34,54 @@ pub use human::health::{render_health_score, render_health_trend};
     unused_imports,
     reason = "used by binary crate modules (combined.rs, audit.rs)"
 )]
-pub use json::strip_root_prefix;
+pub use plow_output::strip_root_prefix;
+
+/// The three line-groups of a human `plow review --walkthrough` render: the
+/// orientation header and final status (stderr), and the staged tour body
+/// (stdout). The entry point in `audit_brief.rs` owns the stream split; this
+/// keeps the pure line builder behind the private `human` module while exposing
+/// exactly what the entry point needs.
+pub struct WalkthroughHumanRender {
+    /// Review Focus orientation header lines (stderr).
+    pub header: Vec<String>,
+    /// The staged tour body lines (stdout).
+    pub body: Vec<String>,
+    /// The final green status line (stderr).
+    pub status: String,
+}
+
+/// The root-relative files (in `direction.order`) the local ledger marked viewed
+/// against the guide's current hash. Exposed so the markdown surface can collapse
+/// the same viewed files into Cleared that the human surface does, keeping the two
+/// formats consistent on the same on-disk `--mark-viewed` state.
+#[must_use]
+pub fn walkthrough_viewed_files(
+    guide: &plow_output::StandardWalkthroughGuide,
+    viewed: &crate::walkthrough_state::ViewedState,
+) -> Vec<String> {
+    human::walkthrough::viewed_files_for(guide, viewed)
+}
+
+/// Build the human walkthrough tour from the in-memory guide. Pure: no IO, no
+/// mutation. `viewed` decorates each file row; `show_cleared` expands the
+/// Cleared panel.
+#[must_use]
+pub fn build_walkthrough_human(
+    guide: &plow_output::StandardWalkthroughGuide,
+    viewed: &crate::walkthrough_state::ViewedState,
+    show_cleared: bool,
+) -> WalkthroughHumanRender {
+    let input = human::walkthrough::WalkthroughHumanInput {
+        guide,
+        viewed,
+        show_cleared,
+    };
+    WalkthroughHumanRender {
+        header: human::walkthrough::build_focus_header(guide, viewed),
+        body: human::walkthrough::build_walkthrough_human_lines(&input),
+        status: human::walkthrough::build_status_line(guide, viewed),
+    }
+}
 
 /// Shared context for all report dispatch functions.
 ///
@@ -67,6 +117,10 @@ pub struct ReportContext<'a> {
     /// (combined-mode orientation header). Standalone `plow health` keeps
     /// the default `false` and renders both sections inline.
     pub skip_score_and_trend: bool,
+    /// Human-only: whether `--css` was requested. When `true` but no stylesheet
+    /// was import-reachable, the CSS-health section renders an explanatory note
+    /// instead of being silently omitted. Defaults `false` for non-css callers.
+    pub css_requested: bool,
 }
 
 /// Strip the project root prefix from a path for display, falling back to the full path.
@@ -148,6 +202,7 @@ pub fn elide_common_prefix<'a>(base: &str, target: &'a str) -> &'a str {
 }
 
 /// Compute a SARIF-compatible relative URI from an absolute path and project root.
+#[cfg(test)]
 fn relative_uri(path: &Path, root: &Path) -> String {
     normalize_uri(&relative_path(path, root).display().to_string())
 }
@@ -158,10 +213,7 @@ fn relative_uri(path: &Path, root: &Path) -> String {
 /// SARIF validation warnings (e.g., Next.js dynamic routes like `[slug]`).
 #[must_use]
 pub fn normalize_uri(path_str: &str) -> String {
-    path_str
-        .replace('\\', "/")
-        .replace('[', "%5B")
-        .replace(']', "%5D")
+    plow_output::normalize_uri(path_str)
 }
 
 /// Severity level for human-readable output.
@@ -241,31 +293,22 @@ pub fn print_results(
             ExitCode::SUCCESS
         }
         OutputFormat::CodeClimate => codeclimate::print_codeclimate(results, ctx.root, ctx.rules),
-        OutputFormat::PrCommentGithub => {
-            let issues = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::pr_comment::print_pr_comment("dead-code", ci::pr_comment::Provider::Github, &value)
-        }
-        OutputFormat::PrCommentGitlab => {
-            let issues = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::pr_comment::print_pr_comment("dead-code", ci::pr_comment::Provider::Gitlab, &value)
-        }
-        OutputFormat::ReviewGithub => {
-            let issues = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::review::print_review_envelope("dead-code", ci::pr_comment::Provider::Github, &value)
-        }
-        OutputFormat::ReviewGitlab => {
-            let issues = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::review::print_review_envelope("dead-code", ci::pr_comment::Provider::Gitlab, &value)
-        }
-        OutputFormat::Badge => {
-            eprintln!("Error: badge format is only supported for the health command");
-            ExitCode::from(2)
-        }
+        ci_format => print_results_ci_comment(results, ctx, ci_format),
     }
+}
+
+/// Render the CI comment / review / badge fallback arms for dead-code results.
+fn print_results_ci_comment(
+    results: &AnalysisResults,
+    ctx: &ReportContext<'_>,
+    output: OutputFormat,
+) -> ExitCode {
+    let issues = codeclimate::api_codeclimate_issues(results, ctx.root, ctx.rules);
+    let value = plow_output::codeclimate_issues_to_value(&issues);
+    print_ci_comment_format("dead-code", &value, output).unwrap_or_else(|| {
+        eprintln!("Error: badge format is only supported for the health command");
+        ExitCode::from(2)
+    })
 }
 
 /// Render grouped results across all output formats.
@@ -311,30 +354,7 @@ fn print_grouped_results(
         OutputFormat::CodeClimate => {
             codeclimate::print_grouped_codeclimate(original, ctx.root, ctx.rules, resolver)
         }
-        OutputFormat::PrCommentGithub => {
-            let issues = codeclimate::build_codeclimate(original, ctx.root, ctx.rules);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::pr_comment::print_pr_comment("dead-code", ci::pr_comment::Provider::Github, &value)
-        }
-        OutputFormat::PrCommentGitlab => {
-            let issues = codeclimate::build_codeclimate(original, ctx.root, ctx.rules);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::pr_comment::print_pr_comment("dead-code", ci::pr_comment::Provider::Gitlab, &value)
-        }
-        OutputFormat::ReviewGithub => {
-            let issues = codeclimate::build_codeclimate(original, ctx.root, ctx.rules);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::review::print_review_envelope("dead-code", ci::pr_comment::Provider::Github, &value)
-        }
-        OutputFormat::ReviewGitlab => {
-            let issues = codeclimate::build_codeclimate(original, ctx.root, ctx.rules);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::review::print_review_envelope("dead-code", ci::pr_comment::Provider::Gitlab, &value)
-        }
-        OutputFormat::Badge => {
-            eprintln!("Error: badge format is only supported for the health command");
-            ExitCode::from(2)
-        }
+        ci_format => print_results_ci_comment(original, ctx, ci_format),
     }
 }
 
@@ -384,38 +404,29 @@ pub fn print_duplication_report(
             ExitCode::SUCCESS
         }
         OutputFormat::CodeClimate => codeclimate::print_duplication_codeclimate(report, ctx.root),
-        OutputFormat::PrCommentGithub => {
-            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::pr_comment::print_pr_comment("dupes", ci::pr_comment::Provider::Github, &value)
-        }
-        OutputFormat::PrCommentGitlab => {
-            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::pr_comment::print_pr_comment("dupes", ci::pr_comment::Provider::Gitlab, &value)
-        }
-        OutputFormat::ReviewGithub => {
-            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::review::print_review_envelope("dupes", ci::pr_comment::Provider::Github, &value)
-        }
-        OutputFormat::ReviewGitlab => {
-            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::review::print_review_envelope("dupes", ci::pr_comment::Provider::Gitlab, &value)
-        }
-        OutputFormat::Badge => {
-            eprintln!("Error: badge format is only supported for the health command");
-            ExitCode::from(2)
-        }
+        ci_format => print_duplication_ci_comment(report, ctx.root, ci_format),
     }
+}
+
+/// Render the CI comment / review / badge fallback arms for duplication results.
+fn print_duplication_ci_comment(
+    report: &DuplicationReport,
+    root: &Path,
+    output: OutputFormat,
+) -> ExitCode {
+    let issues = codeclimate::api_duplication_codeclimate_issues(report, root);
+    let value = plow_output::codeclimate_issues_to_value(&issues);
+    print_ci_comment_format("dupes", &value, output).unwrap_or_else(|| {
+        eprintln!("Error: badge format is only supported for the health command");
+        ExitCode::from(2)
+    })
 }
 
 /// Render grouped duplication results across all output formats.
 #[must_use]
 fn print_grouped_duplication_report(
     report: &DuplicationReport,
-    grouping: &dupes_grouping::DuplicationGrouping,
+    grouping: &DuplicationGrouping,
     ctx: &ReportContext<'_>,
     output: OutputFormat,
     resolver: &OwnershipResolver,
@@ -442,26 +453,10 @@ fn print_grouped_duplication_report(
         OutputFormat::CodeClimate => {
             codeclimate::print_grouped_duplication_codeclimate(report, ctx.root, resolver)
         }
-        OutputFormat::PrCommentGithub => {
-            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::pr_comment::print_pr_comment("dupes", ci::pr_comment::Provider::Github, &value)
-        }
-        OutputFormat::PrCommentGitlab => {
-            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::pr_comment::print_pr_comment("dupes", ci::pr_comment::Provider::Gitlab, &value)
-        }
-        OutputFormat::ReviewGithub => {
-            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::review::print_review_envelope("dupes", ci::pr_comment::Provider::Github, &value)
-        }
-        OutputFormat::ReviewGitlab => {
-            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::review::print_review_envelope("dupes", ci::pr_comment::Provider::Gitlab, &value)
-        }
+        OutputFormat::PrCommentGithub
+        | OutputFormat::PrCommentGitlab
+        | OutputFormat::ReviewGithub
+        | OutputFormat::ReviewGitlab => print_duplication_ci_comment(report, ctx.root, output),
         OutputFormat::Compact => {
             compact::print_duplication_compact(report, ctx.root);
             warn_dupes_grouping_unsupported(grouping, "compact");
@@ -479,7 +474,34 @@ fn print_grouped_duplication_report(
     }
 }
 
-fn warn_dupes_grouping_unsupported(grouping: &dupes_grouping::DuplicationGrouping, format: &str) {
+/// Dispatch a PR-comment / review CI format from a precomputed CodeClimate value.
+///
+/// Returns `Some(exit_code)` for the four CI comment/review formats and `None`
+/// for every other output format, so callers keep their exhaustive match arms.
+fn print_ci_comment_format(
+    analysis: &str,
+    value: &serde_json::Value,
+    output: OutputFormat,
+) -> Option<ExitCode> {
+    let exit = match output {
+        OutputFormat::PrCommentGithub => {
+            ci::pr_comment::print_pr_comment(analysis, ci::pr_comment::Provider::Github, value)
+        }
+        OutputFormat::PrCommentGitlab => {
+            ci::pr_comment::print_pr_comment(analysis, ci::pr_comment::Provider::Gitlab, value)
+        }
+        OutputFormat::ReviewGithub => {
+            ci::review::print_review_envelope(analysis, ci::pr_comment::Provider::Github, value)
+        }
+        OutputFormat::ReviewGitlab => {
+            ci::review::print_review_envelope(analysis, ci::pr_comment::Provider::Gitlab, value)
+        }
+        _ => return None,
+    };
+    Some(exit)
+}
+
+fn warn_dupes_grouping_unsupported(grouping: &DuplicationGrouping, format: &str) {
     eprintln!(
         "note: --group-by {} is not supported for {format} duplication output, falling back to \
          ungrouped output (use --format json for the full grouped envelope)",
@@ -505,35 +527,15 @@ fn warn_dupes_grouping_unsupported(grouping: &dupes_grouping::DuplicationGroupin
 ///   richer grouped envelope.
 #[must_use]
 pub fn print_health_report(
-    report: &crate::health_types::HealthReport,
-    grouping: Option<&crate::health_types::HealthGrouping>,
+    report: &plow_output::HealthReport,
+    grouping: Option<&plow_output::HealthGrouping>,
     group_resolver: Option<&grouping::OwnershipResolver>,
     ctx: &ReportContext<'_>,
     output: OutputFormat,
 ) -> ExitCode {
     match output {
         OutputFormat::Human => {
-            if ctx.summary {
-                human::health::print_health_summary(
-                    report,
-                    ctx.elapsed,
-                    ctx.quiet,
-                    ctx.summary_heading,
-                );
-            } else {
-                human::print_health_human(&human::PrintHealthHumanInput {
-                    report,
-                    root: ctx.root,
-                    elapsed: ctx.elapsed,
-                    quiet: ctx.quiet,
-                    show_explain_tip: ctx.show_explain_tip,
-                    explain: ctx.explain,
-                    skip_score_and_trend: ctx.skip_score_and_trend,
-                });
-                if let Some(grouping) = grouping {
-                    human::print_health_grouping(grouping, ctx.root, ctx.quiet);
-                }
-            }
+            print_health_human_report(report, grouping, ctx);
             ExitCode::SUCCESS
         }
         OutputFormat::Compact => {
@@ -566,26 +568,10 @@ pub fn print_health_report(
             }
             None => codeclimate::print_health_codeclimate(report, ctx.root),
         },
-        OutputFormat::PrCommentGithub => {
-            let issues = codeclimate::build_health_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::pr_comment::print_pr_comment("health", ci::pr_comment::Provider::Github, &value)
-        }
-        OutputFormat::PrCommentGitlab => {
-            let issues = codeclimate::build_health_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::pr_comment::print_pr_comment("health", ci::pr_comment::Provider::Gitlab, &value)
-        }
-        OutputFormat::ReviewGithub => {
-            let issues = codeclimate::build_health_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::review::print_review_envelope("health", ci::pr_comment::Provider::Github, &value)
-        }
-        OutputFormat::ReviewGitlab => {
-            let issues = codeclimate::build_health_codeclimate(report, ctx.root);
-            let value = codeclimate::issues_to_value(&issues);
-            ci::review::print_review_envelope("health", ci::pr_comment::Provider::Gitlab, &value)
-        }
+        OutputFormat::PrCommentGithub
+        | OutputFormat::PrCommentGitlab
+        | OutputFormat::ReviewGithub
+        | OutputFormat::ReviewGitlab => print_health_ci_comment(report, ctx.root, output),
         OutputFormat::Badge => {
             warn_grouping_unsupported(grouping, "badge");
             badge::print_health_badge(report)
@@ -593,7 +579,46 @@ pub fn print_health_report(
     }
 }
 
-fn warn_grouping_unsupported(grouping: Option<&crate::health_types::HealthGrouping>, format: &str) {
+/// Render the human-format health report, including the per-group summary block.
+fn print_health_human_report(
+    report: &plow_output::HealthReport,
+    grouping: Option<&plow_output::HealthGrouping>,
+    ctx: &ReportContext<'_>,
+) {
+    if ctx.summary {
+        human::health::print_health_summary(report, ctx.elapsed, ctx.quiet, ctx.summary_heading);
+        return;
+    }
+    human::print_health_human(&human::PrintHealthHumanInput {
+        report,
+        root: ctx.root,
+        elapsed: ctx.elapsed,
+        quiet: ctx.quiet,
+        show_explain_tip: ctx.show_explain_tip,
+        explain: ctx.explain,
+        skip_score_and_trend: ctx.skip_score_and_trend,
+        css_requested: ctx.css_requested,
+    });
+    if let Some(grouping) = grouping {
+        human::print_health_grouping(grouping, ctx.root, ctx.quiet);
+    }
+}
+
+/// Render the CI comment / review fallback arms for health results.
+fn print_health_ci_comment(
+    report: &plow_output::HealthReport,
+    root: &Path,
+    output: OutputFormat,
+) -> ExitCode {
+    let issues = codeclimate::api_health_codeclimate_issues(report, root);
+    let value = plow_output::codeclimate_issues_to_value(&issues);
+    print_ci_comment_format("health", &value, output).unwrap_or_else(|| {
+        eprintln!("Error: badge format is only supported for the health command");
+        ExitCode::from(2)
+    })
+}
+
+fn warn_grouping_unsupported(grouping: Option<&plow_output::HealthGrouping>, format: &str) {
     if let Some(g) = grouping {
         eprintln!(
             "note: --group-by {} is not supported for {format} output, falling back to \
@@ -607,7 +632,7 @@ fn warn_grouping_unsupported(grouping: Option<&crate::health_types::HealthGroupi
 ///
 /// Only emits output in human format to avoid corrupting structured JSON/SARIF output.
 pub fn print_cross_reference_findings(
-    cross_ref: &plow_core::cross_reference::CrossReferenceResult,
+    cross_ref: &plow_engine::CrossReferenceResult,
     root: &Path,
     quiet: bool,
     output: OutputFormat,
@@ -647,6 +672,29 @@ pub fn print_clone_trace(trace: &CloneTrace, root: &Path, format: OutputFormat) 
     }
 }
 
+/// Print impact-closure trace results. JSON only emits the structured
+/// closure; human renders a short summary.
+pub fn print_impact_closure_trace(trace: &ImpactClosureTrace, format: OutputFormat) {
+    match format {
+        OutputFormat::Json => json::print_trace_json(trace),
+        _ => {
+            outln!("Impact closure for {}", trace.seed);
+            outln!(
+                "  affected beyond the diff: {} file{}",
+                trace.affected_not_shown.len(),
+                plural(trace.affected_not_shown.len())
+            );
+            for gap in &trace.coordination_gap {
+                outln!(
+                    "  coordination gap: {} consumes {}",
+                    gap.consumer_file,
+                    gap.consumed_symbols.join(", ")
+                );
+            }
+        }
+    }
+}
+
 /// Print pipeline performance timings.
 /// In JSON mode, outputs to stderr to avoid polluting the JSON analysis output on stdout.
 pub fn print_performance(timings: &PipelineTimings, format: OutputFormat) {
@@ -661,10 +709,7 @@ pub fn print_performance(timings: &PipelineTimings, format: OutputFormat) {
 
 /// Print health pipeline performance timings.
 /// In JSON mode, outputs to stderr to avoid polluting the JSON analysis output on stdout.
-pub fn print_health_performance(
-    timings: &crate::health_types::HealthTimings,
-    format: OutputFormat,
-) {
+pub fn print_health_performance(timings: &plow_output::HealthTimings, format: OutputFormat) {
     match format {
         OutputFormat::Json => match serde_json::to_string_pretty(timings) {
             Ok(json) => eprintln!("{json}"),
@@ -675,91 +720,58 @@ pub fn print_health_performance(
 }
 
 #[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use codeclimate::build_codeclimate;
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use codeclimate::build_duplication_codeclimate;
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use codeclimate::build_health_codeclimate;
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use codeclimate::issues_to_value as codeclimate_issues_to_value;
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use compact::build_compact_lines;
-#[allow(
     clippy::redundant_pub_crate,
     reason = "pub(crate) deliberately limits visibility, report is pub but these are internal"
 )]
 pub(crate) use json::SCHEMA_VERSION;
-pub use json::build_baseline_deltas_json;
-pub use json::build_check_json_payload_with_config_fixable;
+#[allow(
+    clippy::redundant_pub_crate,
+    reason = "target-dependent: report is public in lib, private in bin, but this adapter remains crate-internal"
+)]
+pub(crate) use json::api_check_json_payload_with_config_fixable;
+#[allow(
+    clippy::redundant_pub_crate,
+    reason = "target-dependent: report is public in lib, private in bin, but these adapters remain crate-internal"
+)]
+pub(crate) use json::{build_baseline_deltas_output, check_json_extras};
 #[allow(
     unused_imports,
     reason = "target-dependent: used in lib, unused in bin"
 )]
-pub use json::build_duplication_json;
+pub use plow_api::build_compact_lines;
 #[allow(
     unused_imports,
     reason = "target-dependent: used in lib, unused in bin"
 )]
-pub use json::build_grouped_duplication_json;
+pub use plow_api::build_duplication_markdown;
 #[allow(
     unused_imports,
     reason = "target-dependent: used in lib, unused in bin"
 )]
-pub use json::build_health_json;
+pub use plow_api::build_health_markdown;
 #[allow(
     unused_imports,
-    reason = "target-dependent: used in bin audit.rs, unused in lib"
+    reason = "target-dependent: used in lib, unused in bin"
+)]
+pub use plow_api::build_markdown;
+#[allow(
+    unused_imports,
+    reason = "target-dependent: used in lib, unused in bin"
 )]
 #[allow(
     clippy::redundant_pub_crate,
-    reason = "pub(crate) deliberately limits visibility, report is pub but these are internal"
+    reason = "target-dependent: report is public in lib, private in bin, but this adapter remains crate-internal"
 )]
-pub(crate) use json::harmonize_multi_kind_suppress_line_actions;
+pub(crate) use sarif::api_health_sarif_document;
 #[allow(
     unused_imports,
     reason = "target-dependent: used in lib, unused in bin"
 )]
-pub use json::{build_json, build_json_with_config_fixable};
 #[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
+    clippy::redundant_pub_crate,
+    reason = "target-dependent: report is public in lib, private in bin, but this adapter remains crate-internal"
 )]
-pub use markdown::build_duplication_markdown;
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use markdown::build_health_markdown;
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use markdown::build_markdown;
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use sarif::build_health_sarif;
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use sarif::build_sarif;
+pub(crate) use sarif::api_sarif_document;
 
 #[cfg(test)]
 mod tests {
@@ -781,6 +793,7 @@ mod tests {
             baseline_matched: None,
             config_fixable: false,
             skip_score_and_trend: false,
+            css_requested: false,
         }
     }
 

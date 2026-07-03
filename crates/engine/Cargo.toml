@@ -1,0 +1,43 @@
+[package]
+name = "plow-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Typed analysis engine facade for plow consumers"
+readme = "../../README.md"
+
+[lib]
+doctest = false
+
+[dependencies]
+plow-config = { workspace = true }
+plow-core = { workspace = true }
+plow-extract = { workspace = true }
+plow-graph = { workspace = true }
+plow-output = { workspace = true }
+plow-types = { workspace = true }
+colored = { workspace = true }
+dunce = { workspace = true }
+globset = { workspace = true }
+oxc_coverage_instrument = { workspace = true }
+rustc-hash = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+xxhash-rust = { workspace = true }
+
+[features]
+schema = ["plow-output/schema", "plow-types/schema"]
+
+[dev-dependencies]
+oxc_span = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

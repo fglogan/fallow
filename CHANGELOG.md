@@ -7,7 +7,791 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.104.0] - 2026-07-01
+
 ### Added
+
+- **The GitLab CI template can reuse a pre-installed plow binary.** Set
+  `PLOW_SKIP_INSTALL: "true"` to skip `npm install -g plow` and run the
+  `plow` already resolvable on `PATH`, for example a version pinned through
+  a pnpm catalog and exposed on `PATH`, so CI runs the same binary as your
+  local lint gate. The job fails fast with a clear error when no `plow` is
+  found. Default behavior is unchanged. Thanks
+  [@Jerc92](https://github.com/Jerc92) for the patch in
+  [#1662](https://github.com/fglogan/genesis-plow/pull/1662).
+
+- **Design-token blast-radius for CSS-in-JS tokens (CSS program Phase 3d).** The
+  Phase 2 token blast-radius (`css_analytics.token_consumers` + the
+  `get_token_blast_radius` MCP tool) covered only Tailwind v4 `@theme` tokens. It
+  now also covers CSS-in-JS token DEFINITIONS, so changing a StyleX `defineVars` or
+  vanilla-extract `createTheme` / `createThemeContract` / `createGlobalTheme` token
+  shows its blast radius (a `consumer_count` plus located `consumers[]`) the same
+  way an `@theme` token does. Because CSS-in-JS tokens are defined in JS objects and
+  consumed via cross-module member access (`import { vars } from './tokens';
+  vars.color.primary`, including bracket access `vars.color['gray-100']`), the
+  consumer scan resolves each relative import to its defining file and matches the
+  member-access chain against the defined leaf token paths, so an unrelated
+  same-named binding is never counted. Entries reuse the existing `token_consumers`
+  shape with a new `consumers[].kind` of `js-member`; `token` is the
+  binding-qualified access path (`vars.color.primary`) and `namespace` is the
+  defining binding (`vars`). Dep-gated on a declared CSS-in-JS library
+  (`@stylexjs/stylex` / `@vanilla-extract/css`), descriptive-only (no `actions`, no
+  exit-code effect), no new wire field, and no `CACHE_VERSION` bump; a non-CSS-in-JS
+  project and a plain `plow health` run (no `--css`) are byte-unchanged, and the
+  Tailwind `token_consumers` output is untouched. `consumer_count` is a static lower
+  bound (path-aliased / bare-package imports are not resolved), and unlike Tailwind
+  there is no corroborating dead-token finding, so a CSS-in-JS `consumer_count` of 0
+  is a weaker signal. Panda (`defineTokens` / `token('...')`) is a planned follow-on.
+
+- **Fuzzy CSS clones via CSS-aware value canonicalization (CSS program Phase 4).**
+  `plow dupes` already tokenized CSS, but the lexer was character-naive, so
+  near-miss / value-drifted CSS clones (the same shadow / gradient / transition
+  recipe re-implemented with `0px` vs `0` or `#fff` vs `#ffffff` drift, the shape
+  of design-system erosion) never matched. The duplicate-detection tokenizer now
+  canonicalizes CSS values on the stylesheet path: a zero-with-unit collapses to a
+  bare `0` (`0px`/`0em`/`0%`) and a hex color expands to its long lowercased form
+  (`#fff` -> `#ffffff`, `#abcd` -> `#aabbccdd`), so semantically-equal CSS hashes
+  equal and the clone engine surfaces the fuzzy duplicates. Scoped to CSS-family
+  files and SFC/Astro `<style>` regions only; JS/TS clone detection is unchanged.
+  (PR #1669)
+
+- **CSS-in-JS first-class in `plow health --css` (CSS program Phase 3).**
+  styled-components / emotion / linaria apps previously got `null` `css_analytics`
+  because their CSS lives in `styled`/`css`/`keyframes` tagged templates. A new
+  lexical lifter (`css_in_js_virtual_stylesheet`, the tagged-template analogue of
+  the SFC `<style>` lifter) extracts the CSS body from each template literal,
+  masks `${}` interpolations to a CSS-valid placeholder, and feeds it through the
+  existing structural analytics + styling-health, so a CSS-in-JS app now gets real
+  `css_analytics` + `styling_health` (duplicate styled blocks, structural metrics,
+  design-token sprawl) instead of `null`. Dep-gated on a declared CSS-in-JS library
+  (`styled-components` / `@emotion/styled` / `@emotion/react` / `@emotion/css` /
+  `@linaria/core` / `@linaria/react`), so a non-CSS-in-JS project is byte-unchanged.
+  Template-literal form only (the object form `css({...})` ships in Phase 3c);
+  descriptive-only, no `CACHE_VERSION` bump, no new wire field. (PR #1668)
+
+- **Object-notation CSS-in-JS in `plow health --css` (CSS program Phase 3c).**
+  The growing zero-runtime camp writes its CSS as an object (`style({...})`,
+  `stylex.create({...})`, `css({...})`, `styled.div({...})`), which the
+  template-literal lifter could not reach, so vanilla-extract / StyleX / Panda /
+  emotion-object apps still got `null` `css_analytics`. A new AST object-to-CSS
+  serializer lifts those style objects into the same virtual-stylesheet pipeline,
+  so both CSS-in-JS forms now converge on one analyzer. Recognition is gated on
+  import binding (a call only fires when its name was imported from a recognized
+  CSS-in-JS module), so a local `style`/`css` helper or an unrelated `cva` never
+  fires; static values only (camelCase to kebab-case, implicit-px outside the
+  unitless set and custom properties, one level of selector nesting), with dynamic / spread /
+  computed-key values dropped rather than guessed (no false positives).
+  Flat-by-construction atomic CSS (StyleX, Panda) is kept out of the
+  styling-health structural grade and duplicate-block detection and its grade is
+  marked low-confidence, so atomic CSS-in-JS never inflates the grade, while
+  token sprawl and duplicate blocks are surfaced for every library. Dep-gated
+  (adds `@vanilla-extract/css`, `@pandacss/dev`, `@stylexjs/stylex`), so a project
+  with none of the object deps is byte-identical; descriptive-only, no
+  `CACHE_VERSION` bump, no new wire field. The CSS-in-JS design-token graph
+  (StyleX `defineVars`, vanilla-extract `createTheme`) ships in Phase 3d.
+
+- **`get_token_blast_radius` MCP tool: query a design token's blast radius
+  directly.** A focused, read-only MCP tool that runs `plow health --css
+  --format json` and surfaces `css_analytics.token_consumers` (the Tailwind v4
+  token blast-radius reverse index) without the agent needing to set `css=true` on
+  `check_health` or know the data hides inside `css_analytics`. Per `@theme` token:
+  the defining site, a `consumer_count`, and a capped located `consumers` sample
+  tagged `theme-var` / `css-var` / `utility` / `apply`. Annotated read-only and
+  closed-world (deterministic static analysis); free, no runtime layer. It is a
+  scoping aid, not a deletion gate: `consumer_count` is a static lower bound and
+  the dead-token verdict stays on `unused_theme_tokens`.
+
+- **`token_consumers`: design-token blast-radius in `plow health --css --format
+  json`.** For a Tailwind v4 project, `css_analytics` now carries a reverse index of
+  where each `@theme` token is consumed, so an agent (or human) changing
+  `--color-brand` can see what it affects before touching it. Per token: the defining
+  `(path, line)`, a `consumer_count`, and a capped, located `consumers` sample tagged
+  by `kind`: `theme-var` (a `@theme`-interior `var()` reference), `css-var` (a
+  regular-CSS `var()` read), `utility` (a markup/className token ending in `-<name>`
+  such as `bg-brand`), or `apply` (a class inside an `@apply` body). Built from the
+  same gated candidate set as `unused_theme_tokens` (Tailwind v4, non-plugin,
+  non-published, whole-scope), so it inherits the same abstain behavior and a
+  `consumer_count` of 0 mirrors the dead-token signal. `consumer_count` is a STATIC
+  lower bound (a computed class name like `bg-${c}` is not counted), so it is
+  descriptive context, not a deletion proof; the authoritative dead-token finding
+  stays `unused_theme_tokens`. Additive and gated like `css_analytics`: a plain
+  `plow health --format json` run is byte-unchanged, no schema-version bump.
+  Reachable over MCP via `check_health` with `css=true`.
+
+- **Styling health: a second CSS-quality health axis under `plow health --css`,
+  now confidence-aware.** `plow health --css` reports a `styling_health` score
+  (0-100) and A-F grade derived from the structural CSS analytics, scored
+  SEPARATELY from the code health score (which is byte-unchanged). It is
+  descriptive-only: no exit code, badge, or CI gating. Five capped penalty
+  categories (duplication, dead surface, broken references, token erosion,
+  structural), each shown in a `Deductions:` breakdown mirroring the code score.
+  To keep the grade honest on thin CSS, it carries a `confidence` marker (`high`
+  or `low`) plus a `confidence_reason`: `low` means the grade was computed from a
+  small authored-CSS surface (below 50 declarations, e.g. a utility-first Tailwind
+  app), where the penalty ratios are too sensitive to be authoritative. A
+  low-confidence grade renders dimmed (prefixed `~`) with a plain-text caveat
+  naming the declaration and stylesheet counts; agents reading `--format json`
+  get the `confidence` flag plus the raw `css_analytics.summary.total_declarations`
+  to apply their own threshold. When no stylesheet is import-reachable, the axis
+  is withheld entirely with an explanatory note. The rubric was calibrated against
+  a real-project corpus (government design systems grade A, the worst app a B from
+  a genuine high `!important` density). Reach this over MCP via `check_health`
+  with `css=true`.
+
+- **`unusedComponentProps.ignorePattern`: opt-in regex to treat
+  leading-underscore (or any pattern-matched) destructured props as
+  intentionally unused.** Component frameworks often accept a prop for public-API
+  stability while not consuming it internally, aliasing the destructure with a
+  leading underscore (`let { stage: _stage } = $props()`), the convention TS
+  `noUnusedParameters` and ESLint `varsIgnorePattern` / `argsIgnorePattern`
+  honor. Set `"unusedComponentProps": { "ignorePattern": "^_" }` to exempt any
+  prop whose LOCAL destructure binding name matches the regex from
+  `unused-component-props`. Applies to Vue, Svelte, Astro, and React/Preact
+  props. Default behavior is unchanged (opt-in only). Notes: the match is on the
+  local binding name (`_stage`), not the public prop name the finding reports
+  (`stage`); matching is unanchored like ESLint's `RegExp.test`, so anchor with
+  `^_`; an invalid regex fails config load with a clear error. A human-output
+  note reports how many props were exempted so a typo'd pattern that matches
+  nothing is not silently inert. Thanks
+  [@hniedner](https://github.com/hniedner) for the request.
+  (Closes [#1648](https://github.com/fglogan/genesis-plow/issues/1648))
+
+- **`plow review --walkthrough`: render the review walkthrough as a staged
+  terminal tour.** Turns the existing walkthrough guide into an ordered,
+  human-readable tour: a Review Focus header, staged sections, ordered files
+  each with a one-line fact and grounded badges, and a "cleared" panel collapsed
+  by default with an expand hint. `--format markdown` emits a paste-into-PR
+  artifact (no ANSI); `--format json` is byte-identical to `--walkthrough-guide`
+  (the same agent-contract envelope, no new schema). Per-file viewed state
+  persists locally under the project cache (`--mark-viewed`) and is tolerant of a
+  moved tree (a changed graph snapshot reads as not-viewed without discarding
+  marks). The renderer is pure presentation over the in-memory guide; it never
+  re-derives ordering or facts, and the review path still always exits 0.
+
+### Changed
+
+- **Styling-health now weights CSS value DRIFT over byte-identical repetition
+  (formula v3).** Research is clear that exact CSS duplication is the
+  least-harmful CSS pattern (repeated declarations gzip away, graphical properties
+  are loosely coupled, CSS has no native abstraction so some repetition is
+  unavoidable), while the real maintenance harm is design-token inconsistency. So
+  the styling-health grade's `duplication` exact-block penalty is down-weighted to
+  a soft hint (scale `200` -> `80`, the 20pt cap unchanged, the detector kept), and
+  the `token_erosion` penalty gains a hardcoded-value-sprawl drift sub-term sourced
+  from the count of distinct un-tokenized `box-shadow` / `border-radius` /
+  `line-height` values (per-axis baselines 10/8/6, gently saturating, sub-capped at
+  5pt inside the unchanged 10pt category). A system that tokenizes its scales via
+  `var(--*)` scores 0 sprawl regardless of how many tokens it defines (var-
+  referenced and `@theme`-defined values are not counted); only hardcoded literals
+  contribute. `STYLING_HEALTH_FORMULA_VERSION` bumps `2` -> `3`. This is
+  descriptive-only: no exit code, badge, gate, regression baseline, or trend
+  snapshot consumes the styling score, and the JS/TS code `health_score` is
+  byte-unchanged. **Consumers diffing `styling_health.score`/`grade` over time**
+  (raw `--format json` snapshot CIs, styling-grade trend dashboards): grades move
+  for some projects at the version boundary, so re-baseline or gate on
+  `formula_version`; the one-time step-change is expected, not a regression.
+
+- **Typed architecture boundaries across engine, output, and API callers.**
+  `plow-engine`, `plow-output`, and `plow-api` now own the command-neutral
+  analysis runners, output contracts, and programmatic Rust boundary instead of
+  treating `plow-cli` as the implicit API surface. LSP, MCP, NAPI, and Rust
+  callers consume typed engine/API results and serialize JSON only at protocol
+  boundaries; the old `plow-programmatic-cli` compatibility crate has been
+  removed. The extraction pipeline now exposes typed semantic facts while
+  domain-specific adapters remain where the analysis still needs them.
+
+### Fixed
+
+- **Astro template `.map()` callbacks over a typed class array no longer report
+  the class members as unused.** An iteration variable in an Astro template
+  `{...}` expression (`{utils.map((util) => <li>{util.getter}</li>)}`) whose
+  receiver is a frontmatter binding typed as an array of a class (`Util[]`)
+  previously flagged the element class members as `unused-class-member`. Astro
+  frontmatter is visitor-parsed (so a frontmatter `.map` was already credited),
+  but the template body `{...}` expressions were only scanned for bare
+  identifiers, never run through the member-recording visitor. plow now
+  re-parses each template expression region and runs it through the same
+  iteration-binding visitor pass, seeded with the frontmatter's element types, so
+  a template `.map` / `.forEach` / `for...of` callback credits the element class
+  the same as the frontmatter and `.tsx`. Over-credit only: a member accessed
+  nowhere still reports. (Closes
+  [#1713](https://github.com/fglogan/genesis-plow/issues/1713))
+
+- **Angular `@for` / `*ngFor` loop variables over a class array no longer report
+  the class members as unused.** An Angular component with an inline `template:`
+  that iterates a component field typed as an array of a class (`utils: Util[]`)
+  via `@for (util of utils; track util)` or legacy `*ngFor="let util of utils"`
+  and reads members on the loop item (`{{ util.getName() }}`) previously flagged
+  those members as `unused-class-member`. The loop variable is a template local,
+  not a class field, and nothing typed it to the iterated field's element class.
+  The Angular template scanner now types a bare-identifier `@for` / `*ngFor` loop
+  variable to the element class of the matching component field and remaps
+  `util.member` onto that class. Over-credit only: the iterated field is still
+  credited, a builtin-array field (`number[]`) types nothing, and a genuinely
+  unused member still reports. External `templateUrl` templates are a known
+  remaining case. (Closes
+  [#1712](https://github.com/fglogan/genesis-plow/issues/1712))
+
+- **Vue `v-for` over a `props.<field>` array no longer reports the element
+  class members as unused.** A Vue `<script setup>` component that iterates a
+  prop typed as an array of a class and reads members on the loop item, for
+  example `v-for="(util, i) of props.items"` with `{{ util.getter }}` /
+  `{{ util.hello() }}` where `props` comes from
+  `defineProps<{ items: Util[] }>()`, previously flagged `Util.getter` /
+  `Util.hello` as `unused-class-member`. The element-type crediting only matched
+  a bare module-scope iterable, not a `props.<field>` member-expression source.
+  The `defineProps` inline-type harvest now records each array-typed prop field's
+  element class as `props.<field>`, which the existing `v-for` scanner matches, so
+  member accesses on the loop item credit the class. Over-credit only: a
+  genuinely unused member on the same class still reports, and a non-class array
+  prop (`number[]`) types nothing. (Closes
+  [#1711](https://github.com/fglogan/genesis-plow/issues/1711))
+
+- **Iterating a typed class array no longer reports the class members as
+  unused.** Extending the Vue `v-for` fix below to the general iteration case: an
+  iteration variable whose type is the element class of a typed array or reactive
+  array is now credited when you read members on it. This covers array-method
+  callbacks (`utils.map(u => u.getter)`, `.forEach`, `.filter`, `.find`,
+  `.flatMap`, and friends; `reduce` / `reduceRight` are excluded because their
+  first callback argument is the accumulator, not an element), `for (const u of
+  utils)` loops, React and Preact JSX `.map`, and Svelte `{#each utils as util}`
+  blocks. Previously all of these false-reported the class members as
+  `unused-class-member`. Explicitly annotated callback parameters
+  (`(u: Util) => ...`) already worked; this adds the implicitly-typed case. The
+  change only removes false positives; a genuinely unused member on the same
+  class still reports. The deferred sibling cases are now fixed above: Angular
+  `@for` / `*ngFor`
+  ([#1712](https://github.com/fglogan/genesis-plow/issues/1712)), Astro `.map`
+  ([#1713](https://github.com/fglogan/genesis-plow/issues/1713)), and Vue `v-for`
+  over a member-expression `props.<field>` source
+  ([#1711](https://github.com/fglogan/genesis-plow/issues/1711)). (Refs
+  [#1707](https://github.com/fglogan/genesis-plow/issues/1707))
+
+- **Vue `v-for` loop variables iterating over a class array no longer report the
+  class members as unused.** A Vue template that iterates a typed array or
+  reactive array of a class and reads members on the loop item, for example
+  `v-for="(util, index) of utils"` with `{{ util.getter }}` / `{{ util.property }}`
+  / `{{ util.hello() }}` where `utils` is `Util[]` or
+  `computed(() => Util[])`, previously flagged `Util.getter` / `Util.property` /
+  `Util.hello` as `unused-class-member`. Previously plow had no way to type a
+  `v-for` loop variable to its source iterable's element class, so member accesses
+  on the item were dropped. plow now infers the element class of a Vue
+  `<script setup>` array or reactive-array binding (from the type annotation, a
+  `ref` / `computed` / `reactive` generic argument, a reactivity callback returning
+  a typed array, or a `new Class()` array literal) and credits member accesses on
+  the loop item. The change only removes false positives: a genuinely unused member
+  on the same class is still reported. Thanks [@Ericlm](https://github.com/Ericlm)
+  for the report and the minimal reproduction. (Closes
+  [#1707](https://github.com/fglogan/genesis-plow/issues/1707))
+
+- **Telemetry: `plow flags` and `plow watch` now record `findings_present`,
+  and a guard prevents the whole class of regression.** Both commands emit a
+  `code_quality_review` telemetry event (the same workflow as combined `plow`,
+  which does populate the field) but never noted their find-state, so
+  `findings_present` serialized as null, the same gap fixed for the `security`
+  subcommands. `flags` now notes its feature-flag count and `watch` notes each
+  cycle's issue count. Focused `dead-code` / `dupes` trace and impact-closure
+  views also record their underlying analysis count, so `findings_present`
+  reflects what the analysis surfaced independent of the output view. A
+  debug-build invariant at the single telemetry event-emission point now fails
+  fast if any finding-surfacing workflow records a non-failing event without
+  noting find-state, so a future analysis command cannot silently reintroduce
+  the gap. No change to the telemetry payload shape.
+  (Refs [#1650](https://github.com/fglogan/genesis-plow/issues/1650))
+
+- **Telemetry: the `security` workflow once again records `findings_present` for
+  the `survivors` and `blind-spots` subcommands.** Both subcommands emit a
+  `security` telemetry event but never noted their find-state, so the
+  process-global accumulator stayed unset and `findings_present` serialized as
+  null. Because `plow security` exits non-zero only when findings exist and the
+  rule is raised to `error`, `findings_present` is the field that distinguishes
+  "found candidates" from "errored," and a null value lost that signal for these
+  modes. `survivors` now notes its retained (non-dismissed) candidate count and
+  `blind-spots` notes its unresolved-callee-site count before exit, matching the
+  default / `--file` / `--gate` paths. No change to the telemetry payload shape.
+  (Closes [#1650](https://github.com/fglogan/genesis-plow/issues/1650))
+- **`unused-files` no longer false-flags a custom version-bump `updater` script
+  referenced under the package.json `commit-and-tag-version` key.** A custom
+  updater module (`app/scripts/gradle-updater.cjs`) is loaded by
+  commit-and-tag-version at runtime and has no static importer, so plow
+  reported it as unused. plow only scanned an allowlist of package.json keys
+  (`main`, `bin`, `exports`, `scripts`, ...) for file references and had no
+  plugin for this tool. A new `commit-and-tag-version` plugin (legacy enabler
+  `standard-version`) now credits each `bumpFiles[]` / `packageFiles[]` entry's
+  `updater` module and `filename` target, from both the package.json key and
+  standalone `.versionrc` / `.versionrc.{json,js,cjs}` configs. Crediting is
+  gated on the file existing on disk, so non-source targets (gradle, plist,
+  version.txt) and phantom paths are never over-credited. Thanks
+  [@rbalet](https://github.com/rbalet) for the report.
+  (Closes [#1640](https://github.com/fglogan/genesis-plow/issues/1640))
+- **`unused-files` no longer false-flags Next.js `page.mdx` (and other entries)
+  when `next.config` wraps its config object.** plow resolved a bare
+  `export default config`, but not a config passed as a named const to a wrapper
+  call, so `export default withMDX(nextConfig)` (the official `@next/mdx` docs
+  idiom), `module.exports = createJestConfig(customConfig)`, nested wrappers, and
+  `compose(...)(nextConfig)` all read as an empty config. The Next.js plugin
+  never saw `pageExtensions`, so MDX App Router pages were reported as unused.
+  The shared config resolver now follows the named const (including through
+  nested wrapper calls), which also fixes the same class for any wrapped Vite /
+  Webpack / Jest config. Thanks [@AlonMiz](https://github.com/AlonMiz) for the
+  report.
+  (Closes [#1642](https://github.com/fglogan/genesis-plow/issues/1642))
+
+- **`unused-class-members` no longer false-flags framework-dispatched OpenLayers
+  interaction methods.** A `handleEvent` (or the `PointerInteraction`
+  `handle*Event` / `stopDown` protocol) on a subclass of an `ol/interaction/*`
+  base is invoked by OpenLayers per browser event, never through an explicit
+  call site, so it was reported as an unused class member. plow now credits
+  these dispatched methods, gated on the `super_class` resolving through the
+  file's imports to an `ol/interaction/*` specifier (so a same-named local base
+  does not credit) and walked down `extends` chains so transitive subclasses are
+  covered. Genuinely-unused non-dispatched members on the same class still
+  report.
+  (Closes [#1638](https://github.com/fglogan/genesis-plow/issues/1638))
+
+- **`unused-class-members` no longer false-flags a `toString` invoked only
+  through implicit string coercion.** A `toString` used solely via a
+  template-literal interpolation (`` `${new Money(5)}` ``), `String(...)`, or `+`
+  with a string operand has no explicit `.toString()` call site, so it was
+  reported as unused. plow now credits a class's `toString` when a
+  `new Class()` flows directly into one of those coercion positions. The scope is
+  tight to the direct `new Class()` form: a numeric `+` (`new Num() + 5`) and a
+  `new Class()` outside a coercion position do not credit, so a genuinely-unused
+  `toString` still reports.
+  (Closes [#1638](https://github.com/fglogan/genesis-plow/issues/1638))
+
+## [2.103.0] - 2026-06-28
+
+### Added
+
+- **`coverage analyze --format json` now emits the runtime trust-output contract
+  on the local report.** Each report carries `actionable`,
+  `actionability_reason`, and `actionability_verdict` (a capture with no tracked
+  functions is a first-class `insufficient_evidence` verdict, never silently read
+  as cold), plus a `provenance` block (`data_source`, `freshness_days`,
+  `untracked_ratio`, `unresolved_ratio`, `stale`, `stale_after_days`). The block
+  is context only: it never gates a positive verdict or a confidence score.
+  Additive, JSON-only.
+
+- **`coverage analyze` findings now carry a `discriminators` block.** Alongside
+  each verdict, the inputs that produced it are now legible instead of needing to
+  be re-derived: `tracking_state` (called / never_called / untracked),
+  `invocation_ratio`, the `low_traffic_threshold` and `min_observation_volume`
+  in effect, and `trace_count` with `meets_observation_volume`. It makes the
+  existing signals visible and gates nothing. Additive and backwards-compatible
+  (omitted when absent).
+
+- **`get_blast_radius` and `get_importance` MCP tools now state the
+  augment-not-gate rule in their descriptions.** Both return review context
+  (caller counts, risk bands, importance scores); the descriptions now make
+  explicit that these signals must not gate a `safe_to_delete` decision or a
+  confidence score. Only the three-state runtime tracking signal (called /
+  never_called / untracked) can issue a deletion verdict, matching the
+  server-side enforcement.
+
+- **`coverage analyze --cloud` now hints the source-map upload command when
+  coverage is unresolved.** When the cloud cannot map runtime positions to source
+  (almost always because no source maps were uploaded for the commit) and built
+  source maps exist on disk, plow prints the exact
+  `plow coverage upload-source-maps --dir <dir>` command and build directory.
+  Human output only; JSON consumers already get the structured
+  `coverage_unresolved` warning in `report.warnings`.
+
+### Changed
+
+- **Typed output contracts across every consumer.** Engine results now feed the
+  CLI, LSP, NAPI, MCP, and programmatic callers through shared typed contracts
+  instead of CLI rendering being the implicit API surface. As part of this,
+  `workspace_diagnostics` is now a typed `WorkspaceDiagnostic` array on
+  `CheckOutput` and `DupesOutput` (and the combined and audit envelopes),
+  matching `WorkspacesOutput`, so `docs/output-schema.json` and the generated
+  npm / VS Code `.d.ts` describe it precisely instead of as an opaque value.
+  Thanks [@riker-wamf](https://github.com/riker-wamf) for flagging it.
+  (Closes [#1635](https://github.com/fglogan/genesis-plow/issues/1635))
+
+- **`plow dupes` now ignores test and mock files by default.** Duplicate-code
+  analysis skips `*.test.*`, `*.spec.*`, `__tests__`, and `__mocks__` paths out
+  of the box, reducing first-run noise from intentionally repetitive tests.
+  Set `duplicates.ignoreDefaults: false` to restore the previous corpus.
+  (Closes [#1386](https://github.com/fglogan/genesis-plow/issues/1386))
+
+### Fixed
+
+- **`unused-component-props` no longer false-flags a Svelte prop used only
+  through a `bind:`/`style:`/`class:` directive shorthand.** A value-less
+  directive such as `bind:open`, `style:height`, or `class:active` is shorthand
+  for `directive:NAME={NAME}`, so the directive name itself references the prop.
+  Template-usage extraction now credits these, alongside the existing
+  `use:`/`transition:`/`in:`/`out:`/`animate:` handling. Directives written with
+  an explicit value (`style:height={h}`) are unchanged: the value names the
+  reference, and the bare target (CSS property, class name, child prop) does
+  not. Thanks [@hniedner](https://github.com/hniedner) for the report.
+  (Closes [#1641](https://github.com/fglogan/genesis-plow/issues/1641))
+
+- **`unused-component-props` no longer false-flags a Vue prop used only through
+  a value-less `v-bind` same-name shorthand.** Vue 3.4+ lets `:open` stand for
+  `:open="open"` and `:some-prop` for `:some-prop="someProp"`, so the argument
+  itself references the prop. Template-usage extraction now credits the
+  camelCase argument of a value-less `v-bind`. A `v-bind` written with an
+  explicit value (`:label="text"`) is unchanged: the value names the reference,
+  not the bare argument.
+  (Refs [#1641](https://github.com/fglogan/genesis-plow/issues/1641))
+
+- **`unused-component-props` no longer false-flags a Vue prop used only through
+  a `<style> v-bind()` reference.** Vue SFC CSS `v-bind(accent)`,
+  `v-bind(props.accent)`, and the string form `v-bind('a.b')` bind a script or
+  prop value into CSS. Template-usage extraction now scans `<style>` blocks for
+  these references, so a prop consumed only by CSS `v-bind()` is credited
+  instead of reported as unused.
+
+- **`unused-store-members` no longer false-flags a Pinia store member reached
+  through indirection.** A member used inline on a store-factory call
+  (`useFooStore().member`), or through a store passed as a param typed
+  `ReturnType<typeof useFooStore>` (inline or via a local `type` alias) and read
+  as `store.member`, `props.store.member`, or `const { member } = props.store`,
+  is now credited instead of reported as unused. Resolution is gated on the
+  `use<Name>Store` naming convention, so a non-store call or
+  `ReturnType<typeof ...>` param never masks a genuinely unused member.
+  Member usage in `.ts` files is credited alongside `.vue` SFCs. Thanks
+  [@Jerc92](https://github.com/Jerc92) and [@Ericlm](https://github.com/Ericlm)
+  for the reports.
+  (Closes [#1489](https://github.com/fglogan/genesis-plow/issues/1489) and
+  [#1488](https://github.com/fglogan/genesis-plow/issues/1488))
+
+- **`unused-class-members` no longer false-flags a member reached through a
+  factory or composable return value.** When a class instance reaches a call
+  site only through a function that returns it (a `useApi()` composable, a
+  singleton getter), `const api = useApi(); api.Member()` now credits
+  `Class.Member`, including when the factory's return type is inferred rather
+  than annotated. Previously the member was reported as unused unless the
+  instance was reached through a directly-typed reference. Thanks
+  [@Jerc92](https://github.com/Jerc92) for the report.
+  (Closes [#1441](https://github.com/fglogan/genesis-plow/issues/1441))
+
+- **`unused-component-props` no longer aborts on a spaced `</template >` closing
+  tag.** Whitespace inside a Vue SFC closing template tag previously aborted
+  template-usage extraction for the entire component, so every prop and emit in
+  that SFC was reported as unused. The closing tag is now matched regardless of
+  internal whitespace. Thanks [@Jerc92](https://github.com/Jerc92) for the
+  report.
+  (Closes [#1439](https://github.com/fglogan/genesis-plow/issues/1439))
+
+- **`ignorePatterns` now accepts a leading `./`.** Entries such as
+  `./src/generated/**` now match the same project-root-relative files as
+  `src/generated/**`, instead of silently leaving those files in the analysis.
+  The same normalization applies to `ignoreUnresolvedImports`. (Closes
+  [#1385](https://github.com/fglogan/genesis-plow/issues/1385))
+
+## [2.102.0] - 2026-06-23
+
+### Added
+
+- **Code review brief (`plow review`, or `plow audit --brief`).** A new advisory
+  orientation mode over changed code. It runs the same dead-code + complexity +
+  duplication analysis as `plow audit` but answers "where do I look?" instead of
+  "will CI block this?": it ALWAYS exits 0 (the verdict is carried informationally),
+  so a reviewer or agent can read it regardless of the gate outcome. The brief renders
+  a ranked decision surface, a weighted focus map, and change-impact context. `--format`
+  is orthogonal to `--brief`. `plow review` is an alias for `plow audit --brief`.
+
+- **`plow decision-surface` command and `decision_surface` MCP tool.** Surfaces the
+  consequential structural decisions a change embeds (the apex of the review brief):
+  a ranked, capped (3-5) set of coupling/boundary, public-API/contract, and dependency
+  decisions, each framed as a judgment question with the routed expert to ask. Each
+  decision carries an honest count of how many internal consumers it affects plus an
+  explicit trade-off clause, so the reader sees the cost as well as the call. Separable
+  and cheap, advisory (always exits 0), and every decision is suppressible with
+  `// plow-ignore`. Use `--base` / `--changed-since` to pick the comparison point,
+  exactly like `plow audit`.
+
+- **`plow trace <FILE:SYMBOL>` symbol-level call chains.** Walks callers UP (modules
+  that import the symbol) and callees DOWN (import-symbol edges plus intra-module call
+  sites) through the module graph, bounded by `--depth` (default 2). `--callers` /
+  `--callees` scope the direction; both are walked by default. Best-effort and syntactic
+  per ADR-001: resolved-vs-unresolved callees are reported honestly, never silently
+  dropped. It is its own surface, never folded into the ranked review brief.
+
+- **Agent-contract walkthrough loop (`--walkthrough-guide` / `--walkthrough-file`).**
+  `--walkthrough-guide` emits a deterministic digest (the brief, the decision surface,
+  the review direction, the JSON schema the agent must return, and a graph-snapshot hash)
+  built from the graph only, so PR prose is never folded in and the digest is
+  injection-resistant. `--walkthrough-file` ingests an agent's judgment JSON and
+  post-validates it against the LIVE graph: it rejects any judgment whose `signal_id`
+  plow did not emit (anti-hallucination) and refuses the whole payload as stale when
+  the echoed graph-snapshot hash no longer matches. The verifier is the graph, not a
+  second model. Both imply the brief and always exit 0.
+
+- **Weighted focus map with a de-prioritized escape hatch.** The review brief ranks
+  changed units by review weight and collapses the de-prioritized tail by default;
+  `--show-deprioritized` re-expands the human render. The `deprioritized` list is always
+  present in `--format json` regardless of the flag.
+
+- **LLM-call prompt-injection candidate (`plow security`).** A new `llm-call-injection`
+  category (CWE-1427) in the tainted-sink catalogue. It fires only when an untrusted
+  source flows into the prompt/messages argument of a known LLM-call sink (a taint PATH
+  into the call, not every LLM call), pinned to the distinctive LLM SDK call shapes. Like
+  all `plow security` output it is a CANDIDATE for verification, not a verified
+  vulnerability, and never appears under bare `plow` or the `audit` gate.
+
+- **React component intelligence in the editor.** The LSP now surfaces ambient React/Preact
+  context with no new rule, finding, severity, or gating. A code lens above each component
+  summarizes it (`rendered 12x (8 parents), 5 props, 9 hooks (4 state, 3 effect, 1 memo, 1
+  callback)`), and a per-prop hover shows `read in body, passed from 3 call sites` (or `not read
+  in body` for a prop the component ignores); a forwarded prop adds `forwarded 4 levels: Page >
+  Layout > Sidebar > Profile`. Descriptive editor-only context: `plow` / `audit` / `--format
+  json` output is unchanged (the data is an in-process LSP carrier computed only on the editor
+  path). Render counts exclude test/spec/story files and headline distinct parents, not in-file
+  repetition.
+
+- **Astro framework-health detection.** `.astro` components now participate in the same
+  health suite as Vue/Svelte/Angular/React. The frontmatter is semantic-analyzed (imports
+  used only as `<Header/>` tags or `{expr}` markup are credited; a genuinely-dead
+  frontmatter import now refines `unused-export`). A reachable `.astro` component kept alive
+  only by a barrel re-export but rendered in no template surfaces as `unrendered-component`
+  (framework `astro`). An `interface Props` field read nowhere via `Astro.props`
+  (destructure / member access) or the template surfaces as `unused-component-prop`, with a
+  zero-false-positive abstain ladder (`interface Props extends X` / `type Props = Imported`,
+  rest destructure, whole-object `Astro.props` use, and `{...Astro.props}` template spread
+  all abstain the component). No new rules or severities: `.astro` reuses the existing
+  `unrendered-component` and `unused-component-prop` rules.
+
+- **Lit / web-component framework-health detection.** A custom element registered via
+  `@customElement('x-foo')` or `customElements.define('x-foo', C)` but rendered as a tag in no
+  `html` template anywhere in the project surfaces as `unrendered-component` (framework `lit`,
+  the finding names the tag). The zero-false-positive ladder wholesale-abstains published
+  elements (re-exported from a package entry, the dominant design-system shape), credits
+  imperative renders (`document.createElement` / `customElements.get` / `whenDefined`), and
+  abstains the whole project when any `html` template renders a dynamic tag. A Lit `@state()`
+  reactive property read nowhere in its element (neither a method nor the `html` template) now
+  surfaces as `unused-class-member`; `@property` (the public attribute API, settable via HTML
+  attribute / parent binding / `setAttribute` / CSS) is never flagged. Gated on a `lit` /
+  `lit-element` / `@lit/reactive-element` dependency; reuses the existing `unrendered-component`
+  and `unused-class-member` rules (no new rules).
+
+### Changed
+
+- **Deeper React prop coverage for `unused-component-prop`.** The React arm now harvests props
+  from same-file typed interfaces (`(props: Props) => props.x`) and generic `forwardRef<Ref,
+  Props>` components, not only inline destructure, so a prop a non-exported component declares
+  but never reads is caught on more component shapes. Imported prop interfaces, `extends` /
+  generic / intersection types, and any whole-object props use still abstain, so exported
+  public-API components and library surfaces are never flagged (validated zero false positives
+  on a real-project corpus).
+
+- **`plow health` now scores `.astro` complexity.** Astro frontmatter functions are scored
+  like a Vue/Svelte `<script>`, and a synthetic `<template>` entry scores the markup
+  `{ ... }` expression and iteration (`.map` / `.flatMap` / `.forEach`) complexity, mirroring
+  the existing Vue/Svelte synthetic `<template>` entries. This is a health SIGNAL only (it
+  never appears under bare `plow`, `audit`, or `dead-code`), but it is a one-time
+  discontinuity in baselined health trends for projects with `.astro` files: a previously
+  unscored `.astro` frontmatter/template now contributes to the complexity aggregate.
+
+- **VS Code: clearer tree badges, hardened health spawn, and de-duplicated diagnostics.**
+  The sidebar tree badges are tightened, the background `plow health` spawn is more
+  resilient, and overlapping diagnostics for the same location are de-duplicated so the
+  Problems panel no longer double-reports.
+
+- **Faster command-only surfaces.** Commands that do not run a full analysis (schema and
+  template printers, and similar metadata surfaces) start up faster.
+
+### Fixed
+
+- **Merged namespace values imported through star barrels are no longer falsely reported as unused.**
+  A value export that shares its name with an `export declare namespace` and is consumed through
+  `export *` now receives the same named-import credit as a direct import. The type-only namespace
+  side stays governed by type usage, so unrelated unused type findings and sibling value exports
+  remain reportable. Thanks [@TeoVezza95](https://github.com/TeoVezza95) for the report.
+  (Closes [#1373](https://github.com/fglogan/genesis-plow/issues/1373))
+
+- **VS Code now resolves the native plow binary from platform packages.** When the
+  binary is reached through a `.cmd` / `.ps1` launcher shim on `PATH`, the extension
+  re-resolves it to the sibling native executable so LSP-backed diagnostics start
+  reliably. Thanks [@ivan-palatov](https://github.com/ivan-palatov) for the report.
+  (Closes [#1359](https://github.com/fglogan/genesis-plow/issues/1359))
+
+- **TanStack Router: custom `routeFileIgnorePrefix` is honored.** Files using a project's
+  configured ignore prefix are no longer flagged as dead code. Thanks
+  [@Spiralis](https://github.com/Spiralis) for the report.
+  (Closes [#1358](https://github.com/fglogan/genesis-plow/issues/1358))
+
+- **`plow audit` base-snapshot worktree paths are unique per call.** Non-reusable
+  base-worktree directory names can no longer collide across concurrent audit runs, which
+  could intermittently fail an audit with exit 2.
+
+- **More precise telemetry failure classification.** When telemetry is enabled, a failed
+  run now records a specific failure reason (validation, config, network, and the like)
+  instead of a generic bucket.
+
+- **Review direction no longer routes through ownership for the current reviewer**, and
+  story/test-only coordination-gap noise is dropped from the review brief.
+
+- **Vendored GitLab CI now bundles `gitlab_common.sh`.** `plow ci-template gitlab --vendor`
+  writes the shared helper both `comment.sh` and `review.sh` source, so vendored pipelines
+  run without reaching out to `raw.githubusercontent.com`.
+
+## [2.101.0] - 2026-06-21
+
+### Changed
+
+- **Faster duplicate detection on large repositories.** Clone detection now builds its
+  suffix array with a linear-time SA-IS construction instead of the previous
+  prefix-doubling approach, cutting the duplication stage of `plow dupes` (and of
+  bare `plow` and `plow audit`) on large codebases. Reported clones are unchanged.
+
+- **Faster repeated stylesheet resolution.** Resolving external (`node_modules`)
+  stylesheet `@import` / `@use` chains now reuses a single resolver session across
+  lookups instead of rebuilding the resolver and re-reading every workspace
+  `package.json` for each stylesheet. On a 41-workspace monorepo this removes roughly
+  80 manifest reads and 80 path-canonicalization calls per external stylesheet.
+  Resolution results are unchanged.
+
+- **Faster plugin and config detection on large repositories.** Plugin config files
+  (`tsconfig.json`, `.eslintrc.json`, `bunfig.toml`, and the like) are now collected
+  during the existing project file scan instead of a second filesystem walk of every
+  directory, and workspace file bucketing runs in parallel. The same in-memory listing
+  also drives filesystem-based plugin activation, so the browser-extension and Obsidian
+  plugins no longer read every candidate directory's `manifest.json` to decide whether
+  to activate. On a 21k-file, 41-workspace project this roughly halves the plugin
+  detection stage (about 340ms). Analysis output is unchanged: byte-identical results
+  across the benchmark suite.
+
+  One deliberate behavior refinement comes with it: outside production mode, config
+  files and activation manifests are now discovered with the same traversal rules as
+  source files, so one that is gitignored, excluded by an `ignorePatterns` entry, or
+  inside a hidden directory plow does not traverse is no longer parsed or used to
+  activate a plugin. Committed files in normal locations are unaffected. Production
+  mode keeps the previous filesystem discovery.
+
+### Fixed
+
+- **Vue components exposed as namespaces are no longer falsely reported as unused.**
+  A design system that re-exports compound components through namespace barrels
+  (`export * as List from "./components/List"`) and renders their members via dotted
+  tags had every such member reported by the `unrendered-component` check as
+  "reachable but rendered nowhere". The render-usage walk now follows namespace
+  re-export edges back to the underlying `.vue` files and credits them, for both the
+  named-import form (`import { List } from "@/design-system"`; `<List.Root>`) and the
+  whole-namespace-import form (`import * as DS from "@/design-system"`;
+  `<DS.List.Root>`), including barrels nested through further `export *` /
+  `export * as` re-exports. This removes those false positives; a component
+  re-exported through a namespace that nothing renders is still reported.
+  Thanks [@Smrtnyk](https://github.com/Smrtnyk) for the report.
+  (Closes [#1351](https://github.com/fglogan/genesis-plow/issues/1351))
+
+- **Varlock now activates from a nested `.env.schema`, not just a root-level one.**
+  A project with a `.env.schema` in a subdirectory (for example `apps/web/.env.schema`)
+  and no `varlock` dependency previously left the plugin inactive, so packages declared
+  via `@plugin(...)` inside that schema were reported as unused dependencies. They are
+  now credited. This removes those false positives; expect a small drop in
+  unused-dependency findings for affected projects. Production mode is unchanged
+  (activation there still requires the `varlock` dependency or a root-level
+  `.env.schema`).
+
+- **`plow ci-template gitlab` now bundles the shared `gitlab_common.sh` helper.**
+  The vendored GitLab CI template sources a shared `gitlab_common.sh` script from its
+  comment and review steps, but the file was missing from the vendored output, so a
+  generated pipeline failed at runtime trying to source a file that was not there. The
+  template now includes it.
+
+## [2.100.0] - 2026-06-19
+
+### Added
+
+- **Rule packs can now ban catalogue-derived effect classes.** `banned-effect` rules let teams forbid calls whose callee matches an internal security-catalogue effect such as `network`, `storage`, `shell`, `crypto`, `randomness`, `dom`, or `database`. The effect is stored on each `security_matchers.toml` row and resolved through the same written plus import-resolved callee matching used by `banned-call`, including framework dependency gates. Findings continue to report as `policy-violation` with scoped suppression via `<pack>/<rule-id>`. (Closes [#1143](https://github.com/fglogan/genesis-plow/issues/1143).)
+
+- **`plow dupes` now scans authored web-format code outside JS and TS.** Duplicate detection now tokenizes `.css`, `.scss`, `.sass`, and `.less` files, plus Vue and Svelte template and style regions and Astro template and style regions. SFC and Astro regions keep section boundaries, so a clone candidate cannot be formed by stitching script, markup, and style tokens together. Warm duplicate-token caches refresh on upgrade because older caches stored these files as empty or script-only streams.
+
+- **`unused-component-prop` now covers Svelte 5 `$props()` destructures.** Svelte components that declare a prop through `$props()` and never read it in their script or markup now report through the existing `unused-component-prop` rule. The finding keeps the same output shape, severity, manual action, and suppression token as Vue and React component-prop findings. It stays conservative by requiring a declared `svelte` or `@sveltejs/kit` dependency and abstaining when a `$props()` destructure contains rest, computed, nested, or whole-object shapes that could hide a use.
+
+- **`plow inspect` bundles every evidence query for one file or exported symbol.** The new read-only `inspect` command exposes on the CLI (and in the editor) the same evidence bundle the MCP `inspect_target` tool returns: it composes existing trace, dead-code, duplication, complexity, and security evidence into one typed JSON result without adding a new analyzer pass. Target a file with `plow inspect --file src/foo.ts` or a symbol with `plow inspect --symbol src/foo.ts:Foo`; symbol targets add precise `trace_export` identity plus file-scoped evidence for the analyses that do not yet map to an enclosing symbol. The VS Code inspect command saves dirty files before running and consumes the typed output.
+
+- **`plow health --format json` can now report framework detector coverage.** When a health run already has the dead-code analysis output it needs, health JSON gains an optional `framework_health` block listing the detected framework ids and the scoped status of each framework detector (active, disabled, abstained, or not-checked). This makes it visible why a framework-specific finding did or did not surface in a given run. The block is omitted when the run did not need analysis data, so default health output stays lean.
+
+- **`plow security` gains verifier-workflow outputs for CI and agents.** Two read-only subcommands close the loop between plow's security candidates and an external verifier. `plow security survivors` joins raw `plow security --format json` candidates with a verdict file so confirmed survivors are reported without rewriting the candidate output; it surfaces `summary.unverdicted`, separates verifier dispositions from unreviewed candidates in human output, and offers `--require-verdict-for-each-candidate` as a strict complete-verdict CI gate (structured exit 2 on an incomplete verdict file). `plow security blind-spots` groups unresolved security callees and accepts `--file` before or after the subcommand. The new output contracts are wired through schema generation and the generated TypeScript types, and the unverified-candidate framing is preserved throughout.
+
+### Changed
+
+- **SARIF file output now streams to disk.** Writing SARIF with `--output-file` / `-o` (or `--sarif-file`) streams the report to the file instead of building the whole document in memory first, lowering peak memory on large result sets. Output content is unchanged.
+
+### Fixed
+
+- **Local-only value exports now report consistently as unused exports.** A value export that is only referenced by another export in the same file is again treated as unused public surface by default, so `dead-code`, `trace`, and stale suppression detection agree. The fix action still removes only the export modifier, leaving the local declaration available to same-file consumers. Teams that intentionally export this pattern can keep using `@public`, `ignoreExports`, or `ignoreExportsUsedInFile`.
+
+- **`plow dupes` avoids cross-format clone groups for web-format tokens.** Duplicate token hashes now include the active source namespace, so JS, style, and markup regions do not form clone groups with each other just because their punctuation or identifier shapes match. Large-corpus duplicate detection also prefilters files with no repeated `minTokens` shingle before suffix-array analysis, and the real-world benchmark watchdog now allows the expanded Next.js combined-analysis surface to complete on CI while streaming progress, preserving diagnostics through a script-local timeout, and avoiding unused full-report serialization.
+
+- **`plow dupes --format compact` now emits traceable clone lines.** Duplication compact output uses the `code-duplication` issue tag and includes the stable `dup:<id>` fingerprint plus group, token, line, and instance metadata on each clone instance line, so agents can jump straight to `plow dupes --trace dup:<id>` without scraping human output.
+
+- **`audit --gate new-only` no longer reports pre-existing clones as introduced when edits only shift line numbers.** Editing a large file in a way that moved an unchanged duplicate block to different line numbers could make the audit gate attribute that inherited clone as newly introduced and fail the gate. Clone attribution now matches inherited clones by their content fingerprint independent of line position, so a line-shift alone keeps the clone inherited. A regression test covers the shifted-duplicate case across platforms. Thanks [@dotmaster](https://github.com/dotmaster) for the report. (Closes [#1340](https://github.com/fglogan/genesis-plow/issues/1340).)
+
+### Documentation
+
+- **MCP server setup now covers project devDependency installs.** The MCP config snippets previously assumed `plow-mcp` was on your `PATH` (a global install). When plow is installed as a project devDependency, the binary lives in `node_modules/.bin/` and the server fails to start with `ENOENT`. The MCP integration guide, quickstart, and npm README now show the package-manager runner variants (`npx` / `pnpm exec` / `yarn` / `bunx`) alongside the global form. Thanks [@wouterkroes](https://github.com/wouterkroes) for flagging it. (Closes [#1343](https://github.com/fglogan/genesis-plow/issues/1343).)
+
+- **Refreshed the duplicate-detection benchmark comparison numbers.** The README and comparison docs benchmark figures were re-measured against current upstream releases so the published comparison reflects today's numbers. Thanks [@kucherenko](https://github.com/kucherenko) for flagging the staleness. (Closes [#1316](https://github.com/fglogan/genesis-plow/issues/1316).)
+
+## [2.99.0] - 2026-06-18
+
+### Added
+
+- **A new opt-in `require-suppression-reason` rule lets teams require a documented reason on every suppression.** Suppression comments and `@expected-unused` JSDoc tags can now carry a trailing `-- <reason>`, for example `// plow-ignore-next-line unused-export -- public compatibility export` or `// plow-ignore-file -- generated route map`. The reason text is parsed, cached, and carried through to stale-suppression reporting. With the rule enabled (set `rules.require-suppression-reason` to `warn` or `error`; the default is `off`, so existing suppressions are unaffected), a suppression that has no reason surfaces as a `missing-suppression-reason` finding so the team can backfill it. Reported across human, JSON, SARIF, CodeClimate, audit, and baseline output plus the LSP and editors. Thanks [@codingthat](https://github.com/codingthat) for the request. (Closes [#1302](https://github.com/fglogan/genesis-plow/issues/1302).)
+
+### Fixed
+
+- **Nested same-file schema values no longer report as unused when a reachable exported value depends on them.** Effect Schema projects commonly pair `export const Foo = Schema...` with `export type Foo = Schema.Schema.Type<typeof Foo>`, then compose that value into another exported schema through `Schema.Array(Foo)`. Plow now walks reachable same-file exported value initializers so the child schema value is credited through the parent schema, while unrelated unused sibling schemas still report. Thanks [@danielo515](https://github.com/danielo515) for the report. (Closes [#1304](https://github.com/fglogan/genesis-plow/issues/1304).)
+
+- **The VS Code / VS Codium extension no longer shows inflated totals on startup.** On a cold editor start the extension could consume the LSP's first workspace analysis before any document had opened, rendering a stale, too-high issue count until the next edit. Startup analysis now waits for the first opened document, and a save-triggered analysis queues behind an in-flight startup run instead of being dropped. Thanks [@codingthat](https://github.com/codingthat) for the report. (Closes [#1303](https://github.com/fglogan/genesis-plow/issues/1303).)
+
+- **Catalog rules now read Bun catalogs from root `package.json`.** Bun workspaces that declare catalog entries under `workspaces.catalog` / `workspaces.catalogs` (or Bun's accepted top-level `catalog` / `catalogs` form) now get the same `unresolved-catalog-references`, `unused-catalog-entries`, and `empty-catalog-groups` coverage as pnpm workspaces with `pnpm-workspace.yaml`. Plow still prefers `pnpm-workspace.yaml` when it exists, preserving existing pnpm behavior. Thanks [@codingthat](https://github.com/codingthat) for the report. (Closes [#1301](https://github.com/fglogan/genesis-plow/issues/1301).)
+
+## [2.98.0] - 2026-06-17
+
+### Added
+
+- **Framework dead-code findings now lead with manual fix actions.** `unused-server-action`, `unprovided-inject`, `unused-load-data-key`, `unrendered-component`, `unused-component-prop`, `unused-component-emit`, and `unused-svelte-event` now put a domain-specific manual fix action first in JSON `actions[]` instead of leading with suppression only. The actions stay non-auto-fixable and preserve the existing suppress action as the second option, so agents get clearer next steps while public API and dynamic-wiring caveats stay explicit. Human and markdown health output also labels synthetic `<template>` rows as template-complexity entries and switches the section wording to "complexity findings" when template or component rollup rows are present. Machine-readable complexity formats keep the canonical `<template>` name for compatibility.
+
+- **The `misplaced-directive` and `mixed-client-server-barrel` rules now cover React Server Components frameworks beyond Next.js.** Both rules encode universal RSC semantics, a body-position `"use client"` / `"use server"` string is silently ignored by every RSC bundler (not just Next), and a barrel that re-exports both a client module and a server-only module drags directive context across the boundary in any RSC framework. They previously activated only when `next` was a declared dependency; they now activate for any RSC bundler: `next`, `waku`, `@lazarv/react-server`, `react-server-dom-webpack`, `react-server-dom-vite`, `react-server-dom-parcel`, or `@vitejs/plugin-rsc`. The two Next-specific rules stay Next-gated on purpose: `invalid-client-export` keys on Next route-segment config names (`getServerSideProps`, the route HTTP-method exports) and `unused-server-action` keys on Next Server Action registration. No config or output change.
+
+- **The `unused-server-action` rule now covers inline `"use server"` body directives.** It previously reclassified only unused exports of a whole `"use server"` file; an `export async function deleteUser() { "use server"; ... }` whose action is dead surfaced as a plain `unused-export`. Such a dead inline Server Action is now reclassified to `unused-server-action` for precise categorization. The extract layer records the export names of exported functions and `const` arrows whose body carries an inline `"use server"` directive, and the reclassifier moves an unused export whose name matches. It inherits every `unused-export` abstain (entry-point, public-API re-export, whole-object, reachable-reference), so a wired-up action (`action={fn}`, `<form action={fn}>`, import-and-call) is never flagged; the marginal surface over `unused-export` is just the inline directive gate. Stays Next-gated and `warn`-level, like the file-level case. Validated at zero false positives on real Next App Router projects (vercel ai-chatbot, commerce). Warm extraction caches refresh on upgrade.
+
+- **Vue and Svelte template control flow now counts toward complexity health.** `plow health --complexity` (and the complexity signal in the overall health score and hotspots) now includes a synthetic `<template>` entry per `.vue` / `.svelte` file, computed from the template's control flow and bound expressions, the same way it already does for Angular templates. Previously only an SFC's `<script>` functions were scored, so a component with heavy `v-if` / `v-for` (Vue) or `{#if}` / `{#each}` / `{#await}` (Svelte) branching, deeply nested logic, or complex bound expressions and `{{ }}` / `{ }` interpolations read as artificially simple. The template scan masks the `<script>` and `<style>` blocks, so script complexity is never double-counted, and nesting depth follows the template's tag/block structure so nested branches weigh more, matching the cyclomatic/cognitive model used everywhere else. This reuses the existing `maxCyclomatic` / `maxCognitive` thresholds and the `complexity` suppression token; there is no new rule, finding type, or flag. Warm extraction caches refresh on upgrade to pick up the new entry.
+
+- **The `unrendered-component` rule now covers Angular.** Previously Vue/Svelte only, it now also flags an Angular `@Component` whose element selector is used in no template anywhere in the project and that is not routed, bootstrapped, or dynamically rendered. This is the project-wide direction `@angular-eslint` does not cover (its `NG8113` is single-component only). It harvests each component's `selector`, the element-selector tags used across every inline and external (`templateUrl`) template, route `component:` / `loadComponent` references, and `bootstrap` references, then flags a component whose selector is rendered nowhere. It stays false-positive-safe by abstaining when the component is rendered via its tag, routed (including the bare `loadComponent: () => import('./x')` default-export lazy form and `loadChildren`, credited because the lazy target's default export is referenced), bootstrapped, public-API exported, or when the project uses any dynamic component-render API (`ViewContainerRef.createComponent` / `*ngComponentOutlet`), which abstains project-wide. Attribute and class selectors and `@Directive` classes are out of the first cut (element-selector components only). Reuses the existing `unrendered-component` rule and all its surfaces; no new rule or flag. Validated at zero false positives on the angular-realworld example app.
+
+- **`plow` now flags Svelte component events that are dispatched but listened to nowhere.** A new `unused-svelte-event` rule (default severity `warn`) reports a Svelte component that fires a custom event through a `createEventDispatcher` binding (`const dispatch = createEventDispatcher(); dispatch('save')`) whose event name is listened to by no component in the project: no `<Child on:save>` (or event-forwarding `on:save`) on any rendered instance. This is the cross-file dead-output direction that no Svelte tool covers: the compiler and `svelte-check` are single-file or type-only, and `eslint-plugin-svelte` has no project-wide listener check. It reuses plow's whole-project graph the same way `unprovided-inject` does: a project-wide set of listened event names (every `on:<name>` on a component tag, with event forwarding counting as a listen) is built first, then a dispatched event absent from it is flagged. It stays false-positive-safe by over-crediting toward "listened" (a listener on any component credits the name) and by abstaining on the whole component when it cannot see the event name: a dynamic `dispatch(<expr>)` or a `dispatch` reference passed elsewhere as a value. `on:click` and other listeners on lowercase DOM elements are native DOM events, not component events, and are ignored. The rule activates only when `svelte` is a declared dependency, and reports in human, JSON, SARIF, CodeClimate, compact, and markdown output plus the LSP and MCP. There is no auto-fix (wire a listener or remove the dispatch, a human decision); suppress with `// plow-ignore-next-line unused-svelte-event` or set the rule to `off`. Validated at zero false positives on the Budibase monorepo (215 `createEventDispatcher` components). The Svelte 5 callback-prop direction (a callback prop the parent never passes) is caller-side and not yet covered.
+
+- **`unused-component-prop` and `unused-component-emit` now cover the Vue Options API.** The two rules previously only inspected `<script setup>` components; they now also harvest `props:` and `emits:` (array and object forms) from `export default { ... }` and `defineComponent({ ... })` in a non-setup `<script>` block, so a declared Options-API prop read nowhere in its own component, or a declared emit fired nowhere, is flagged the same way. Usage is credited from `this.<prop>` reads and template references for props, and from `this.$emit('<name>')` calls and template `$emit` for emits. It stays false-positive-safe by abstaining on the whole component when a member could be read or fired invisibly to the per-component scan: a `mixins:` or `extends:` option (a mixin or base can read a prop or fire an emit), a dynamic `this[expr]` access, a `props`/`emits` value that is an identifier, a spread, or a `defineComponent<Type>()` type generic, and a `setup(props, { emit })` method (its `props` param and context `emit` are consumed opaquely). Reported through the same surfaces as the `<script setup>` rules; no new rule or flag. `.vue` files only (a `defineComponent` in a plain `.ts` file is not yet in scope).
+
+- **`plow` now flags Angular component inputs that are read nowhere in their component.** A new `unused-component-input` rule (default severity `warn`) reports an Angular `@Input()`, signal `input()` / `input.required()`, or `model()` declared on a component (or directive) class that is read by no code in its own component: not in the inline or external `templateUrl` template, and not anywhere in the class body. This is the in-component dead-input direction that no tool in the Angular ecosystem covers: there is no `@angular-eslint` rule for it, and the Angular compiler never flags a declared-but-unread `@Input` (it only checks caller-side binding correctness). A declared input consumed only by a parent binding but never read in its own component IS flagged, because binding it does nothing in-component (it is wired to a dead end). Input names are harvested onto the extraction IR from the decorator form (`@Input() foo`, `@Input({ required: true }) bar`), the signal form (`input()`, `input.required()`), and `model()`; usage is credited from every angle so only a genuinely-unread input is flagged: a template reference (inline or external template, the latter through the side-effect edge to the `.html`), any `this.<member>` read in the class body, a member-by-name access (which covers the `ngOnChanges` `changes['foo']` pattern), and the `inputs: [...]` / `host: {...}` decorator-metadata forms (already credited at extraction). It stays false-positive-safe by abstaining on the whole component when it cannot see all reads: any `extends` heritage clause (a base class in another file may read the member), a `{ ...this }` spread, and JS-reserved-word names; accessor inputs (`@Input() set foo(v)` / getters) are skipped per-input since a setter body runs on binding, and an observable-stream output shape is left to the output rule. The rule activates only when `@angular/core` is a declared dependency, and reports in human, JSON, SARIF, CodeClimate, compact, and markdown output plus the LSP and MCP. There is no auto-fix (wire the input to a real read or remove it, a human decision); suppress with `// plow-ignore-next-line unused-component-input` or set the rule to `off`. Validated at zero false positives on the angular/components monorepo.
+
+- **`plow` now flags Angular component outputs that are emitted nowhere in their component.** A new `unused-component-output` rule (default severity `warn`) reports an Angular `@Output()` or signal `output()` declared on a component (or directive) class that is `.emit()`-ed by no code in its own component. This is the output-side sibling of `unused-component-input` and the in-component dead-output direction that no Angular tooling covers: there is no `@angular-eslint` rule for a never-emitted output, and the compiler only checks caller-side listener correctness. Output names are harvested onto the extraction IR from the decorator form (only `@Output() bar = new EventEmitter()`-style initializers are harvested; an observable-stream `@Output` is treated as an abstain shape) and the signal `output()` form; usage is credited from a `this.<out>.emit(...)` call site, a template `(event)="x.emit()"` handler, and any forwarded `this.<out>` value read (passed to a function that may emit it), so over-crediting can only suppress a finding, never create one. It abstains on the whole component for any `extends` heritage clause and for `{ ...this }` spreads; `model()` outputs are excluded entirely from the output side, since their implicit `update:` emit is framework-driven. The rule activates only when `@angular/core` is a declared dependency, and reports in human, JSON, SARIF, CodeClimate, compact, and markdown output plus the LSP and MCP. There is no auto-fix (emit the output or remove it, a human decision); suppress with `// plow-ignore-next-line unused-component-output` or set the rule to `off`. Validated at zero false positives on the angular/components monorepo.
+
+- **The `unprovided-inject` rule now covers Angular.** Previously Vue/Svelte only, it now also flags an Angular `InjectionToken` injected through `inject(TOKEN)` or an `@Inject(TOKEN)` constructor parameter that is supplied by no provider anywhere in the project: no `{ provide: TOKEN, useClass | useValue | useFactory | useExisting }` recipe in any `providers` array, and no self-providing `new InjectionToken(..., { factory })` / `{ providedIn }`. At runtime such an inject throws `NullInjectorError`, which no static tool in the Angular ecosystem catches (there is no `@angular-eslint` rule, and the compiler does not flag it for non-root tokens). It scopes to user `InjectionToken` symbols only: a class token (`inject(MyService)`) is out of scope because it self-provides via `providedIn: 'root'` and third-party `provideX()` providers, which would make it false-positive-prone. It stays false-positive-safe by abstaining on an `inject(TOKEN, { optional: true })` / `@Optional()` inject (designed to be unprovided), a token imported from an npm package (the provider may live in the package), a token that is public API of this package (a consumer provides it), and project-wide whenever the provider graph becomes opaque: any `importProvidersFrom(...)`, `makeEnvironmentProviders(...)`, a `...spread` in a `providers` array, or a computed `provide:` key. The rule activates only when `@angular/core` is a declared dependency, reuses the existing `unprovided-inject` rule and all its surfaces (human, JSON, SARIF, CodeClimate, compact, markdown, LSP, MCP), and has no auto-fix (provide the token or remove the inject, a human decision); suppress with `// plow-ignore-next-line unprovided-inject` or set the rule to `off`. Tokens of any type-argument shape are covered, including a primitive-typed (`new InjectionToken<string>('FLAG')`) or untyped (`new InjectionToken('FLAG')`) token; a bare string-literal inject key and the provided-never-injected direction are not yet covered. Validated at zero false positives on the angular/components monorepo.
+
+### Fixed
+
+- **Pinia store members consumed through inline `storeToRefs(useStore())` calls are now credited.** `unused-store-member` now treats `storeToRefs(usePermissionsStore())` and `toRefs(usePermissionsStore())` object destructures the same way as the existing store-local form, including aliased destructures such as `const { canCreateEvents: canCreate } = storeToRefs(usePermissionsStore())`. The credit stays limited to bare store-factory identifiers or tracked store locals, so unrelated helper calls are not treated as store consumption. Thanks [@Smrtnyk](https://github.com/Smrtnyk) for the report. (Closes [#1282](https://github.com/fglogan/genesis-plow/issues/1282).)
+
+- **`unused-class-members` no longer misses Playwright fixture methods reached through branch-selected aliases.** Plow now credits fixture object aliases selected by ternaries, `if/else`, and `switch` branches inside Playwright test callbacks, and same-file local fixture tests passed into `mergeTests(...)` now feed the merged wrapper. The alias tracking is Playwright-only, order-sensitive, and conservative on shadowing or unknown reassignment, so genuinely unused page-object methods still report. Thanks [@vethman](https://github.com/vethman) for the report. (Closes [#1270](https://github.com/fglogan/genesis-plow/issues/1270).)
+
+- **React JSX depth is now descriptive context, not cognitive complexity.** Deeply nested presentational React and Preact components, such as skeleton tables or layout wrappers with no control flow, no longer surface as high cognitive complexity solely because their JSX tree is deep. Plow still records `react_jsx_max_depth` for hotspot context, while hook density and wide prop interfaces continue to contribute to cognitive complexity through `hook-density` and `prop-count`. The public `jsx-depth` contribution kind remains in the schema for compatibility, but current extraction no longer emits it for layout depth. Thanks [@pavle99](https://github.com/pavle99) for the report. (Closes [#1281](https://github.com/fglogan/genesis-plow/issues/1281).)
+
+- **Svelte 5's bare `<script module>` is now recognized as module context.** Plow previously recognized only the Svelte 4 `<script context="module">` form, so a Svelte 5 bare `<script module>` block was treated as the instance script and its imports were wrongly credited as template-visible, which could mask a genuinely unused import or export in a Svelte 5 component. The bare `module` attribute is now matched (with the same standalone-attribute anchoring as the `setup` attribute, so a `lang` or `generics` attribute containing the substring "module" cannot false-match), and its declarations are scoped as module context like the Svelte 4 form. The extraction cache version is bumped so warm caches refresh on upgrade.
+
+## [2.97.0] - 2026-06-16
+
+### Added
+
+- **`plow health --css` now flags unused Tailwind v4 `@theme` design tokens.** A Tailwind v4 `@theme` token (`--color-brand`, `--radius-card`) defines a design token that generates a utility (`bg-brand`, `rounded-card`); a token whose utility, `var()` reads, and `@apply` uses appear nowhere is a dead design token, the `unused-export` of the token era, which single-surface tools (the Tailwind compiler, eslint-plugin-tailwindcss) do not catch. The check credits usage from every angle (a `*-<name>` utility in markup, a `clsx` / CSS-in-JS string, an `@apply` body, an arbitrary `[--ns-name]` value, or a `var()` read including one `@theme` token backing another) and is false-negative-leaning by design, so a live token is never flagged. The non-CSS-source search is namespace-qualified (it matches a real `-<name>` utility suffix, never a bare dictionary word), so a token named `brand` or `card` is not credited just because the word appears in a `.tsx` file. To stay near-zero-false-positive (validated across the Next.js bundle-analyzer, the `next-saas-starter`, the Tailwind docs site, and shadcn/ui, where it surfaces genuinely-dead shadcn `chart-*` / `sidebar-*` tokens at zero false positives), it is heavily gated: it emits only on a Tailwind v4 project (a `tailwindcss` dependency plus at least one `@theme` block), abstains entirely on a Tailwind plugin project (`@plugin` or a config `plugins[]`, whose tokens a plugin can consume invisibly), abstains on a published-library stylesheet (a `@theme` exported as a package surface is a public token API consumed downstream), and abstains on a partial-scope run. The `--breakpoint-*` / `--container-*` variant namespaces and the `--<token>--<property>` modifier form are excluded from candidacy. These are candidates, never gated findings, each with a read-only, namespace-qualified verify command. Reported in human, markdown, and JSON (`css_analytics.unused_theme_tokens`).
+
+- **`plow health --css` now flags unused `@font-face` web fonts.** A font family declared by an `@font-face` rule (so its font files are downloaded) but applied by no `font-family` anywhere surfaces as a cleanup candidate, located at the declaring stylesheet. A dead web font is real shipped weight that no per-rule linter catches. To stay near-zero-false-positive (validated against Bootstrap, Excalidraw, reveal.js, Svelte, where it now reports zero false positives), a family is only flagged if its name appears in no CSS `font-family` AND in no other source either: a font applied from JavaScript or a canvas `fontFamily` assignment, or referenced from a `.scss`/`.sass` theme the parser does not expand, is correctly left alone. Font-family names are matched case-insensitively, per the CSS spec. These are candidates, never gated findings (the family could be set from an inline style or JS), each with a read-only verify command. Reported in human, markdown, and JSON (`css_analytics.unused_font_faces`).
+
+- **`plow health --css` now flags a `font-size` scale authored in mixed length units.** When a project's `font-size` values are split across several units (for example `px` and `rem`), the new `font_size_unit_mix` candidate reports the per-unit breakdown, because mixing fixed `px` with root-relative `rem` for type works against user-zoom accessibility. It is advisory and conservatively floored: it stays silent on a consistent scale and on small stylesheets, and only fires once the project plainly has a type scale spread across two or more units, so a single outlier is not flagged. The candidate names the dominant unit to standardize on, framed as "unless this is an intentional migration". Color-notation mixing (hex vs rgb vs hsl) is deliberately not surfaced: the CSS parser canonicalizes every legacy sRGB notation to hex before plow sees the value, so the authored distinction is already gone. Reported in human, markdown, and JSON (`css_analytics.font_size_unit_mix`).
+
+- **`plow health --css` now flags global CSS classes referenced by no in-project markup.** A class defined in a plain `.css`/`.scss` rule whose literal name appears in no `class`/`className` across the project (the CSS analogue of an unused export) surfaces as a cleanup candidate, located at its definition. Dead-CSS detection is notoriously false-positive-prone, so this is heavily gated (validated against Bootstrap, Svelte, Excalidraw, and other real projects, where it produces zero false positives): a class counts as referenced if it is a whole static `class` token OR a substring of any dynamic class expression (so a class assembled from a `${...}` or `clsx(...)` fragment is never flagged); a stylesheet abstains entirely if it is a published package entry (`package.json` `style`/`main`/`sass`/`exports`) or none of its classes are used in-project (a design-system surface consumed elsewhere); and the whole check abstains on preprocessor-dominant projects and on partial-scope runs (`--changed-since`/`--workspace`), where a class cannot be proven dead. These are candidates, never gated findings: the class may be applied from an HTML email, server template, CMS, or Markdown the parser never scans, so each carries that disclosure plus a read-only verify command. Reported in human, markdown, and JSON (`css_analytics.unreferenced_css_classes`).
+
+- **`plow health --css` now flags likely CSS class-name typos in markup.** A static `class` / `className` token in JSX/TSX, HTML, or a Vue/Svelte/Astro template that matches no CSS class defined anywhere in the project, but is one edit away from a class that IS defined (`className="card-tite"` where `.card-title` exists), surfaces as a candidate with the suggested class. This is the CSS analogue of an unresolved import, applied across the CSS-to-markup boundary that single-file linters and CSS-analytics tools cannot see. The near-miss restriction plus several false-positive guards (validated against Bootstrap, Svelte, Excalidraw, and other real projects) keep it near-zero-false-positive: Tailwind utility classes and unrelated tokens are not one edit from an authored class; numeric-scale families (`col-lg-6` vs `col-lg-4`) and singular/plural pairs (`button` vs `buttons`) are excluded because a one-digit or trailing-`s` difference is a deliberate variation, not a typo; and the check abstains entirely on preprocessor-dominant projects (`.scss`/`.sass`/`.less` outnumbering plain CSS), where generated classes are invisible to the parser and would otherwise look unresolved. CSS Module classes are out of scope (already covered by unused-export detection). These are candidates, never gated findings, and only appear under `--css`: a token could still be defined in CSS-in-JS or an external stylesheet the parser never sees, so each carries a read-only verify command. Reported in human, markdown, and JSON (`css_analytics.unresolved_class_references`).
+
+- **`plow` now flags SvelteKit `load()` return-object keys that no consumer reads.** A new `unused-load-data-key` rule (default severity `warn`) reports a key returned from a route `load()` (in `+page.ts` / `+page.server.ts` and the `.js` variants) that is read by no code: not the sibling `+page.svelte`'s `data.<key>`, and not any project-wide `page.data.<key>` (Svelte 5 `$app/state`) or `$page.data.<key>` (Svelte 4 `$app/stores`). A dead returned key still runs its real server-side fetch / DB cost on every request for data nothing renders, and no other static tool catches it: `svelte-check` types `data` through the generated `$types` but never flags an unread returned key (the unused-input direction). It stays false-positive-safe by abstaining whenever it cannot see all consumption: an unharvestable `load` body (a spread return, a non-literal or multi-branch return, a computed key, a wrapped / re-exported `load`), a sibling component that passes the whole `data` object opaquely (`data={data}`, `{...data}`, `fn(data)`, `const x = data`), a `+page.server.ts` whose universal `+page.ts` sibling reads or forwards its `data` param, and any project-wide reflective whole-object read of the page-data store (`Object.values(page.data)`), which abstains every route. The rule activates only when `@sveltejs/kit` is a declared dependency, and reports in human, JSON, SARIF, CodeClimate, compact, and markdown output plus the LSP and MCP. There is no auto-fix (a load fetch can have side effects, so removing a key is a human decision); suppress with `// plow-ignore-next-line unused-load-data-key` or set the rule to `off`. Layout loads (`+layout.{ts,server.ts}`) are not covered yet.
 
 - **`plow` now flags Next.js Server Actions that no code in the project calls.** A new `unused-server-action` rule (default severity `warn`) reports an exported function in a Next.js `"use server"` file that is referenced by no consumer anywhere: no import-and-call, no `action={fn}` binding, and no `<form action={fn}>`. This is the cross-graph "exported but wired to nothing" direction that eslint-plugin-next cannot see (it is single-file), and it is exactly where dead server actions accumulate as a page is refactored. It reuses plow's whole-project reference graph: the `action={fn}` and `<form action={fn}>` bindings, plain import-and-call, and component-prop forwarding are all credited as real uses, and wrapped action factories (`authenticatedActionClient.action(...)`, `withAuditLogging(...)`) are credited by the wrapped const's references, so only a genuinely orphaned action is flagged. The finding is a more specific re-classification of `unused-export` for `"use server"` files (the endpoint is not "unreachable", Next still registers its action id, but no project code calls it, so it is a strong delete candidate and a smaller surface area). The rule activates only when `next` is a declared dependency, and reports in human, JSON, SARIF, CodeClimate, compact, and markdown output plus the LSP and MCP. There is no auto-fix (wire the action to a consumer or delete it, a human decision); suppress with `// plow-ignore-next-line unused-server-action` or set the rule to `off`. Inline `"use server"` body directives (`export async function f() { "use server" }` in a non-`"use server"` file) are not covered yet; such dead actions still surface as `unused-export`. **Upgrade note for strict CI gates:** when this rule is active, a dead server action that previously failed CI as an `unused-export` (default `error`) now reports as `unused-server-action` (default `warn`), so the exit code for that finding relaxes from non-zero to zero. If you gate CI on dead server actions, set `unused-server-action` to `error` in your config to keep failing on them, and re-save any `--save-baseline` snapshot once (the finding moves between baseline categories on the first run after upgrade).
 
@@ -31,7 +815,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`plow` now flags a `"use client"` / `"use server"` directive placed below an import (Next.js).** A new `misplaced-directive` rule (default severity `warn`) reports a directive string written as an expression statement after an import (or any other statement) instead of in the file's leading prologue. The parser only honors a directive in the leading position, so a misplaced one is silently ignored and the file is treated as a server module, a quiet footgun. The fix is to move the directive above every import. It runs only when `next` is a declared dependency, and reports in human, JSON, SARIF, CodeClimate, compact, and markdown output plus the LSP. There is no auto-fix; suppress with `// plow-ignore-next-line misplaced-directive` or set the rule to `off`.
 
-- **`plow` now flags Next.js App Router route collisions and dynamic-segment name conflicts.** Two new rules catch App Router routing errors statically, in your editor and CI, with no build. `route-collision` (default severity `error`) reports two or more route files (`page` or `route` handler) that resolve to the same URL within one app-root: route groups `(name)` and parallel slots `@name` do not change the URL, so `app/(marketing)/about/page.tsx` and `app/(shop)/about/page.tsx` both own `/about`, which `next build` rejects ("You cannot have two parallel pages that resolve to the same path"; a `page.tsx` and a `route.ts` in the same segment collide the same way). plow surfaces every colliding file at once, where the build error names only one. `dynamic-segment-name-conflict` (default severity `warn`) reports sibling dynamic segments at one position using different slug names (`[id]` vs `[slug]`, or `[...x]` vs `[[...x]]`). Next.js throws "You cannot use different slug names for the same dynamic path" at dev / production runtime, but `next build` does NOT catch it, so CI passes while the route crashes the first time it is hit; plow's static catch closes that gap. Both run only when `next` is a declared dependency and report in human, JSON, SARIF, CodeClimate, compact, and markdown output plus the LSP and CI summaries. Collision buckets are scoped per app-root using your workspace package roots, so a monorepo with several independent Next apps that happen to share a path is not flagged; files under a private `_folder` or an intercepting marker `(.)`/`(..)`/`(...)` are excluded. The primary suggested action is to move or merge a file (a build error is not something to suppress); `// plow-ignore-file route-collision` / `dynamic-segment-name-conflict` remain as escape hatches. The two default severities differ by design: `route-collision` is already a `next build` failure, so erroring aligns plow's exit code with the build it mirrors (a project hitting it was already red); `dynamic-segment-name-conflict` is a runtime crash the build does NOT catch, so it ships at `warn` and is intended to graduate to `error` in a later release once it has proven false-positive-free in the field.
+- **`plow` now flags Next.js App Router route collisions and dynamic-segment name conflicts.** Two new rules catch App Router routing errors statically, in your editor and CI, with no build. `route-collision` (default severity `error`) reports two or more route files (`page` or `route` handler) that resolve to the same URL within one app-root: route groups `(name)` and parallel slots `@name` do not change the URL, so `app/(marketing)/about/page.tsx` and `app/(shop)/about/page.tsx` both own `/about`, which `next build` rejects ("You cannot have two parallel pages that resolve to the same path"; a `page.tsx` and a `route.ts` in the same segment collide the same way). plow surfaces every colliding file at once, where the build error names only one. `dynamic-segment-name-conflict` (default severity `error`) reports sibling dynamic segments at one position using different slug names (`[id]` vs `[slug]`, or `[...x]` vs `[[...x]]`). Next.js throws "You cannot use different slug names for the same dynamic path" at dev / production runtime, but `next build` does NOT catch it, so CI passes while the route crashes the first time it is hit; plow's static catch closes that gap. Both run only when `next` is a declared dependency and report in human, JSON, SARIF, CodeClimate, compact, and markdown output plus the LSP and CI summaries. Collision buckets are scoped per app-root using your workspace package roots, so a monorepo with several independent Next apps that happen to share a path is not flagged; files under a private `_folder` or an intercepting marker `(.)`/`(..)`/`(...)` are excluded. The primary suggested action is to move or merge a file (a build error is not something to suppress); `// plow-ignore-file route-collision` / `dynamic-segment-name-conflict` remain as escape hatches. Both default to `error` but for two distinct reasons: `route-collision` is already a `next build` failure (a project hitting it was red before plow ran), while `dynamic-segment-name-conflict` is a deterministic runtime crash on first request that `next build` lets through, so plow is the only gate that fails on it. The detector is pure path arithmetic on the same primitive as `route-collision` (no AST, no heuristic to misfire), and the false-positive surface (route groups, parallel slots, per-app-root monorepo scoping) is exercised false-positive-free across a 22-project real-world corpus. Note one upgrade case: a monorepo whose `next` dependency lives only in a bundled demo / example app arms both rules at `error` there, so a deliberately-divergent example route now fails CI; suppress it with `// plow-ignore-file dynamic-segment-name-conflict` or set the rule to `warn` / `off`.
 
 - **Route-internal unused exports in Next.js app-router files are reported where other tools suppress them.** A stray helper export or a typo'd `metadata` (for example `meatdata`) inside `app/page.tsx` / `layout.tsx` surfaces as an unused export, because plow credits a precise per-route-file export allowlist rather than treating the whole route file as an opaque entry point. Valid framework exports (`metadata`, `default`, segment config) stay credited.
 
@@ -41,7 +825,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Reclaim stale `plow impact` stores with `PLOW_IMPACT_STORE_MAX_AGE_DAYS`.** Set it to a number of days and a recorded run prunes per-project histories that have not been touched in that long (for example, stores left behind by repos you have since deleted). Unset (the default) keeps every store forever; the project you are currently recording is never reclaimed.
 
+- **`plow health --css` reports structural CSS analytics.** A new opt-in section surfaces the codebase-scale CSS slop that per-rule linters do not aggregate: specificity hotspots (id selectors, deep compound selectors), `!important` density, over-complex selectors, deep nesting, empty rules, design-token sprawl (the count of distinct color, `font-size`, `z-index`, `box-shadow`, `border-radius`, and `line-height` values across the whole codebase, so an uncontrolled palette or scale stands out), cleanup candidates for custom properties (`--x`) and `@keyframes` that are defined but never referenced in any stylesheet, and dead Vue `<style scoped>` classes (a scoped class used nowhere else in its component) (all reported conservatively as candidates, since a token can still be used from JavaScript or inline HTML). It also flags the inverse, references that resolve to nothing: an `animation` / `animation-name` whose `@keyframes` is defined in no stylesheet anywhere (a likely typo or a removed animation, listed by name and file with a verify step), plus a count of `var()` references with no CSS definition (kept a count rather than located, because these are dominated by JavaScript-set design tokens). It also flags duplicate declaration blocks: rules across the project whose declaration set (4 or more declarations, compared order-insensitively and `!important`-aware) is identical are grouped as copy-paste consolidation candidates, listed by location with an estimated number of declarations you could remove. On Tailwind projects it surfaces arbitrary-value bypasses: utilities like `w-[13px]` or `text-[11px]` that hardcode a one-off value in markup instead of a configured scale token, aggregated by token with a use count and first location (the scan runs only when the project declares a `tailwindcss` dependency). It also flags unused CSS at-rule entities: an `@property` registered but never read via `var()`, and an `@layer` declared but never populated, both listed by name and file as cleanup candidates. Unreferenced `@keyframes` and dead scoped classes are listed by name and file, each carrying a read-only verification step so the candidate can be confirmed before removal; Vue/Svelte SFC `<style>` blocks are analyzed alongside `.css` files. Each notable rule carries a location, and a project summary reports stylesheet, rule, declaration, `!important`, empty-rule, max-nesting, value-sprawl, unreferenced-token, and scoped-unused-class totals. Present in JSON, the human report, and a `## CSS Health` markdown summary; opt-in because it reads and parses every project stylesheet. Standard CSS only (SCSS is skipped). (Refs [#550](https://github.com/fglogan/genesis-plow/issues/550).)
+
+### Changed
+
+- **CSS Module class extraction now uses a real CSS parser.** Standard `.module.css` class names are read from a parsed CSS syntax tree instead of a stack of regular expressions, removing a class of edge-case bugs around cascade layers, `@scope`, and CSS Modules `:global()` / `:local()` selectors. Output is unchanged on existing projects; warm caches re-parse CSS Module files once after upgrading. (Refs [#550](https://github.com/fglogan/genesis-plow/issues/550).)
+
 ### Fixed
+
+- **The analysis findings added this cycle now surface correctly in CI summaries, the VS Code sidebar, and editor severity.** The new IssueKinds (unused server actions, the Vue component-prop / -emit rules, unrendered components, unprovided injects, unused store members, the Next.js RSC checks, and route collisions / dynamic-segment name conflicts) were complete in the Rust output but under-wired in three secondary surfaces. They now appear in the GitHub Action and GitLab CI pull-request / merge-request summaries, annotations, and combined / audit breakdowns; they are counted, shown, and filterable in the VS Code Issues sidebar (previously the editor squiggles appeared but the tree and badge ignored them); and `route-collision` and `dynamic-segment-name-conflict` diagnostics now render at error severity in the editor to match their CLI default (they were shown as warnings). Drift gates across every CI summary and annotation surface, the VS Code sidebar registries, and the LSP severity map now fail the moment a future dead-code finding is missing from any of them (the CI gate derives its expected set from `plow schema`; the VS Code and LSP gates use compile-time exhaustiveness), so this class of gap cannot silently recur. The same pass also closed the remaining inconsistencies: a test-only dependency now gets a CI annotation and a correct `--changed-since` count, an empty pnpm catalog group is filterable in the editor, and the new SvelteKit `unused-load-data-key` finding surfaces across all of these instead of only the dead-code summary. A follow-up extended the same guards to the VS Code diagnostic-code catalog itself (so a future kind cannot be emitted as an editor squiggle yet stay missing from the sidebar count and filter), which immediately surfaced and fixed one more: rule-pack policy violations are now counted, rendered, and filterable in the editor sidebar.
+
+- **`plow dupes` now excludes re-export barrels and top-level static `require()` binding blocks when `ignoreImports` is enabled.** The default duplicate filter already removed ES import declarations; it now also strips `export ... from`, `export * from`, and top-level `const` / `let` / `var` declarations whose bindings are all static `require("...")` calls. Local exports, side-effect `require()` calls, nested `require()` calls, dynamic require arguments, and mixed declarations still count as code. Teams using `duplicates.threshold` gates or duplication baselines may see another measured percentage drop; set `"ignoreImports": false`, pass `--no-ignore-imports`, or pass `--dupes-no-ignore-imports` to keep module wiring counted. (Closes [#1225](https://github.com/fglogan/genesis-plow/issues/1225).)
+
+- **GitHub Action and GitLab combined-mode runs no longer fail on hidden duplicate stats.** When filtered duplication output has `dupes.clone_groups: []`, combined CI now gates and renders duplication from that actionable array instead of the raw stats counter, so a run with no visible clone groups stays clean instead of reporting duplicate issues with no annotations. Thanks @pavle99 for the report.
 
 - **Vue components rendered after a `<template #slot>` are no longer falsely reported as unused.** The Vue single-file-component template scanner matched the root `<template>` against the FIRST `</template>`, so in a component whose template contains a nested slot template (`<template #header>...</template>`) followed by more components, every component rendered after that nested slot was dropped from usage tracking. Its export could then surface as a false `unused-export` (and its import as unused) even though it is rendered. The scanner now locates the root `</template>` with nesting depth tracking, so all rendered components are credited. Byte-safe scanning also fixes a crash on templates containing multi-byte (for example CJK) text. This is common in real component libraries and design systems, where layout/shell components pass slots to children.
 
@@ -54,6 +850,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **More VS Code extension hardening across diagnostics, binary probing, and the sidebar.** A follow-up pass from the same extension audit: the binary version check now runs off the activation/restart thread, so a slow `--version` no longer stalls the editor; a corrupt stored "hidden findings" state recovers to nothing-hidden instead of disabling the extension for that workspace; toggling categories from the manage view applies in a single step (one refresh, not two); the final hide/show toggle is no longer dropped when a window closes mid-write; empty pnpm catalog groups now appear in the Issues tree (and are counted in the issue total) instead of being counted but unnavigable; an invalid `plow.duplication.mode` value falls back to the default instead of failing the whole analysis; and the tree and status views clean up correctly on reload so a late background result can no longer touch a disposed view.
 
 - **Next.js RSC findings carry a fix action and show up in the combined-mode CI summary.** The three RSC checks (invalid client exports, mixed client/server barrels, misplaced directives) now emit a structured fix action in JSON output (move the export to a server module, split the barrel, hoist the directive) next to the suppress action, so agents and CI integrations see the remediation, not just "ignore this". They also list by name in the GitHub Action and GitLab CI combined-mode "Code issues" breakdown table, where a combined run previously surfaced them only in the headline count. The `plow dead-code --explain` output now also prints a description for the misplaced-directive section.
+
+- **`plow coverage analyze --cloud` no longer fails to parse the runtime-context response.** When the caller-graph (blast-radius) or complexity / CODEOWNERS inputs are unavailable, the response now returns `null` for `caller_count`, `caller_count_weighted_by_traffic`, `cyclomatic`, and `owner_count` rather than a placeholder, and the client rejected those nulls, breaking the command outright. The client now tolerates `null`, absent, and legacy numeric values for those fields and renders them unchanged. (Closes [#1263](https://github.com/fglogan/genesis-plow/issues/1263).)
 
 ## [2.96.0] - 2026-06-13
 
@@ -68,6 +866,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Thanks [@danielo515](https://github.com/danielo515) for the report. (Closes [#1224](https://github.com/fglogan/genesis-plow/issues/1224).)
 
 - **Plow Impact history now lives in your user config dir, not in each repo.** Enabling Impact (or recording a run) no longer creates a `.plow/` directory or edits the repo's `.gitignore`; the per-project store moved to `<config-dir>/plow/impact/<key>.json` (the same base as `telemetry.json`: `~/Library/Application Support/plow/` on macOS, `$XDG_CONFIG_HOME/plow/` on Linux, `%APPDATA%\plow\` on Windows). The store is keyed by repo identity (`git rev-parse --git-common-dir`), so running `plow impact` from any subdirectory or any git worktree of a repo resolves to one shared history, and nothing is ever written into the working tree. Per-finding attribution baselines are namespaced per worktree internally, so concurrent worktrees of one repo no longer prune each other's baseline. An existing in-repo `.plow/impact.json` is imported once on first run (the old file is left untouched); a multi-package monorepo with several subdir stores imports whichever subdir runs first. After that one-time import the in-repo file is no longer read, so running an OLDER plow binary on the same repo after upgrading writes to the legacy file and does not feed the new user store (a transient mixed-version condition). Impact is now also explicitly forced off in CI (previously it was only off because a fresh CI checkout had no store file), so a user-global default cannot start recording on a CI runner.
+
+- **CSS Module class extraction now uses a real CSS parser.** Standard `.module.css` class names are read from a parsed CSS syntax tree instead of a stack of regular expressions, removing a class of edge-case bugs around cascade layers, `@scope`, and CSS Modules `:global()` / `:local()` selectors. Output is unchanged on existing projects; warm caches re-parse CSS Module files once after upgrading. (Refs [#550](https://github.com/fglogan/genesis-plow/issues/550).)
 
 ### Added
 
@@ -169,6 +969,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`plow security survivors` now makes incomplete verifier reviews visible.** Survivor output now reports `summary.unverdicted` and the human renderer prints an unreviewed-candidate line when the verdict file does not cover every candidate. CI can opt into `--require-verdict-for-each-candidate` to fail incomplete verdict files with a structured exit-2 error, `security survivors --help` now shows the verdict shape, and `security blind-spots --file` is accepted after the subcommand instead of being a help-text trap.
 - **VS Code tooltips now escape names taken from analyzed code.** The complexity hover interpolated function names into tooltip markdown unescaped, so a crafted function name in the analyzed project could spoof tooltip content. All extension tooltips now share one canonical pair of markdown escape helpers (an inline variant that normalizes whitespace and a multiline variant that preserves it), and normal names render unchanged in the editor.
 - **`plow security` now traces untrusted input through chained local bindings.** Source-backing follows up to three chained same-module local bindings (`const a = req.query.id; const b = \`x-${a}\`; execSync(\`run ${b}\`)`), so common injection shapes that route a request value through one or two intermediate variables are upgraded to arg-level confidence with the trace anchored at the original read instead of staying module-level. Chains stay conservative: only plain aliases and template / string-concat / object-literal initializers chain (call, conditional, and property-read initializers do not), and a flow past the chain limit degrades to module-level rather than claiming arg-level. Set `RUST_LOG=debug` to see when a chain is dropped for exceeding the limit. (Closes [#1146](https://github.com/fglogan/genesis-plow/issues/1146).)
 - **`plow audit` no longer diffs against a stale local default branch.** With no `--base`, audit auto-detected the comparison base by discovering the default branch via `origin/HEAD` but returning the bare name `main`, which git resolves to the local `refs/heads/main`. On long-lived worktree checkouts cut from `origin/main` whose local `main` is never updated, this diffed every branch against an ancient base, surfaced the whole already-merged delta as changed, and could fail the agent gate on a one-line change. Auto-detection now resolves the base to the `git merge-base` (fork point) against the branch's upstream or the remote default (`origin/HEAD`, then `origin/main`, then `origin/master`), mirroring the `plow hooks install --target git` pre-commit hook. The merge-base is also immune to an unfetched `origin/main` in the false-fail direction. Repositories with no `origin` remote still fall back to the local `main` / `master` branch, so offline checkouts are unaffected. A new `PLOW_AUDIT_BASE` environment variable pins the base without editing the generated agent gate script (for example `PLOW_AUDIT_BASE=upstream/main` on a fork), taking effect when no `--base` / `--changed-since` is passed. The human audit scope line now shows the resolved base with its provenance, for example `vs a1b2c3d4e5f6 (merge-base with origin/main)`. Thanks [@Zain-Bin-Arshad](https://github.com/Zain-Bin-Arshad) for the detailed report. (Closes [#1168](https://github.com/fglogan/genesis-plow/issues/1168).)
@@ -387,7 +1188,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`plow coverage upload-source-maps` now uploads each map's repo-relative path, so the source-evidence viewer can resolve monorepo sub-package source.** A bundled map under a sub-package (e.g. `dashboard/dist/assets/X.js.map`) lists its sources relative to the map file (`../../src/components/X.tsx`); the cloud previously had only the basename and collapsed that to `src/components/X.tsx`, which never matched the package-prefixed runtime path `dashboard/src/components/X.tsx`, so the viewer reported "source not in maps" even though the file was in an uploaded map. The CLI now sends the map's path relative to the repo root alongside the existing `fileName`, letting the cloud resolve each source against the map's directory and recover `dashboard/src/components/X.tsx`. The field is omitted when a map is not under the repo root (an absolute `--dir` outside it), in which case the cloud falls back to its previous behavior. Run `upload-source-maps` from the repo root so the prefix is correct. No change for single-package projects. (Closes [#260](https://github.com/fglogan/genesis-plow-cloud/issues/260).)
+- **`plow coverage upload-source-maps` now uploads each map's repo-relative path, so the source-evidence viewer can resolve monorepo sub-package source.** A bundled map under a sub-package (e.g. `dashboard/dist/assets/X.js.map`) lists its sources relative to the map file (`../../src/components/X.tsx`); the cloud previously had only the basename and collapsed that to `src/components/X.tsx`, which never matched the package-prefixed runtime path `dashboard/src/components/X.tsx`, so the viewer reported "source not in maps" even though the file was in an uploaded map. The CLI now sends the map's path relative to the repo root alongside the existing `fileName`, letting the cloud resolve each source against the map's directory and recover `dashboard/src/components/X.tsx`. The field is omitted when a map is not under the repo root (an absolute `--dir` outside it), in which case the cloud falls back to its previous behavior. Run `upload-source-maps` from the repo root so the prefix is correct. No change for single-package projects. (Closes [#260](https://github.com/plow-rs/plow-cloud/issues/260).)
 
 - **`plow flags` now surfaces the configuration surface when it finds nothing.** The empty-result line (`No feature flags detected`) is no longer byte-identical whether a project truly has no flags or just uses an SDK plow does not recognize. On full defaults, the human output now lists the built-in env-var prefixes and SDK providers it scanned for, then points at `flags.sdkPatterns`, `flags.configObjectHeuristics`, and the configuration docs, so you can tell a true negative from a missing detector and add your own SDK (PostHog, in-house, anything not listed). Projects that already configured custom `flags.*` patterns get a single terse line acknowledging their config instead of the discovery block. The enumerated detectors are derived from plow's built-in tables, so the hint stays in sync as defaults grow. JSON, SARIF, compact, markdown, and CodeClimate output are unchanged, and `--quiet` suppresses the hint. (Closes [#562](https://github.com/fglogan/genesis-plow/issues/562).)
 - **`plow impact` reports what plow has done for you, opt-in and local-only.** A new `plow impact` command shows how many issues plow is currently surfacing, the trend since the previous recorded run, and how many commits its pre-commit gate blocked then cleared. Enable it with `plow impact enable` (with `disable` and `status` siblings); once enabled, each `plow audit` run appends a small record to a single rolling `.plow/impact.json` (gitignored, never uploaded). The generated `plow init --hooks` pre-commit hook now tags gate runs so a blocked-then-fixed commit is recorded as contained. Writes are best-effort and never change a command's exit code or output. Human, `--format json`, and `--format markdown` output are available, and the JSON shape ships in the published output schema. `plow impact` now also credits per-finding **resolutions**: when a finding you previously saw goes away because you fixed the code, it counts as resolved, and when it goes away because you added a `plow-ignore`, it is reported separately as intentionally managed and never counted as a win. It distinguishes the two by capturing which suppressions are present each run, and it ignores findings that merely moved rather than being removed (within a file, or relocated to another file, including across separate commits). Resolution attribution covers dead code, complexity, and duplication, accrues from your local runs (it is a local-developer signal, not a CI metric, since it lives in `.plow/impact.json`), and adds `resolved_total`, `suppressed_total`, and a recent-resolutions list to all three output formats and the published schema.
@@ -1612,7 +2413,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`BINARY_SIGNING_VERIFY_KEY` rotated to match the key pair now deployed in the sidecar release pipeline.** The first two `fglogan/genesis-plow-cloud` sidecar release tags (`sidecar-v0.1.0`, `sidecar-v0.1.1`) failed in CI because the `ED25519_BINARY_SIGNING_PRIVATE_KEY` GitHub secret had been set with a malformed `gh secret set --body -` invocation that stored the literal `-` rather than reading the seed from stdin. Recovering the original seed was not possible (write-only secrets, local env scrubbed after write), so a fresh key pair was provisioned across Fly (staged), GitHub Actions secret (validated via `workflow_dispatch`), and GitHub Actions variable. This commit updates the compiled-in verify key so v2.40.1+ CLI binaries accept signatures produced by the new signing key. v2.40.0 remains safe -- no sidecar binaries were ever published under the broken configuration (`sidecar-v0.1.0` / `sidecar-v0.1.1` reached neither npm nor the GitHub release assets), so no user-visible regression to undo. First real signed sidecar will ship against v2.40.1 + `sidecar-v0.1.2`.
+- **`BINARY_SIGNING_VERIFY_KEY` rotated to match the key pair now deployed in the sidecar release pipeline.** The first two `plow-rs/plow-cloud` sidecar release tags (`sidecar-v0.1.0`, `sidecar-v0.1.1`) failed in CI because the `ED25519_BINARY_SIGNING_PRIVATE_KEY` GitHub secret had been set with a malformed `gh secret set --body -` invocation that stored the literal `-` rather than reading the seed from stdin. Recovering the original seed was not possible (write-only secrets, local env scrubbed after write), so a fresh key pair was provisioned across Fly (staged), GitHub Actions secret (validated via `workflow_dispatch`), and GitHub Actions variable. This commit updates the compiled-in verify key so v2.40.1+ CLI binaries accept signatures produced by the new signing key. v2.40.0 remains safe -- no sidecar binaries were ever published under the broken configuration (`sidecar-v0.1.0` / `sidecar-v0.1.1` reached neither npm nor the GitHub release assets), so no user-visible regression to undo. First real signed sidecar will ship against v2.40.1 + `sidecar-v0.1.2`.
 
 ## [2.40.0] - 2026-04-17
 
@@ -3067,7 +3868,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fglogan/genesis-plow/compare/v2.96.0...HEAD
+[Unreleased]: https://github.com/fglogan/genesis-plow/compare/v2.104.0...HEAD
+[2.104.0]: https://github.com/fglogan/genesis-plow/compare/v2.103.0...v2.104.0
+[2.103.0]: https://github.com/fglogan/genesis-plow/compare/v2.102.0...v2.103.0
+[2.102.0]: https://github.com/fglogan/genesis-plow/compare/v2.101.0...v2.102.0
+[2.101.0]: https://github.com/fglogan/genesis-plow/compare/v2.100.0...v2.101.0
+[2.100.0]: https://github.com/fglogan/genesis-plow/compare/v2.99.0...v2.100.0
+[2.99.0]: https://github.com/fglogan/genesis-plow/compare/v2.98.0...v2.99.0
+[2.98.0]: https://github.com/fglogan/genesis-plow/compare/v2.97.0...v2.98.0
+[2.97.0]: https://github.com/fglogan/genesis-plow/compare/v2.96.0...v2.97.0
 [2.96.0]: https://github.com/fglogan/genesis-plow/compare/v2.95.0...v2.96.0
 [2.95.0]: https://github.com/fglogan/genesis-plow/compare/v2.94.0...v2.95.0
 [2.94.0]: https://github.com/fglogan/genesis-plow/compare/v2.93.0...v2.94.0

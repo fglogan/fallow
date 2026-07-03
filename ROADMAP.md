@@ -1,8 +1,8 @@
 # Plow Roadmap
 
-> Last updated: 2026-06-13
+> This roadmap covers planned work and is reviewed periodically. For shipped capabilities, see the [releases](https://github.com/fglogan/genesis-plow/releases) and [documentation](https://docs.genesis-plow.dev).
 
-This roadmap tracks planned work on Plow. For shipped capabilities, see the [documentation](https://docs.genesis-plow.dev) and [GitHub releases](https://github.com/fglogan/genesis-plow/releases).
+This roadmap tracks planned work on Plow: what is queued, what is being scoped, and where the project is headed.
 
 ---
 
@@ -12,7 +12,7 @@ Concrete work scoped to the next one or two minor releases.
 
 ### Richer MCP responses
 
-Agents already query plow via MCP, but the responses lack context agents need to make confident removal decisions: re-export chains, who imports this symbol, recent churn, duplicate siblings. Expand existing tool responses before adding new tools.
+In progress: agents already query plow via MCP, but the responses lack context agents need to make confident removal decisions: re-export chains, who imports this symbol, recent churn, duplicate siblings. The work expands existing tool responses before adding new tools, and is partially landed.
 
 ### Coverage sidecar ergonomics
 

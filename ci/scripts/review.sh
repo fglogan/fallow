@@ -31,6 +31,10 @@ AUTH_HEADER="PRIVATE-TOKEN: ${GITLAB_TOKEN}"
 NOTES_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes"
 DISCUSSIONS_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/discussions"
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=gitlab_common.sh
+source "${SCRIPT_DIR}/gitlab_common.sh"
+
 # Initialize two sidecar markers so downstream jobs always see definitive
 # values. GitLab CI lacks an equivalent of $GITHUB_OUTPUT for cross-job
 # propagation; these greppable text files serve the same role when added to
@@ -47,72 +51,6 @@ DISCUSSIONS_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_
 # does not already exist.
 [ -f plow-skip-reason.txt ] || printf 'none\n' > plow-skip-reason.txt
 [ -f plow-dedup-lookup-failed.txt ] || printf 'false\n' > plow-dedup-lookup-failed.txt
-
-# Track mktemp files so an EXIT trap cleans them up on signal or early exit.
-_PLOW_TMPS=()
-trap 'rm -f "${_PLOW_TMPS[@]:-}"' EXIT
-
-curl_retry() {
-  local attempts="${PLOW_API_RETRIES:-3}"
-  local delay="${PLOW_API_RETRY_DELAY:-2}"
-  local attempt=1
-  local err out
-  err=$(mktemp)
-  out=$(mktemp)
-  while true; do
-    if curl -sf "$@" >"$out" 2>"$err"; then
-      cat "$out"
-      rm -f "$err" "$out"
-      return 0
-    fi
-    # Match the Rust `with_rate_limit_retry` decision: 429 + 502/503/504 are
-    # transient and worth retrying; persistent 5xx (500, 501, 505) and all
-    # other 4xx surface immediately. curl -sf emits stderr like
-    # `curl: (22) The requested URL returned error: 502 Bad Gateway`, so we
-    # match either the explicit code or the rate-limit / Retry-After hints.
-    if [ "$attempt" -ge "$attempts" ] \
-        || ! grep -Eqi 'error: (429|502|503|504)|rate limit|Retry-After' "$err"; then
-      cat "$err" >&2
-      rm -f "$err" "$out"
-      return 1
-    fi
-    echo "WARNING: GitLab API rate limit response; retrying (${attempt}/${attempts})" >&2
-    sleep "$delay"
-    attempt=$((attempt + 1))
-  done
-}
-
-# Walk the GitLab REST API's Link-header pagination, concatenating every page
-# of a JSON array into a single combined array on stdout. Last positional arg
-# is the initial URL; preceding args are passed to curl_retry verbatim. Without
-# this, a >100-comment MR can silently lose existing fingerprints outside the
-# first page and re-post duplicate inline review notes on every run.
-curl_paginate() {
-  local args=("$@")
-  local last=$(( ${#args[@]} - 1 ))
-  local url="${args[$last]}"
-  unset 'args[last]'
-  local headers body
-  headers=$(mktemp)
-  body=$(mktemp)
-  local combined='[]'
-  while [ -n "$url" ]; do
-    if ! curl_retry -D "$headers" "${args[@]}" "$url" > "$body"; then
-      rm -f "$headers" "$body"
-      return 1
-    fi
-    # Defensively skip non-array pages (e.g. an error envelope) so the
-    # caller degrades to "no existing notes seen" instead of crashing on
-    # `array + object` jq errors.
-    combined=$(jq -s 'map(arrays) | add // []' <(printf '%s' "$combined") "$body")
-    url=$(grep -i '^link:' "$headers" \
-      | tr ',' '\n' \
-      | sed -n 's/.*<\([^>]*\)>.*rel="next".*/\1/p' \
-      | head -1)
-  done
-  rm -f "$headers" "$body"
-  printf '%s' "$combined"
-}
 
 load_gitlab_diff_refs() {
   if [ -n "${PLOW_GITLAB_BASE_SHA:-}" ] && [ -n "${PLOW_GITLAB_HEAD_SHA:-}" ]; then
@@ -143,32 +81,9 @@ load_gitlab_diff_refs() {
 render_with_plow() {
   local format=$1
   local output=$2
-  [ -f plow-analysis-args.sh ] || return 1
-  # shellcheck disable=SC1091
-  source plow-analysis-args.sh
-  local args=("${PLOW_ANALYSIS_ARGS[@]}")
-  local replaced=false
-  for i in "${!args[@]}"; do
-    if [ "${args[$i]}" = "--format" ] && [ $((i + 1)) -lt "${#args[@]}" ]; then
-      args[$((i + 1))]="$format"
-      replaced=true
-      break
-    fi
-  done
-  if [ "$replaced" != "true" ]; then
-    args+=(--format "$format")
-  fi
-  if [ -z "${PLOW_DIFF_FILE:-}" ] && [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
-    if git diff "${CI_MERGE_REQUEST_DIFF_BASE_SHA}..HEAD" > plow-mr.diff 2>plow-mr-diff-stderr.log; then
-      export PLOW_DIFF_FILE="$PWD/plow-mr.diff"
-    else
-      echo "WARNING: Failed to fetch MR diff; diff filter disabled, reporting all findings"
-      rm -f plow-mr.diff
-    fi
-  fi
+  prepare_plow_render_args "$format" || return 1
   load_gitlab_diff_refs
-  export PLOW_DIFF_FILTER="${PLOW_DIFF_FILTER:-added}"
-  PLOW_MAX_COMMENTS="$MAX" plow "${args[@]}" > "$output" 2> plow-review-stderr.log || true
+  PLOW_MAX_COMMENTS="$MAX" plow "${PLOW_RENDER_ARGS[@]}" > "$output" 2> plow-review-stderr.log || true
   # Surface plow's structured-error envelope before the schema check so the
   # CLI message lands in the GitLab job log rather than a generic warning.
   if jq -e '.error == true' "$output" > /dev/null 2>&1; then

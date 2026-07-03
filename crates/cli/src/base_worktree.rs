@@ -1,9 +1,10 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
-use plow_core::git_env::clear_ambient_git_env;
+use plow_engine::clear_ambient_git_env;
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::report::plural;
@@ -22,14 +23,7 @@ impl BaseWorktree {
         {
             return Some(worktree);
         }
-        let path = std::env::temp_dir().join(format!(
-            "plow-audit-base-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .ok()?
-                .as_nanos()
-        ));
+        let path = non_reusable_worktree_path()?;
         let mut guard = WorktreeCleanupGuard::new(repo_root, &path);
         let mut command = Command::new("git");
         command
@@ -108,6 +102,28 @@ impl BaseWorktree {
     pub fn path(&self) -> &Path {
         &self.path
     }
+}
+
+/// Build a unique temp path for a non-reusable base worktree.
+///
+/// The pid stays the FIRST `-`-separated segment so [`audit_worktree_pid`] and
+/// the orphan sweep keep working. A process-global monotonic counter is the
+/// final segment: the wall-clock nanos read is NOT monotonic and repeats across
+/// threads, so two `audit` runs in one process (e.g. parallel unit tests, or a
+/// future in-process batch) could otherwise mint the same path and race on
+/// `git worktree add`, where the loser fails and the audit aborts with a generic
+/// error. The counter makes every path distinct regardless of clock resolution.
+fn non_reusable_worktree_path() -> Option<PathBuf> {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    Some(std::env::temp_dir().join(format!(
+        "plow-audit-base-{}-{nanos}-{seq}",
+        std::process::id()
+    )))
 }
 
 /// RAII cleanup guard for a freshly-created git worktree directory.
@@ -341,63 +357,7 @@ pub fn sweep_old_reusable_caches(repo_root: &Path, max_age: Option<Duration>, qu
         if !is_reusable_audit_worktree_path(&path) {
             continue;
         }
-        // Prunable orphan: an external temp-reaper (macOS `$TMPDIR` cleanup,
-        // container restart, CI cache eviction) removed the cache directory but
-        // git's admin entry survives. The sidecar lives next to the dir and is
-        // not deleted by such a reaper, so the age branch below would re-touch a
-        // fresh sidecar and never reclaim the dead entry. Reclaim eagerly,
-        // independent of `max_age`, so orphans do not accumulate even when
-        // age-based GC is disabled (`cacheMaxAgeDays = 0`).
-        if !path.exists() {
-            let Some(_lock) = ReusableWorktreeLock::try_acquire(&path) else {
-                continue;
-            };
-            // Re-check under the lock: a concurrent `reuse_or_create` rebuild may
-            // have recreated the directory between the existence check and the
-            // lock acquisition.
-            if path.exists() {
-                continue;
-            }
-            remove_audit_worktree(repo_root, &path);
-            let _ = std::fs::remove_file(reusable_worktree_last_used_path(&path));
-            removed += 1;
-            continue;
-        }
-        let Some(max_age) = max_age else {
-            continue;
-        };
-        let sidecar = reusable_worktree_last_used_path(&path);
-        let sidecar_mtime = std::fs::metadata(&sidecar)
-            .ok()
-            .and_then(|m| m.modified().ok());
-        let Some(mtime) = sidecar_mtime else {
-            touch_last_used(&path);
-            continue;
-        };
-        let Ok(age) = now.duration_since(mtime) else {
-            continue;
-        };
-        if age < max_age {
-            continue;
-        }
-        let Some(_lock) = ReusableWorktreeLock::try_acquire(&path) else {
-            continue;
-        };
-        remove_audit_worktree(repo_root, &path);
-        let dir_removed = match std::fs::remove_dir_all(&path) {
-            Ok(()) => true,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => true,
-            Err(err) => {
-                tracing::warn!(
-                    path = %path.display(),
-                    error = %err,
-                    "failed to remove stale reusable audit worktree directory; entry may leak",
-                );
-                false
-            }
-        };
-        let _ = std::fs::remove_file(&sidecar);
-        if dir_removed {
+        if reclaim_reusable_cache_entry(repo_root, &path, max_age, now) {
             removed += 1;
         }
     }
@@ -421,6 +381,90 @@ pub fn sweep_old_reusable_caches(repo_root: &Path, max_age: Option<Duration>, qu
             "plow: reclaimed {removed} stale base-snapshot cache{s}",
         );
     }
+}
+
+/// Reclaim a single reusable-cache entry. Returns `true` when the entry was
+/// removed (either as a prunable orphan or as aged-out past `max_age`).
+fn reclaim_reusable_cache_entry(
+    repo_root: &Path,
+    path: &Path,
+    max_age: Option<Duration>,
+    now: SystemTime,
+) -> bool {
+    // Prunable orphan: an external temp-reaper (macOS `$TMPDIR` cleanup,
+    // container restart, CI cache eviction) removed the cache directory but
+    // git's admin entry survives. The sidecar lives next to the dir and is
+    // not deleted by such a reaper, so the age branch would re-touch a fresh
+    // sidecar and never reclaim the dead entry. Reclaim eagerly, independent
+    // of `max_age`, so orphans do not accumulate even when age-based GC is
+    // disabled (`cacheMaxAgeDays = 0`).
+    if !path.exists() {
+        return reclaim_orphan_cache_entry(repo_root, path);
+    }
+    let Some(max_age) = max_age else {
+        return false;
+    };
+    reclaim_aged_cache_entry(repo_root, path, max_age, now)
+}
+
+/// Reclaim a cache entry whose directory was deleted out from under git's
+/// admin record. Lock-guarded with a re-check so a concurrent rebuild that
+/// recreated the directory is preserved.
+fn reclaim_orphan_cache_entry(repo_root: &Path, path: &Path) -> bool {
+    let Some(_lock) = ReusableWorktreeLock::try_acquire(path) else {
+        return false;
+    };
+    // Re-check under the lock: a concurrent `reuse_or_create` rebuild may
+    // have recreated the directory between the existence check and the lock.
+    if path.exists() {
+        return false;
+    }
+    remove_audit_worktree(repo_root, path);
+    let _ = std::fs::remove_file(reusable_worktree_last_used_path(path));
+    true
+}
+
+/// Reclaim a cache entry whose `.last-used` sidecar is older than `max_age`.
+/// Seeds a fresh sidecar for pre-upgrade entries that lack one (returns
+/// `false` so they age from real last-use on the next run).
+fn reclaim_aged_cache_entry(
+    repo_root: &Path,
+    path: &Path,
+    max_age: Duration,
+    now: SystemTime,
+) -> bool {
+    let sidecar = reusable_worktree_last_used_path(path);
+    let sidecar_mtime = std::fs::metadata(&sidecar)
+        .ok()
+        .and_then(|m| m.modified().ok());
+    let Some(mtime) = sidecar_mtime else {
+        touch_last_used(path);
+        return false;
+    };
+    let Ok(age) = now.duration_since(mtime) else {
+        return false;
+    };
+    if age < max_age {
+        return false;
+    }
+    let Some(_lock) = ReusableWorktreeLock::try_acquire(path) else {
+        return false;
+    };
+    remove_audit_worktree(repo_root, path);
+    let dir_removed = match std::fs::remove_dir_all(path) {
+        Ok(()) => true,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => true,
+        Err(err) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %err,
+                "failed to remove stale reusable audit worktree directory; entry may leak",
+            );
+            false
+        }
+    };
+    let _ = std::fs::remove_file(&sidecar);
+    dir_removed
 }
 
 fn reusable_audit_worktree_path(repo_root: &Path, base_sha: &str) -> PathBuf {
@@ -752,5 +796,48 @@ impl Drop for BaseWorktree {
         }
         remove_audit_worktree(&self.repo_root, &self.path);
         let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Many threads minting a non-reusable worktree path at the same instant
+    /// must each get a distinct path. Before the monotonic counter, concurrent
+    /// callers read the same non-monotonic `nanos` and collided, so two parallel
+    /// `audit` runs in one process raced on `git worktree add` and one aborted
+    /// with a generic error (a flaky exit 2 under parallel unit tests).
+    #[test]
+    fn non_reusable_worktree_paths_are_unique_under_concurrency() {
+        const N: usize = 64;
+        let barrier = std::sync::Barrier::new(N);
+        let paths = std::sync::Mutex::new(Vec::with_capacity(N));
+        std::thread::scope(|s| {
+            for _ in 0..N {
+                let barrier = &barrier;
+                let paths = &paths;
+                s.spawn(move || {
+                    barrier.wait();
+                    let path = non_reusable_worktree_path().expect("path should build");
+                    paths.lock().unwrap().push(path);
+                });
+            }
+        });
+        let mut paths = paths.into_inner().unwrap();
+        assert_eq!(paths.len(), N);
+        paths.sort();
+        paths.dedup();
+        assert_eq!(paths.len(), N, "non-reusable worktree paths collided");
+    }
+
+    /// The pid stays the first segment so orphan-sweep parsing keeps working.
+    #[test]
+    fn non_reusable_worktree_path_pid_is_parseable() {
+        let path = non_reusable_worktree_path().expect("path should build");
+        let name = path.file_name().unwrap().to_str().unwrap();
+        assert!(is_plow_audit_worktree_path(&path));
+        assert!(!is_reusable_audit_worktree_path(&path));
+        assert_eq!(audit_worktree_pid(name), Some(std::process::id()));
     }
 }

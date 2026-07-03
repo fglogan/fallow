@@ -76,6 +76,7 @@ variables:
 
   # Core
   PLOW_VERSION: ""             # Empty reads package.json plow dependency, then falls back to latest
+  PLOW_SKIP_INSTALL: ""        # "true" skips `npm install -g plow` and uses the plow already on PATH (e.g. a pnpm-catalog pin installed by a prior `pnpm install`). Fails fast if no plow is found.
   PLOW_COMMAND: ""            # dead-code, dupes, health, audit, security, fix, or empty (runs all)
   PLOW_ROOT: "."
   PLOW_CONFIG: ""             # Path to .plowrc.json, .plowrc.jsonc, plow.toml, or .plow.toml
@@ -253,6 +254,27 @@ variables:
       NODE
       }
 
+      # PLOW_SKIP_INSTALL lets a pipeline reuse a plow binary that is already
+      # on PATH (e.g. a pnpm-catalog pin installed by a prior `pnpm install`)
+      # instead of `npm install -g plow` at pipeline time. Default empty
+      # preserves the install behavior below.
+      if [ "$(trim "${PLOW_SKIP_INSTALL:-}")" = "true" ]; then
+        if ! command -v plow > /dev/null 2>&1; then
+          echo "ERROR: PLOW_SKIP_INSTALL=true but no 'plow' binary is on PATH. Install plow before this job (e.g. 'pnpm install' so a pinned plow lands on PATH), or unset PLOW_SKIP_INSTALL to let the template run 'npm install -g plow'."
+          exit 2
+        fi
+        installed_version="$(plow --version 2>/dev/null || echo 'unknown version')"
+        echo "Skipping install; using pre-installed ${installed_version} ($(command -v plow))"
+        # Let the MR-integration script-prep block pin remote scripts to the
+        # matching release tag when the binary reports an exact semver (parity
+        # with the install path, which writes the resolved spec here).
+        installed_semver="$(printf '%s\n' "$installed_version" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+([-.][a-zA-Z0-9.]+)?' | head -n 1 || true)"
+        if [ -n "$installed_semver" ]; then
+          printf '%s\n' "$installed_semver" > /tmp/plow-version-spec
+        fi
+        exit 0
+      fi
+
       requested_version="$(trim "${PLOW_VERSION:-}")"
       root="${PLOW_ROOT:-.}"
       project_spec="$(project_plow_spec "$root" 2>/dev/null || true)"
@@ -317,7 +339,7 @@ variables:
         if [ -d "ci/scripts" ]; then
           echo "Using vendored MR integration scripts from the repository checkout..."
 
-          for f in comment.sh review.sh; do
+          for f in comment.sh review.sh gitlab_common.sh; do
             if cp "ci/scripts/${f}" "${PLOW_SCRIPTS_DIR}/${f}" 2>/dev/null; then
               chmod +x "${PLOW_SCRIPTS_DIR}/${f}"
             else
@@ -343,7 +365,7 @@ variables:
           PLOW_SCRIPTS_BASE="https://raw.githubusercontent.com/fglogan/genesis-plow/${PLOW_SCRIPTS_REF}"
           echo "Downloading MR integration scripts pinned to ${PLOW_SCRIPTS_REF}..."
 
-          for f in comment.sh review.sh; do
+          for f in comment.sh review.sh gitlab_common.sh; do
             if curl -sf "${PLOW_SCRIPTS_BASE}/ci/scripts/${f}" -o "${PLOW_SCRIPTS_DIR}/${f}" 2>/dev/null; then
               chmod +x "${PLOW_SCRIPTS_DIR}/${f}"
             else
@@ -605,7 +627,7 @@ variables:
         audit)           ISSUES=$(jq -r 'if (.attribution.gate // "new-only") == "all" then ((.summary.dead_code_issues // 0) + (.summary.complexity_findings // 0) + (.summary.duplication_clone_groups // 0)) else ((.attribution.dead_code_introduced // 0) + (.attribution.complexity_introduced // 0) + (.attribution.duplication_introduced // 0)) end' plow-results.json) ;;
         security)        ISSUES=$(jq -r 'if .gate then (.gate.new_count // 0) else (.summary.security_findings // ((.security_findings // []) | length)) end' plow-results.json) ;;
         fix)             ISSUES=$(jq -r '(.fixes | length)' plow-results.json) ;;
-        "")              ISSUES=$(jq -r '((.check.total_issues // 0) + (.dupes.stats.clone_groups // 0) + (.health.summary.functions_above_threshold // 0) + ((.health.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' plow-results.json) ;;
+        "")              ISSUES=$(jq -r '((.check.total_issues // 0) + ((.dupes.clone_groups // []) | length) + (.health.summary.functions_above_threshold // 0) + ((.health.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' plow-results.json) ;;
       esac
 
       if ! echo "$ISSUES" | grep -qE '^[0-9]+$'; then

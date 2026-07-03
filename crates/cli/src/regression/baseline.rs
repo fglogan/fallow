@@ -2,8 +2,8 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use plow_config::OutputFormat;
-use plow_core::git_env::clear_ambient_git_env;
-use plow_core::results::AnalysisResults;
+use plow_engine::clear_ambient_git_env;
+use plow_types::results::AnalysisResults;
 
 use super::counts::{CheckCounts, DupesCounts, REGRESSION_SCHEMA_VERSION, RegressionBaseline};
 use super::outcome::RegressionOutcome;
@@ -214,6 +214,46 @@ fn find_json_key(content: &str, key: &str) -> Option<usize> {
     None
 }
 
+/// Replace an existing `"regression": { ... }` object whose key starts at
+/// `key_start`. Returns `Ok(None)` when the key is not followed by an object
+/// (caller falls back to append), `Err` on an unmatched brace.
+fn replace_json_regression_object(
+    content: &str,
+    key_start: usize,
+    regression_block: &str,
+) -> Result<Option<String>, String> {
+    let after_key = &content[key_start..];
+    let Some(brace_start) = after_key.find('{') else {
+        return Ok(None);
+    };
+    let abs_brace = key_start + brace_start;
+    let mut depth = 0;
+    let mut end = abs_brace;
+    let mut found_close = false;
+    for (i, ch) in content[abs_brace..].char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = abs_brace + i + 1;
+                    found_close = true;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    if !found_close {
+        return Err("malformed JSON: unmatched brace in regression object".to_string());
+    }
+    let mut result = String::new();
+    result.push_str(&content[..key_start]);
+    result.push_str(&regression_block[2..]); // skip leading two spaces: reuse original indent
+    result.push_str(&content[end..]);
+    Ok(Some(result))
+}
+
 fn update_json_regression(
     content: &str,
     baseline: &plow_config::RegressionBaseline,
@@ -235,36 +275,10 @@ fn update_json_regression(
 
     let regression_block = format!("  \"regression\": {{\n    \"baseline\": {indented}\n  }}");
 
-    if let Some(start) = find_json_key(content, "regression") {
-        let after_key = &content[start..];
-        if let Some(brace_start) = after_key.find('{') {
-            let abs_brace = start + brace_start;
-            let mut depth = 0;
-            let mut end = abs_brace;
-            let mut found_close = false;
-            for (i, ch) in content[abs_brace..].char_indices() {
-                match ch {
-                    '{' => depth += 1,
-                    '}' => {
-                        depth -= 1;
-                        if depth == 0 {
-                            end = abs_brace + i + 1;
-                            found_close = true;
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            if !found_close {
-                return Err("malformed JSON: unmatched brace in regression object".to_string());
-            }
-            let mut result = String::new();
-            result.push_str(&content[..start]);
-            result.push_str(&regression_block[2..]); // skip leading "  " — reuse original indent
-            result.push_str(&content[end..]);
-            return Ok(result);
-        }
+    if let Some(start) = find_json_key(content, "regression")
+        && let Some(replaced) = replace_json_regression_object(content, start, &regression_block)?
+    {
+        return Ok(replaced);
     }
 
     if let Some(last_brace) = content.rfind('}') {
@@ -288,6 +302,12 @@ fn update_json_regression(
 
 /// Update a TOML config file with regression baseline.
 fn update_toml_regression(content: &str, baseline: &plow_config::RegressionBaseline) -> String {
+    let section = render_toml_regression_section(baseline);
+    splice_toml_regression_section(content, &section)
+}
+
+/// Render the `[regression.baseline]` TOML section body from the baseline.
+fn render_toml_regression_section(baseline: &plow_config::RegressionBaseline) -> String {
     use std::fmt::Write;
     let mut section = String::from("[regression.baseline]\n");
     let _ = writeln!(section, "totalIssues = {}", baseline.total_issues);
@@ -345,7 +365,12 @@ fn update_toml_regression(content: &str, baseline: &plow_config::RegressionBasel
         "testOnlyDependencies = {}",
         baseline.test_only_dependencies
     );
+    section
+}
 
+/// Replace an existing `[regression.baseline]` section in `content`, or append
+/// the rendered `section` when none is present.
+fn splice_toml_regression_section(content: &str, section: &str) -> String {
     if let Some(start) = content.find("[regression.baseline]") {
         let after = &content[start + "[regression.baseline]".len()..];
         let end_offset = after.find("\n[").map_or(content.len(), |i| {
@@ -354,7 +379,7 @@ fn update_toml_regression(content: &str, baseline: &plow_config::RegressionBasel
 
         let mut result = String::new();
         result.push_str(&content[..start]);
-        result.push_str(&section);
+        result.push_str(section);
         if end_offset < content.len() {
             result.push_str(&content[end_offset..]);
         }
@@ -365,7 +390,7 @@ fn update_toml_regression(content: &str, baseline: &plow_config::RegressionBasel
             result.push('\n');
         }
         result.push('\n');
-        result.push_str(&section);
+        result.push_str(section);
         result
     }
 }
@@ -572,7 +597,8 @@ fn chrono_now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plow_core::results::*;
+    use plow_types::output_dead_code::*;
+    use plow_types::results::*;
     use std::path::PathBuf;
 
     fn sample_baseline() -> plow_config::RegressionBaseline {
@@ -715,7 +741,11 @@ mod tests {
             unrendered_components: 0,
             unused_component_props: 0,
             unused_component_emits: 0,
+            unused_component_inputs: 0,
+            unused_component_outputs: 0,
+            unused_svelte_events: 0,
             unused_server_actions: 0,
+            unused_load_data_keys: 0,
             unresolved_imports: 1,
             unlisted_dependencies: 0,
             duplicate_exports: 1,

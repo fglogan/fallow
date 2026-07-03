@@ -6,7 +6,7 @@ use crate::template_usage::TemplateUsage;
 
 use super::scanners::{scan_curly_section, scan_html_tag};
 use super::shared::{
-    HTML_COMMENT_RE, extract_pattern_binding_names, merge_component_tag_usage,
+    HTML_COMMENT_RE, ParsedAttr, extract_pattern_binding_names, merge_component_tag_usage,
     merge_expression_usage_allow_dollar_refs_with_bound_targets,
     merge_statement_usage_allow_dollar_refs_with_bound_targets, parse_tag_attrs,
 };
@@ -22,6 +22,16 @@ static SCRIPT_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
 static SVELTE_EACH_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     crate::static_regex(
         r"(?is)^#each\s+(?P<iterable>.+?)\s+as\s+(?P<bindings>.+?)(?:\s*\((?P<key>.+)\))?$",
+    )
+});
+
+/// Matches a `{#each iterable as bindings}` block opener in raw markup, capturing
+/// the iterable and item bindings. Used only by the pre-scan that types each-block
+/// loop variables (issue #1707 follow-up); the streaming scan re-parses each block
+/// via `SVELTE_EACH_RE`.
+static SVELTE_EACH_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    crate::static_regex(
+        r"(?is)\{#each\s+(?P<iterable>[^}]+?)\s+as\s+(?P<bindings>[^}(]+?)\s*(?:\([^})]*\))?\s*\}",
     )
 });
 
@@ -65,62 +75,184 @@ pub(super) fn collect_template_usage(
     source: &str,
     imported_bindings: &FxHashSet<String>,
 ) -> TemplateUsage {
-    collect_template_usage_with_bound_targets(source, imported_bindings, &FxHashMap::default())
+    collect_template_usage_with_bound_targets(
+        source,
+        imported_bindings,
+        &FxHashMap::default(),
+        &FxHashMap::default(),
+    )
 }
 
 pub(super) fn collect_template_usage_with_bound_targets(
     source: &str,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
+    iterable_types: &FxHashMap<String, String>,
 ) -> TemplateUsage {
     let markup = strip_non_template_content(source);
     if markup.is_empty() {
         return TemplateUsage::default();
     }
 
-    let mut usage = TemplateUsage::default();
-    let mut scopes = vec![SvelteScopeFrame {
-        kind: SvelteBlockKind::Root,
-        locals: Vec::new(),
-    }];
+    // Type each `{#each src as item}` loop item to its source iterable's element
+    // class up front (issue #1707 follow-up), so member accesses on the item
+    // (`{item.getter}`) remap onto the class via the effective bound targets. The
+    // pre-scan runs over `markup` (already `<script>`/`<style>`-stripped).
+    let augmented = augment_bound_targets_with_each(&markup, iterable_types, bound_targets);
+    let effective_bound_targets = augmented.as_ref().unwrap_or(bound_targets);
 
-    let bytes = markup.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        match bytes[index] {
-            b'{' => {
-                let Some((tag, next_index)) = scan_curly_section(&markup, index, 1, 1) else {
-                    break;
-                };
-                apply_tag(
-                    tag.trim(),
-                    index,
-                    next_index,
-                    imported_bindings,
-                    bound_targets,
-                    &mut scopes,
-                    &mut usage,
-                );
-                index = next_index;
-            }
-            b'<' => {
-                let Some((tag, next_index)) = scan_html_tag(&markup, index) else {
-                    break;
-                };
-                apply_markup_tag(
-                    tag,
-                    imported_bindings,
-                    bound_targets,
-                    &mut scopes,
-                    &mut usage,
-                );
-                index = next_index;
-            }
-            _ => index += 1,
+    SvelteTemplateUsageScanner::new(
+        &markup,
+        imported_bindings,
+        effective_bound_targets,
+        iterable_types,
+    )
+    .scan()
+}
+
+struct SvelteTemplateUsageScanner<'a> {
+    markup: &'a str,
+    imported_bindings: &'a FxHashSet<String>,
+    bound_targets: &'a FxHashMap<String, String>,
+    iterable_types: &'a FxHashMap<String, String>,
+    usage: TemplateUsage,
+    scopes: Vec<SvelteScopeFrame>,
+}
+
+impl<'a> SvelteTemplateUsageScanner<'a> {
+    fn new(
+        markup: &'a str,
+        imported_bindings: &'a FxHashSet<String>,
+        bound_targets: &'a FxHashMap<String, String>,
+        iterable_types: &'a FxHashMap<String, String>,
+    ) -> Self {
+        Self {
+            markup,
+            imported_bindings,
+            bound_targets,
+            iterable_types,
+            usage: TemplateUsage::default(),
+            scopes: vec![SvelteScopeFrame {
+                kind: SvelteBlockKind::Root,
+                locals: Vec::new(),
+            }],
         }
     }
 
-    usage
+    fn scan(mut self) -> TemplateUsage {
+        let mut index = 0;
+        while index < self.markup.len() {
+            index = self.scan_next(index);
+        }
+        self.usage
+    }
+
+    fn scan_next(&mut self, index: usize) -> usize {
+        match self.markup.as_bytes()[index] {
+            b'{' => self.scan_svelte_tag(index),
+            b'<' => self.scan_markup_tag(index),
+            _ => index + 1,
+        }
+    }
+
+    fn scan_svelte_tag(&mut self, index: usize) -> usize {
+        let Some((tag, next_index)) = scan_curly_section(self.markup, index, 1, 1) else {
+            return self.markup.len();
+        };
+        apply_tag(&mut SvelteTagInput {
+            tag: tag.trim(),
+            tag_start: index,
+            tag_end: next_index,
+            imported_bindings: self.imported_bindings,
+            bound_targets: self.bound_targets,
+            iterable_types: self.iterable_types,
+            scopes: &mut self.scopes,
+            usage: &mut self.usage,
+        });
+        next_index
+    }
+
+    fn scan_markup_tag(&mut self, index: usize) -> usize {
+        let Some((tag, next_index)) = scan_html_tag(self.markup, index) else {
+            return self.markup.len();
+        };
+        apply_markup_tag(
+            tag,
+            self.imported_bindings,
+            self.bound_targets,
+            &mut self.scopes,
+            &mut self.usage,
+        );
+        next_index
+    }
+}
+
+/// Collect Svelte custom-event listener names from template `on:<name>`
+/// bindings on COMPONENT tags (PascalCase or member-expression tag names).
+///
+/// `on:<name>` on a lowercase DOM element (`on:click` on a `<button>`) is a DOM
+/// event, NOT a custom event, so it is excluded. Event forwarding (`on:save`
+/// with no value) still counts as a listen (the parent forwards the child's
+/// event upward, so the name IS listened for). Reuses the same markup tag
+/// scanning (`scan_html_tag` + `parse_tag_attrs`) as the usage scanner so
+/// component-tag detection and attribute parsing stay consistent. The result
+/// feeds the `unused-svelte-event` detector's liberal project-wide listened set.
+pub(super) fn collect_listened_events(source: &str) -> Vec<String> {
+    let markup = strip_non_template_content(source);
+    if markup.is_empty() {
+        return Vec::new();
+    }
+
+    let mut listened: Vec<String> = Vec::new();
+    let bytes = markup.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'<' {
+            let Some((tag, next_index)) = scan_html_tag(&markup, index) else {
+                break;
+            };
+            collect_tag_listeners(tag, &mut listened);
+            index = next_index;
+        } else {
+            index += 1;
+        }
+    }
+
+    listened.sort_unstable();
+    listened.dedup();
+    listened
+}
+
+/// Record `on:<name>` listener names on a single tag when the tag names a
+/// COMPONENT (PascalCase, or a dotted member-expression like `Icons.Alert`).
+fn collect_tag_listeners(tag: &str, listened: &mut Vec<String>) {
+    let trimmed = tag.trim();
+    if trimmed.starts_with("</") || trimmed.starts_with("<!") || trimmed.starts_with("<?") {
+        return;
+    }
+    let parsed = parse_tag_attrs(trimmed, true);
+    if parsed.name.is_empty() {
+        return;
+    }
+    let is_component = parsed.name.contains('.')
+        || parsed
+            .name
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_uppercase());
+    if !is_component {
+        return;
+    }
+    for attr in &parsed.attrs {
+        if let Some(event) = attr.name.strip_prefix("on:") {
+            // Strip event modifiers (`on:click|preventDefault`); the event name
+            // is the segment before the first `|`.
+            let name = event.split('|').next().unwrap_or(event).trim();
+            if !name.is_empty() {
+                listened.push(name.to_string());
+            }
+        }
+    }
 }
 
 fn strip_non_template_content(source: &str) -> String {
@@ -168,41 +300,51 @@ fn strip_non_template_content(source: &str) -> String {
     visible
 }
 
-fn apply_tag(
-    tag: &str,
+struct SvelteTagInput<'a> {
+    tag: &'a str,
     tag_start: usize,
     tag_end: usize,
-    imported_bindings: &FxHashSet<String>,
-    bound_targets: &FxHashMap<String, String>,
-    scopes: &mut Vec<SvelteScopeFrame>,
-    usage: &mut TemplateUsage,
-) {
-    if tag.is_empty() {
+    imported_bindings: &'a FxHashSet<String>,
+    bound_targets: &'a FxHashMap<String, String>,
+    iterable_types: &'a FxHashMap<String, String>,
+    scopes: &'a mut Vec<SvelteScopeFrame>,
+    usage: &'a mut TemplateUsage,
+}
+
+fn apply_tag(input: &mut SvelteTagInput<'_>) {
+    if input.tag.is_empty() {
         return;
     }
 
-    if apply_svelte_block_tag(tag, imported_bindings, bound_targets, scopes, usage) {
-        return;
-    }
-
-    if apply_svelte_expression_directive(
-        tag,
-        tag_start,
-        tag_end,
-        imported_bindings,
-        bound_targets,
-        scopes,
-        usage,
+    if apply_svelte_block_tag(
+        input.tag,
+        input.imported_bindings,
+        input.bound_targets,
+        input.iterable_types,
+        input.scopes,
+        input.usage,
     ) {
         return;
     }
 
+    if apply_svelte_expression_directive(&mut SvelteExpressionDirectiveInput {
+        tag: input.tag,
+        tag_start: input.tag_start,
+        tag_end: input.tag_end,
+        imported_bindings: input.imported_bindings,
+        bound_targets: input.bound_targets,
+        scopes: input.scopes,
+        usage: input.usage,
+    }) {
+        return;
+    }
+
     merge_expression_usage_allow_dollar_refs_with_bound_targets(
-        usage,
-        tag,
-        imported_bindings,
-        bound_targets,
-        &current_locals(scopes),
+        input.usage,
+        input.tag,
+        input.imported_bindings,
+        input.bound_targets,
+        &current_locals(input.scopes),
     );
 }
 
@@ -210,6 +352,7 @@ fn apply_svelte_block_tag(
     tag: &str,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
+    iterable_types: &FxHashMap<String, String>,
     scopes: &mut Vec<SvelteScopeFrame>,
     usage: &mut TemplateUsage,
 ) -> bool {
@@ -219,22 +362,26 @@ fn apply_svelte_block_tag(
     }
 
     if let Some(expr) = tag.strip_prefix("#if") {
-        merge_expression_usage_allow_dollar_refs_with_bound_targets(
-            usage,
-            expr.trim(),
+        merge_expr_and_open_block(
+            expr,
+            SvelteBlockKind::If,
             imported_bindings,
             bound_targets,
-            &current_locals(scopes),
+            scopes,
+            usage,
         );
-        scopes.push(SvelteScopeFrame {
-            kind: SvelteBlockKind::If,
-            locals: Vec::new(),
-        });
         return true;
     }
 
     if let Some(captures) = SVELTE_EACH_RE.captures(tag) {
-        apply_each_tag(&captures, imported_bindings, bound_targets, scopes, usage);
+        apply_each_tag(
+            &captures,
+            imported_bindings,
+            bound_targets,
+            iterable_types,
+            scopes,
+            usage,
+        );
         return true;
     }
 
@@ -243,28 +390,24 @@ fn apply_svelte_block_tag(
         return true;
     }
 
-    if let Some(captures) = SVELTE_THEN_RE.captures(tag) {
-        update_await_branch_locals(&captures, scopes);
-        return true;
-    }
-
-    if let Some(captures) = SVELTE_CATCH_RE.captures(tag) {
+    // `{:then binding}` / `{:catch binding}` both rebind the await frame's locals.
+    if let Some(captures) = SVELTE_THEN_RE
+        .captures(tag)
+        .or_else(|| SVELTE_CATCH_RE.captures(tag))
+    {
         update_await_branch_locals(&captures, scopes);
         return true;
     }
 
     if let Some(expr) = tag.strip_prefix("#key") {
-        merge_expression_usage_allow_dollar_refs_with_bound_targets(
-            usage,
-            expr.trim(),
+        merge_expr_and_open_block(
+            expr,
+            SvelteBlockKind::Key,
             imported_bindings,
             bound_targets,
-            &current_locals(scopes),
+            scopes,
+            usage,
         );
-        scopes.push(SvelteScopeFrame {
-            kind: SvelteBlockKind::Key,
-            locals: Vec::new(),
-        });
         return true;
     }
 
@@ -280,71 +423,128 @@ fn apply_svelte_block_tag(
     false
 }
 
-fn apply_svelte_expression_directive(
-    tag: &str,
-    tag_start: usize,
-    tag_end: usize,
+/// Merge a block opener's condition expression, then push a new scope frame of
+/// the given kind (`{#if expr}`, `{#key expr}`).
+fn merge_expr_and_open_block(
+    expr: &str,
+    kind: SvelteBlockKind,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
-    scopes: &mut [SvelteScopeFrame],
+    scopes: &mut Vec<SvelteScopeFrame>,
     usage: &mut TemplateUsage,
-) -> bool {
-    if let Some(expr) = tag.strip_prefix("@attach") {
-        apply_expression_tag(expr, imported_bindings, bound_targets, scopes, usage);
+) {
+    merge_expression_usage_allow_dollar_refs_with_bound_targets(
+        usage,
+        expr.trim(),
+        imported_bindings,
+        bound_targets,
+        &current_locals(scopes),
+    );
+    scopes.push(SvelteScopeFrame {
+        kind,
+        locals: Vec::new(),
+    });
+}
+
+struct SvelteExpressionDirectiveInput<'a> {
+    tag: &'a str,
+    tag_start: usize,
+    tag_end: usize,
+    imported_bindings: &'a FxHashSet<String>,
+    bound_targets: &'a FxHashMap<String, String>,
+    scopes: &'a mut [SvelteScopeFrame],
+    usage: &'a mut TemplateUsage,
+}
+
+fn apply_svelte_expression_directive(input: &mut SvelteExpressionDirectiveInput<'_>) -> bool {
+    if let Some(expr) = input.tag.strip_prefix("@attach") {
+        apply_directive_expression(input, expr);
         return true;
     }
 
-    if let Some(expr) = tag.strip_prefix("@html") {
-        if let Some(sink) = crate::template_usage::template_html_sink(expr, tag_start, tag_end) {
-            usage.security_sinks.push(sink);
-        }
-        merge_expression_usage_allow_dollar_refs_with_bound_targets(
-            usage,
-            expr.trim(),
-            imported_bindings,
-            bound_targets,
-            &current_locals(scopes),
+    if let Some(expr) = input.tag.strip_prefix("@html") {
+        apply_html_directive(input, expr);
+        return true;
+    }
+
+    if let Some(expr) = input.tag.strip_prefix("@render") {
+        apply_directive_expression(input, expr);
+        return true;
+    }
+
+    if let Some(stmt) = input.tag.strip_prefix("@const") {
+        apply_const_tag(
+            stmt,
+            input.imported_bindings,
+            input.bound_targets,
+            input.scopes,
+            input.usage,
         );
         return true;
     }
 
-    if let Some(expr) = tag.strip_prefix("@render") {
-        apply_expression_tag(expr, imported_bindings, bound_targets, scopes, usage);
+    if let Some(expr) = input.tag.strip_prefix("@debug") {
+        apply_directive_expression(input, expr);
         return true;
     }
 
-    if let Some(stmt) = tag.strip_prefix("@const") {
-        apply_const_tag(stmt, imported_bindings, bound_targets, scopes, usage);
+    if let Some(expr) = input.tag.strip_prefix(":else if") {
+        apply_directive_expression(input, expr);
         return true;
     }
 
-    if let Some(expr) = tag.strip_prefix("@debug") {
-        apply_expression_tag(expr, imported_bindings, bound_targets, scopes, usage);
-        return true;
-    }
-
-    if let Some(expr) = tag.strip_prefix(":else if") {
-        apply_expression_tag(expr, imported_bindings, bound_targets, scopes, usage);
-        return true;
-    }
-
-    if tag.starts_with(":else") {
+    if input.tag.starts_with(":else") {
         return true;
     }
 
     false
 }
 
+/// Merge a directive's expression operand into template usage.
+fn apply_directive_expression(input: &mut SvelteExpressionDirectiveInput<'_>, expr: &str) {
+    apply_expression_tag(
+        expr,
+        input.imported_bindings,
+        input.bound_targets,
+        input.scopes,
+        input.usage,
+    );
+}
+
+/// Record a `{@html expr}` security sink, then merge the expression usage.
+fn apply_html_directive(input: &mut SvelteExpressionDirectiveInput<'_>, expr: &str) {
+    if let Some(sink) =
+        crate::template_usage::template_html_sink(expr, input.tag_start, input.tag_end)
+    {
+        input.usage.security_sinks.push(sink);
+    }
+    merge_expression_usage_allow_dollar_refs_with_bound_targets(
+        input.usage,
+        expr.trim(),
+        input.imported_bindings,
+        input.bound_targets,
+        &current_locals(input.scopes),
+    );
+}
+
 fn apply_each_tag(
     captures: &regex::Captures<'_>,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
+    iterable_types: &FxHashMap<String, String>,
     scopes: &mut Vec<SvelteScopeFrame>,
     usage: &mut TemplateUsage,
 ) {
     let iterable = captures.name("iterable").map_or("", |m| m.as_str()).trim();
     let bindings = captures.name("bindings").map_or("", |m| m.as_str()).trim();
-    let each_locals = extract_pattern_binding_names(bindings);
+    let mut each_locals = extract_pattern_binding_names(bindings);
+    // When the item is typed to an element class (issue #1707 follow-up), drop it
+    // from the block locals so it stays an unresolved reference that remaps onto
+    // the class via the pre-augmented `bound_targets` (crediting `item.member`).
+    // The index alias and destructured items are unaffected.
+    if let Some((item, _)) = svelte_each_element_binding(iterable, bindings, iterable_types) {
+        each_locals.retain(|name| name != &item);
+    }
     let current = current_locals(scopes);
     merge_expression_usage_allow_dollar_refs_with_bound_targets(
         usage,
@@ -370,6 +570,65 @@ fn apply_each_tag(
         kind: SvelteBlockKind::Each,
         locals: each_locals,
     });
+}
+
+/// Pre-scan the markup for `{#each src as item}` blocks and, for each whose source
+/// iterable resolves to a known element class in `iterable_types`, bind the item
+/// to that class. Returns an augmented copy of `bound_targets` only when at least
+/// one typed item was found. First-write-wins on a repeated item name. The markup
+/// is already `<script>`/`<style>`-stripped, so this only sees template each-blocks.
+fn augment_bound_targets_with_each(
+    markup: &str,
+    iterable_types: &FxHashMap<String, String>,
+    bound_targets: &FxHashMap<String, String>,
+) -> Option<FxHashMap<String, String>> {
+    if iterable_types.is_empty() {
+        return None;
+    }
+    let mut augmented: Option<FxHashMap<String, String>> = None;
+    for caps in SVELTE_EACH_BLOCK_RE.captures_iter(markup) {
+        let iterable = caps.name("iterable").map_or("", |m| m.as_str());
+        let bindings = caps.name("bindings").map_or("", |m| m.as_str());
+        let Some((item, class)) = svelte_each_element_binding(iterable, bindings, iterable_types)
+        else {
+            continue;
+        };
+        augmented
+            .get_or_insert_with(|| bound_targets.clone())
+            .entry(item)
+            .or_insert(class);
+    }
+    augmented
+}
+
+/// Resolve a Svelte `{#each}` iterable + item bindings to `(item_name, class)`
+/// when the source iterable has a known element class and the item is a bare
+/// identifier. Destructured items (`{ id }`) and unknown sources yield `None`.
+fn svelte_each_element_binding(
+    iterable: &str,
+    bindings: &str,
+    iterable_types: &FxHashMap<String, String>,
+) -> Option<(String, String)> {
+    let class = iterable_types.get(iterable.trim())?;
+    let item = svelte_each_item_identifier(bindings)?;
+    Some((item, class.clone()))
+}
+
+/// Extract the loop ITEM identifier from a `{#each}` binding clause (`item`,
+/// `item, index`). A destructured or non-identifier item yields `None` (a naive
+/// first-element split leaves an invalid identifier that fails the check).
+fn svelte_each_item_identifier(bindings: &str) -> Option<String> {
+    let first = bindings.trim().split(',').next()?.trim();
+    is_each_identifier(first).then(|| first.to_string())
+}
+
+fn is_each_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    matches!(first, 'A'..='Z' | 'a'..='z' | '_' | '$')
+        && chars.all(|ch| matches!(ch, 'A'..='Z' | 'a'..='z' | '0'..='9' | '_' | '$'))
 }
 
 fn apply_await_tag(
@@ -483,15 +742,52 @@ fn apply_markup_tag(
         merge_component_tag_usage(usage, &parsed.name, imported_bindings, &current, false);
     }
 
+    let element_locals = merge_markup_attr_usage(
+        &parsed.attrs,
+        imported_bindings,
+        bound_targets,
+        &current,
+        usage,
+    );
+
+    if !parsed.self_closing && !is_void_html_tag(&parsed.name) {
+        scopes.push(SvelteScopeFrame {
+            kind: SvelteBlockKind::Element,
+            locals: element_locals,
+        });
+    }
+}
+
+/// Merge usage from each markup attribute (directive bindings, shorthand
+/// expressions, attribute values), returning the `let:` locals the element scope
+/// introduces.
+fn merge_markup_attr_usage(
+    attrs: &[ParsedAttr],
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    current: &[String],
+    usage: &mut TemplateUsage,
+) -> Vec<String> {
     let mut element_locals = Vec::new();
-    for attr in &parsed.attrs {
+    for attr in attrs {
         if let Some(binding) = directive_binding_name(&attr.name) {
             merge_expression_usage_allow_dollar_refs_with_bound_targets(
                 usage,
                 binding,
                 imported_bindings,
                 bound_targets,
-                &current,
+                current,
+            );
+        }
+        if attr.value.is_none()
+            && let Some(binding) = directive_shorthand_binding_name(&attr.name)
+        {
+            merge_expression_usage_allow_dollar_refs_with_bound_targets(
+                usage,
+                binding,
+                imported_bindings,
+                bound_targets,
+                current,
             );
         }
         if let Some(local) = attr.name.strip_prefix("let:")
@@ -505,20 +801,14 @@ fn apply_markup_tag(
                 expr,
                 imported_bindings,
                 bound_targets,
-                &current,
+                current,
             );
         }
         if let Some(value) = attr.value.as_deref() {
-            merge_attribute_value_usage(usage, value, imported_bindings, bound_targets, &current);
+            merge_attribute_value_usage(usage, value, imported_bindings, bound_targets, current);
         }
     }
-
-    if !parsed.self_closing && !is_void_html_tag(&parsed.name) {
-        scopes.push(SvelteScopeFrame {
-            kind: SvelteBlockKind::Element,
-            locals: element_locals,
-        });
-    }
+    element_locals
 }
 
 fn merge_markup_brace_usage(
@@ -564,6 +854,31 @@ fn directive_binding_name(attr_name: &str) -> Option<&str> {
                 .next()
                 .map(str::trim)
                 .filter(|name| !name.is_empty());
+            if binding.is_some() {
+                return binding;
+            }
+        }
+    }
+    None
+}
+
+/// Directive shorthands whose *name* is itself a reference to a local binding
+/// when written without an explicit value: `bind:open` (= `bind:open={open}`),
+/// `style:height` (= `style:height={height}`), `class:active`
+/// (= `class:active={active}`). With an explicit `={…}` value the name is a
+/// target (child prop, CSS property, or class name), not a local reference, so
+/// the caller only consults this for value-less attributes and the value path
+/// credits the binding instead. The leading-character guard rejects CSS custom
+/// properties (`style:--accent`) that would otherwise parse as a `--foo`
+/// pre-decrement expression.
+fn directive_shorthand_binding_name(attr_name: &str) -> Option<&str> {
+    for prefix in ["bind:", "style:", "class:"] {
+        if let Some(rest) = attr_name.strip_prefix(prefix) {
+            let binding = rest.split('|').next().map(str::trim).filter(|name| {
+                name.chars()
+                    .next()
+                    .is_some_and(|c| c.is_alphabetic() || c == '_' || c == '$')
+            });
             if binding.is_some() {
                 return binding;
             }
@@ -653,7 +968,7 @@ fn current_locals(scopes: &[SvelteScopeFrame]) -> Vec<String> {
         .collect()
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::{collect_template_usage, collect_template_usage_with_bound_targets};
     use rustc_hash::{FxHashMap, FxHashSet};
@@ -959,6 +1274,7 @@ mod tests {
             "<button onclick={() => counter.bump()}>{counter.value}</button>",
             &imported(&[]),
             &bound_targets(&[("counter", "Counter")]),
+            &FxHashMap::default(),
         );
 
         assert!(
@@ -985,6 +1301,7 @@ mod tests {
             "{#each rows as counter}<button onclick={() => { other.go(); counter.bump(); }} />{/each}",
             &imported(&[]),
             &bound_targets(&[("counter", "Counter"), ("other", "Other")]),
+            &FxHashMap::default(),
         );
 
         assert!(
@@ -1001,6 +1318,95 @@ mod tests {
                 .iter()
                 .any(|access| access.object == "Counter" && access.member == "bump"),
             "shadowed counter.bump() must not map to Counter.bump, found: {:?}",
+            usage.member_accesses
+        );
+    }
+
+    fn iterable_types(pairs: &[(&str, &str)]) -> FxHashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn each_item_typed_to_element_class_credits_member_access() {
+        // `{#each utils as util}` where `utils` is `Util[]`: member accesses on
+        // the item credit the `Util` class (issue #1707 follow-up).
+        let usage = collect_template_usage_with_bound_targets(
+            "{#each utils as util, i (i)}<p>{util.getter} {util.property} {util.hello()}</p>{/each}",
+            &imported(&[]),
+            &FxHashMap::default(),
+            &iterable_types(&[("utils", "Util")]),
+        );
+
+        for member in ["getter", "property", "hello"] {
+            assert!(
+                usage
+                    .member_accesses
+                    .iter()
+                    .any(|access| access.object == "Util" && access.member == member),
+                "util.{member} should map to Util.{member}, found: {:?}",
+                usage.member_accesses
+            );
+        }
+    }
+
+    #[test]
+    fn each_index_alias_is_not_typed_as_element_class() {
+        let usage = collect_template_usage_with_bound_targets(
+            "{#each utils as util, index}<p>{index.toFixed()}</p>{/each}",
+            &imported(&[]),
+            &FxHashMap::default(),
+            &iterable_types(&[("utils", "Util")]),
+        );
+
+        assert!(
+            !usage
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "Util"),
+            "index member access must not map to the element class, found: {:?}",
+            usage.member_accesses
+        );
+    }
+
+    #[test]
+    fn each_destructured_item_is_not_typed() {
+        let usage = collect_template_usage_with_bound_targets(
+            "{#each utils as { id }}<p>{id}</p>{/each}",
+            &imported(&[]),
+            &FxHashMap::default(),
+            &iterable_types(&[("utils", "Util")]),
+        );
+
+        assert!(
+            !usage
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "Util"),
+            "destructured item must not credit the element class, found: {:?}",
+            usage.member_accesses
+        );
+    }
+
+    #[test]
+    fn each_untyped_source_leaves_item_unmapped() {
+        // Neuter check: no known element type for the source, the item stays a
+        // local and its member accesses are not credited.
+        let usage = collect_template_usage_with_bound_targets(
+            "{#each utils as util}<p>{util.getter}</p>{/each}",
+            &imported(&[]),
+            &FxHashMap::default(),
+            &FxHashMap::default(),
+        );
+
+        assert!(
+            !usage
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "Util"),
+            "untyped each item must not credit any class, found: {:?}",
             usage.member_accesses
         );
     }
@@ -1318,5 +1724,104 @@ mod tests {
         );
 
         assert!(usage.used_bindings.contains("getName"));
+    }
+
+    // The `<svelte:component this={X}>` / `<svelte:element this={tag}>` bound
+    // target is already credited by the generic attribute-value scan in
+    // `apply_markup_tag` (`this` is an ordinary attr whose `{...}` value flows
+    // through `merge_attribute_value_usage`), so no special-element dispatch is
+    // needed. These tests pin that behavior and guard `<svelte:self>` against a
+    // scanner crash.
+    #[test]
+    fn svelte_component_this_credits_target() {
+        let usage = collect_template_usage(
+            "<script>import Foo from './Foo.svelte';</script><svelte:component this={Foo} />",
+            &imported(&["Foo"]),
+        );
+        assert!(
+            usage.used_bindings.contains("Foo"),
+            "Foo should be credited via the existing attr-value scan, got: {usage:?}"
+        );
+    }
+
+    #[test]
+    fn svelte_element_this_credits_tag_binding() {
+        let usage = collect_template_usage(
+            "<script>let tag = 'div';</script><svelte:element this={tag}>x</svelte:element>",
+            &imported(&["tag"]),
+        );
+        assert!(
+            usage.used_bindings.contains("tag"),
+            "tag should be credited via the existing attr-value scan, got: {usage:?}"
+        );
+    }
+
+    #[test]
+    fn svelte_element_string_literal_this_credits_nothing() {
+        let usage = collect_template_usage(
+            r#"<svelte:element this="div">x</svelte:element>"#,
+            &imported(&["div"]),
+        );
+        assert!(
+            usage.is_empty(),
+            "a string-literal element name is a native DOM tag, got: {usage:?}"
+        );
+    }
+
+    #[test]
+    fn listened_events_credits_component_tag_on_directive() {
+        let listened = super::collect_listened_events("<Child on:save on:close />");
+        assert!(listened.contains(&"save".to_string()));
+        assert!(listened.contains(&"close".to_string()));
+    }
+
+    #[test]
+    fn listened_events_excludes_dom_element_on_directive() {
+        // `on:click` on a lowercase DOM `<button>` is a DOM event, not a custom
+        // event, so it must not be credited.
+        let listened = super::collect_listened_events("<button on:click>Hi</button>");
+        assert!(
+            listened.is_empty(),
+            "DOM on:click must be excluded: {listened:?}"
+        );
+    }
+
+    #[test]
+    fn listened_events_credits_event_forwarding_without_value() {
+        // Event forwarding (`on:save` with no value) on a component still counts.
+        let listened = super::collect_listened_events("<Child on:save />");
+        assert!(listened.contains(&"save".to_string()));
+    }
+
+    #[test]
+    fn listened_events_strips_event_modifiers() {
+        let listened = super::collect_listened_events("<Child on:save|once={handler} />");
+        assert!(listened.contains(&"save".to_string()));
+        assert!(!listened.iter().any(|name| name.contains('|')));
+    }
+
+    #[test]
+    fn listened_events_credits_namespaced_component_tag() {
+        let listened = super::collect_listened_events("<Icons.Alert on:dismiss />");
+        assert!(listened.contains(&"dismiss".to_string()));
+    }
+
+    #[test]
+    fn listened_events_ignores_script_block_content() {
+        let listened = super::collect_listened_events(
+            "<script>const x = 'on:save';</script><Child on:close />",
+        );
+        assert!(listened.contains(&"close".to_string()));
+        assert!(!listened.contains(&"save".to_string()));
+    }
+
+    #[test]
+    fn svelte_self_does_not_crash() {
+        let usage = collect_template_usage(
+            "{#if depth}<svelte:self depth={depth} />{/if}",
+            &imported(&["depth"]),
+        );
+        // Inert for component crediting; just must not panic.
+        let _ = usage;
     }
 }

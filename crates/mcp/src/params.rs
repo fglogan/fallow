@@ -240,6 +240,14 @@ pub struct InspectTargetParams {
     pub no_cache: Option<bool>,
 
     pub threads: Option<usize>,
+
+    /// OPT-IN (default off): also attach the best-effort symbol-level call chain
+    /// (`plow trace`) as the `symbol_chain` evidence section. Only
+    /// meaningful for a SYMBOL target. Best-effort, syntactic (ADR-001), and
+    /// EXPLICITLY OFF the ranked path: resolved-vs-unresolved callees are
+    /// reported honestly, the chain is never folded into the ranked brief and is
+    /// never a focus-map / ranking input.
+    pub symbol_chain: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -390,10 +398,20 @@ pub struct HealthParams {
 
     /// Include the per-decision-point complexity breakdown (`contributions[]`) on
     /// each complexity finding. Each entry names the construct (if, else-if,
-    /// loop, boolean operator, ...) and its cyclomatic/cognitive weight, so the
-    /// agent can explain WHY a function scored high and which lines to refactor.
-    /// Forwards `--complexity-breakdown`. Off by default to keep output lean.
+    /// loop, boolean operator, React hook density, wide prop count, ...) and its
+    /// cyclomatic/cognitive weight, so the agent can explain WHY a function
+    /// scored high and which lines to refactor. JSX depth remains descriptive
+    /// `react_jsx_max_depth` context, not a contribution. Forwards
+    /// `--complexity-breakdown`. Off by default to keep output lean.
     pub complexity_breakdown: Option<bool>,
+
+    /// Add a structural CSS analytics section (`css_analytics`): specificity
+    /// hotspots, `!important` density, over-complex selectors, deep nesting,
+    /// design-token sprawl (distinct colors / font-sizes / z-indexes), and
+    /// unreferenced custom-property / `@keyframes` cleanup candidates. Forwards
+    /// `--css`. Opt-in because it reads and parses every project stylesheet
+    /// (standard CSS; SCSS is skipped).
+    pub css: Option<bool>,
 
     /// Show only per-file health scores, sorted by risk-aware triage concern:
     /// lower maintainability index and higher CRAP risk first.
@@ -800,19 +818,61 @@ pub struct FeatureFlagsParams {
     /// root. Passed through to the CLI's `--workspace` flag.
     pub workspace: Option<String>,
 
-    /// Filter by flag type: "environment_variable", "sdk_call", or "config_object".
-    #[expect(
-        dead_code,
-        reason = "exposed via JSON Schema for agent discovery; CLI filter pending"
-    )]
-    pub flag_type: Option<String>,
+    /// Show only the top N flags.
+    pub top: Option<usize>,
 
-    /// Filter by detection confidence: "high", "medium", or "low".
-    #[expect(
-        dead_code,
-        reason = "exposed via JSON Schema for agent discovery; CLI filter pending"
-    )]
-    pub confidence: Option<String>,
+    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    pub no_cache: Option<bool>,
+
+    /// Number of parser threads. Defaults to available CPU cores.
+    pub threads: Option<usize>,
+}
+
+#[derive(Default, Deserialize, JsonSchema)]
+pub struct DecisionSurfaceParams {
+    /// Root directory of the project to analyze. Defaults to current working directory.
+    pub root: Option<String>,
+
+    /// Path to plow config file (.plowrc.json, .plowrc.jsonc, plow.toml, or .plow.toml).
+    pub config: Option<String>,
+
+    /// Git ref to compare against (e.g., "main", "HEAD~5"). When unset, the
+    /// base is the git merge-base against the branch's upstream or the remote
+    /// default (`origin/main`); set `PLOW_AUDIT_BASE` in the server env to pin
+    /// it.
+    pub base: Option<String>,
+
+    /// Cap on the number of consequential structural decisions surfaced (the
+    /// working-memory limit). Default 4; clamped to the 3-5 band (4 plus or minus
+    /// 1).
+    pub max_decisions: Option<usize>,
+
+    /// Scope analysis to one or more workspaces. Accepts a single package name
+    /// for the common case, or a comma-separated list with globs and `!` negation
+    /// (e.g. `"web,admin"`, `"apps/*"`).
+    pub workspace: Option<String>,
+
+    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    pub no_cache: Option<bool>,
+
+    /// Number of parser threads. Defaults to available CPU cores.
+    pub threads: Option<usize>,
+}
+
+/// Parameters for `get_token_blast_radius`, a thin wrapper around
+/// `plow health --css --format json` that steers agents to the
+/// `css_analytics.token_consumers` reverse index (Tailwind v4 `@theme` tokens
+/// plus CSS-in-JS `defineVars` / `createTheme`-family token definitions). Narrow
+/// surface: only root/config plus the global cache knobs apply. `token_consumers`
+/// abstains on partial scope, so `workspace` / `changed_since` are intentionally
+/// omitted (they would only ever return empty).
+#[derive(Default, Deserialize, JsonSchema)]
+pub struct GetTokenBlastRadiusParams {
+    /// Root directory of the project to analyze. Defaults to current working directory.
+    pub root: Option<String>,
+
+    /// Path to plow config file (.plowrc.json, .plowrc.jsonc, plow.toml, or .plow.toml).
+    pub config: Option<String>,
 
     /// Disable the incremental parse cache. Forces a full re-parse of all files.
     pub no_cache: Option<bool>,

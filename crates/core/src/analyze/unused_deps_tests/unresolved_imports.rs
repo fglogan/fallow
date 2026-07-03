@@ -37,13 +37,15 @@ fn unresolved_import_detected() {
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -81,13 +83,15 @@ fn ignore_unresolved_imports_filters_raw_specifier_globs() {
         resolved_dynamic_imports: vec![unresolved_import("@example/icons/dynamic")],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let mut config = test_config(PathBuf::from("/project"));
@@ -145,13 +149,15 @@ fn unresolved_dynamic_import_detected_with_real_location() {
         }],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -216,13 +222,15 @@ fn unresolved_platform_builtins_not_reported() {
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -271,13 +279,15 @@ fn unresolved_virtual_module_not_reported() {
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -322,13 +332,15 @@ fn unresolved_import_with_virtual_prefix_not_reported() {
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -380,13 +392,15 @@ fn unresolved_tanstack_start_virtual_imports_not_reported() {
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -460,13 +474,15 @@ fn unresolved_import_suppressed_by_generated_import_pattern() {
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -537,13 +553,15 @@ fn unresolved_import_suppressed_by_generated_type_import_prefix() {
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -594,13 +612,15 @@ fn generated_type_import_prefix_is_plugin_gated() {
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -643,13 +663,15 @@ fn unresolved_import_suppressed_by_inline_comment() {
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -701,13 +723,15 @@ fn unresolved_dynamic_import_suppressed_by_inline_comment() {
         }],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -761,13 +785,15 @@ fn unresolved_import_file_level_suppression() {
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -833,13 +859,15 @@ fn resolved_import_not_reported_as_unresolved() {
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -907,13 +935,15 @@ fn unresolved_import_not_suppressed_by_wrong_kind() {
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
-        whole_object_uses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));

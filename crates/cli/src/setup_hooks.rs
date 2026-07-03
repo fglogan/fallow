@@ -528,46 +528,8 @@ fn merge_claude_settings(
     };
     let desired = desired_claude_settings(user)?;
 
-    let (serialized, outcome) = match existing_raw.as_deref() {
-        None | Some("") => (serialize_settings(&desired)?, SettingsOutcome::Created),
-        Some(raw) if raw.trim().is_empty() => {
-            (serialize_settings(&desired)?, SettingsOutcome::Created)
-        }
-        Some(raw) => {
-            let current: Option<serde_json::Value> = match serde_json::from_str(raw) {
-                Ok(v) => Some(v),
-                Err(e) => {
-                    if !force {
-                        return Err(format!(
-                            "{} is not valid JSON ({e}); re-run with --force to overwrite.",
-                            path.display()
-                        ));
-                    }
-                    None
-                }
-            };
-            match current {
-                None => (serialize_settings(&desired)?, SettingsOutcome::Created),
-                Some(current) => {
-                    let (value, added, removed, preserved) =
-                        merge_settings_value(&current, &desired)?;
-                    let serialized = serialize_settings(&value)?;
-                    let outcome = if raw == serialized {
-                        SettingsOutcome::Unchanged {
-                            handlers_preserved: preserved,
-                        }
-                    } else {
-                        SettingsOutcome::Updated {
-                            handlers_added: added,
-                            handlers_removed: removed,
-                            handlers_preserved: preserved,
-                        }
-                    };
-                    (serialized, outcome)
-                }
-            }
-        }
-    };
+    let (serialized, outcome) =
+        merge_claude_settings_content(path, existing_raw.as_deref(), &desired, force)?;
 
     if dry_run {
         return Ok(outcome);
@@ -580,6 +542,50 @@ fn merge_claude_settings(
     std::fs::write(path, serialized)
         .map_err(|e| format!("Failed to write {}: {e}", path.display()))?;
     Ok(outcome)
+}
+
+/// Compute the serialized settings text and the resulting [`SettingsOutcome`]
+/// from the existing on-disk content (if any) and the desired settings.
+fn merge_claude_settings_content(
+    path: &Path,
+    existing_raw: Option<&str>,
+    desired: &serde_json::Value,
+    force: bool,
+) -> Result<(String, SettingsOutcome), String> {
+    let Some(raw) = existing_raw.filter(|raw| !raw.trim().is_empty()) else {
+        return Ok((serialize_settings(desired)?, SettingsOutcome::Created));
+    };
+
+    let current: Option<serde_json::Value> = match serde_json::from_str(raw) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            if !force {
+                return Err(format!(
+                    "{} is not valid JSON ({e}); re-run with --force to overwrite.",
+                    path.display()
+                ));
+            }
+            None
+        }
+    };
+    let Some(current) = current else {
+        return Ok((serialize_settings(desired)?, SettingsOutcome::Created));
+    };
+
+    let (value, added, removed, preserved) = merge_settings_value(&current, desired)?;
+    let serialized = serialize_settings(&value)?;
+    let outcome = if raw == serialized {
+        SettingsOutcome::Unchanged {
+            handlers_preserved: preserved,
+        }
+    } else {
+        SettingsOutcome::Updated {
+            handlers_added: added,
+            handlers_removed: removed,
+            handlers_preserved: preserved,
+        }
+    };
+    Ok((serialized, outcome))
 }
 
 fn serialize_settings(value: &serde_json::Value) -> Result<String, String> {
@@ -680,10 +686,6 @@ fn uninstall_claude_settings(path: &Path, dry_run: bool) -> Result<SettingsOutco
 /// Returns the merged value and the tuple `(added, removed, preserved)`
 /// where `preserved` counts handlers in the `Bash` matcher group that are
 /// NOT owned by plow (the existing typecheck/lint / user's own handlers).
-#[expect(
-    clippy::expect_used,
-    reason = "rebuilt settings value is explicitly constructed as an object"
-)]
 fn merge_settings_value(
     current: &serde_json::Value,
     desired: &serde_json::Value,
@@ -692,7 +694,20 @@ fn merge_settings_value(
         .as_object()
         .ok_or_else(|| "settings.json must be a JSON object".to_string())?
         .clone();
+    let mut out = rebuild_settings_object(current_obj, desired);
+    let pretool_arr = settings_pretool_array(&mut out)?;
+    let desired_handlers = desired_pretool_handlers(desired);
+    let (removed_existing, preserved, first_bash_idx) = clean_bash_pretool_groups(pretool_arr)?;
+    let added_now = desired_handlers.len();
+    merge_desired_bash_handlers(pretool_arr, first_bash_idx, desired_handlers)?;
 
+    Ok((out, added_now, removed_existing, preserved))
+}
+
+fn rebuild_settings_object(
+    current_obj: serde_json::Map<String, serde_json::Value>,
+    desired: &serde_json::Value,
+) -> serde_json::Value {
     let mut rebuilt = serde_json::Map::with_capacity(current_obj.len() + 1);
     if let Some(schema) = current_obj
         .get("$schema")
@@ -702,13 +717,20 @@ fn merge_settings_value(
         rebuilt.insert("$schema".to_string(), schema);
     }
     for (key, value) in current_obj {
-        if key == "$schema" {
-            continue;
+        if key != "$schema" {
+            rebuilt.insert(key, value);
         }
-        rebuilt.insert(key, value);
     }
-    let mut out = serde_json::Value::Object(rebuilt);
+    serde_json::Value::Object(rebuilt)
+}
 
+#[expect(
+    clippy::expect_used,
+    reason = "rebuilt settings value is explicitly constructed as an object"
+)]
+fn settings_pretool_array(
+    out: &mut serde_json::Value,
+) -> Result<&mut Vec<serde_json::Value>, String> {
     let out_obj = out
         .as_object_mut()
         .expect("rebuilt value must remain an object");
@@ -722,11 +744,13 @@ fn merge_settings_value(
     let pretool_entry = hooks_obj
         .entry("PreToolUse".to_string())
         .or_insert_with(|| serde_json::json!([]));
-    let pretool_arr = pretool_entry
+    pretool_entry
         .as_array_mut()
-        .ok_or_else(|| "settings.json `hooks.PreToolUse` must be an array".to_string())?;
+        .ok_or_else(|| "settings.json `hooks.PreToolUse` must be an array".to_string())
+}
 
-    let desired_handlers: Vec<serde_json::Value> = desired
+fn desired_pretool_handlers(desired: &serde_json::Value) -> Vec<serde_json::Value> {
+    desired
         .get("hooks")
         .and_then(|h| h.get("PreToolUse"))
         .and_then(|p| p.as_array())
@@ -734,8 +758,12 @@ fn merge_settings_value(
         .and_then(|group| group.get("hooks"))
         .and_then(|h| h.as_array())
         .cloned()
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
 
+fn clean_bash_pretool_groups(
+    pretool_arr: &mut [serde_json::Value],
+) -> Result<(usize, usize, Option<usize>), String> {
     let mut removed_existing = 0usize;
     let mut preserved = 0usize;
     let mut first_bash_idx = None;
@@ -761,7 +789,14 @@ fn merge_settings_value(
         preserved += group_hooks.len();
     }
 
-    let added_now = desired_handlers.len();
+    Ok((removed_existing, preserved, first_bash_idx))
+}
+
+fn merge_desired_bash_handlers(
+    pretool_arr: &mut Vec<serde_json::Value>,
+    first_bash_idx: Option<usize>,
+    desired_handlers: Vec<serde_json::Value>,
+) -> Result<(), String> {
     if let Some(idx) = first_bash_idx {
         let group = pretool_arr[idx]
             .as_object_mut()
@@ -779,7 +814,7 @@ fn merge_settings_value(
         }));
     }
 
-    Ok((out, added_now, removed_existing, preserved))
+    Ok(())
 }
 
 /// Strip plow-owned handlers from a settings `serde_json::Value`,

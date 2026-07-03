@@ -3,10 +3,10 @@ source: crates/cli/tests/snapshot_tests.rs
 expression: json_str
 ---
 {
-  "body": "### Plow dead-code report\n\n24 inline findings selected for GitLab review.\n\n<!-- plow-review -->\n\n<!-- plow-fingerprint:v2: f1e01912f6349509 -->",
+  "body": "### Plow dead-code report\n\n27 inline findings selected for GitLab review.\n\n<!-- plow-review -->\n\n<!-- plow-fingerprint:v2: 773fb47ebaee76f6 -->",
   "summary": {
-    "body": "### Plow dead-code report\n\n24 inline findings selected for GitLab review.\n\n<!-- plow-review -->\n\n<!-- plow-fingerprint:v2: f1e01912f6349509 -->",
-    "fingerprint": "f1e01912f6349509"
+    "body": "### Plow dead-code report\n\n27 inline findings selected for GitLab review.\n\n<!-- plow-review -->\n\n<!-- plow-fingerprint:v2: 773fb47ebaee76f6 -->",
+    "fingerprint": "773fb47ebaee76f6"
   },
   "comments": [
     {
@@ -118,6 +118,16 @@ expression: json_str
         "new_line": 12
       },
       "fingerprint": "291da29e40ca77e0"
+    },
+    {
+      "body": "**warn** `plow/unused-svelte-event`: event \\`dead\\` is dispatched by component \\`Child\\` but listened to nowhere in the project \\(remove it or listen for it\\)\n\n<!-- plow-fingerprint:v2: b5004391914737c9 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/Child.svelte",
+        "new_path": "src/Child.svelte",
+        "new_line": 6
+      },
+      "fingerprint": "b5004391914737c9"
     },
     {
       "body": "**error** `plow/circular-dependency`: Circular dependency: src/a.ts → src/b.ts\n\n<!-- plow-fingerprint:v2: 9f70c2f1869ab63a -->",
@@ -238,6 +248,26 @@ expression: json_str
         "new_line": 5
       },
       "fingerprint": "4e4a7216bbdc8cfa"
+    },
+    {
+      "body": "**warn** `plow/unused-component-input`: input \\`variant\\` is declared but referenced nowhere in component \\`UserCardComponent\\` \\(remove it or use it\\)\n\n<!-- plow-fingerprint:v2: 8a93cdfaa7cabafc -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/user-card.component.ts",
+        "new_path": "src/user-card.component.ts",
+        "new_line": 12
+      },
+      "fingerprint": "8a93cdfaa7cabafc"
+    },
+    {
+      "body": "**warn** `plow/unused-component-output`: output \\`selected\\` is declared but emitted nowhere in component \\`UserCardComponent\\` \\(remove it or emit it\\)\n\n<!-- plow-fingerprint:v2: d1644f190d895a1a -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/user-card.component.ts",
+        "new_path": "src/user-card.component.ts",
+        "new_line": 15
+      },
+      "fingerprint": "d1644f190d895a1a"
     },
     {
       "body": "**error** `plow/unused-export`: Export 'helperFn' is never imported by other modules\n\n<!-- plow-fingerprint:v2: 6b7fb5f6ae546edb -->",

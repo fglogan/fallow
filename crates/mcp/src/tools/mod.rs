@@ -1,10 +1,13 @@
 mod analyze;
+mod api_runtime;
 mod audit;
 mod check_changed;
 mod check_runtime_coverage;
 mod code_mode;
+mod decision_surface;
 mod dupes;
 mod explain;
+mod fallback_policy;
 mod fix;
 mod flags;
 mod health;
@@ -15,32 +18,43 @@ mod project_info;
 mod security;
 mod trace;
 
-pub use analyze::build_analyze_args;
-pub use audit::build_audit_args;
-pub use check_changed::build_check_changed_args;
+pub use analyze::{build_analyze_args, run_analyze};
+pub use audit::{build_audit_args, run_audit};
+pub use check_changed::{build_check_changed_args, run_check_changed};
+#[cfg(test)]
+pub use check_runtime_coverage::build_get_token_blast_radius_args;
 pub use check_runtime_coverage::{
     build_check_runtime_coverage_args, build_get_blast_radius_args,
     build_get_cleanup_candidates_args, build_get_hot_paths_args, build_get_importance_args,
+    run_check_runtime_coverage, run_get_blast_radius, run_get_cleanup_candidates,
+    run_get_hot_paths, run_get_importance, run_get_token_blast_radius,
 };
 pub use code_mode::execute_code_mode;
-pub use dupes::build_find_dupes_args;
-pub use explain::build_explain_args;
+pub use decision_surface::run_decision_surface;
+pub use dupes::{build_find_dupes_args, run_find_dupes};
+pub use explain::{build_explain_args, run_explain};
+#[cfg(test)]
 pub use fix::{build_fix_apply_args, build_fix_preview_args};
-pub use flags::build_feature_flags_args;
-pub use health::build_health_args;
-pub use impact::{build_impact_all_args, build_impact_args};
+pub use fix::{run_fix_apply, run_fix_preview};
+pub use flags::{build_feature_flags_args, run_feature_flags};
+pub use health::{build_health_args, run_health};
+#[cfg(test)]
+pub use impact::build_impact_all_args;
+pub use impact::{build_impact_args, run_impact, run_impact_all};
 pub use inspect_target::inspect_target;
-pub use list_boundaries::build_list_boundaries_args;
-pub use project_info::build_project_info_args;
-pub use security::build_security_candidates_args;
+pub use list_boundaries::{build_list_boundaries_args, run_list_boundaries};
+pub use project_info::{build_project_info_args, run_project_info};
+pub use security::{build_security_candidates_args, run_security_candidates};
 pub use trace::{
     build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
-    build_trace_file_args,
+    build_trace_file_args, run_trace_clone_tool, run_trace_dependency_tool, run_trace_export_tool,
+    run_trace_file_tool,
 };
 
 use std::process::Stdio;
 use std::time::Duration;
 
+use plow_types::issue_meta::MCP_ISSUE_TYPE_FLAGS;
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, Content, RawContent};
 use tokio::process::Command;
@@ -107,43 +121,7 @@ fn push_regression(
 }
 
 /// Issue type flag names mapped to their CLI flags.
-pub const ISSUE_TYPE_FLAGS: &[(&str, &str)] = &[
-    ("unused-files", "--unused-files"),
-    ("unused-exports", "--unused-exports"),
-    ("unused-types", "--unused-types"),
-    ("private-type-leaks", "--private-type-leaks"),
-    ("unused-deps", "--unused-deps"),
-    ("unused-enum-members", "--unused-enum-members"),
-    ("unused-class-members", "--unused-class-members"),
-    ("unused-store-members", "--unused-store-members"),
-    ("unprovided-injects", "--unprovided-injects"),
-    ("unrendered-components", "--unrendered-components"),
-    ("unused-component-props", "--unused-component-props"),
-    ("unused-component-emits", "--unused-component-emits"),
-    ("unused-server-actions", "--unused-server-actions"),
-    ("unresolved-imports", "--unresolved-imports"),
-    ("unlisted-deps", "--unlisted-deps"),
-    ("duplicate-exports", "--duplicate-exports"),
-    ("circular-deps", "--circular-deps"),
-    ("re-export-cycles", "--re-export-cycles"),
-    ("boundary-violations", "--boundary-violations"),
-    ("policy-violations", "--policy-violations"),
-    ("stale-suppressions", "--stale-suppressions"),
-    ("unused-catalog-entries", "--unused-catalog-entries"),
-    ("empty-catalog-groups", "--empty-catalog-groups"),
-    (
-        "unresolved-catalog-references",
-        "--unresolved-catalog-references",
-    ),
-    (
-        "unused-dependency-overrides",
-        "--unused-dependency-overrides",
-    ),
-    (
-        "misconfigured-dependency-overrides",
-        "--misconfigured-dependency-overrides",
-    ),
-];
+pub const ISSUE_TYPE_FLAGS: &[(&str, &str)] = MCP_ISSUE_TYPE_FLAGS;
 
 /// Valid detection modes for the `find_dupes` tool.
 pub const VALID_DUPES_MODES: &[&str] = &["strict", "mild", "weak", "semantic"];
@@ -251,38 +229,11 @@ async fn spawn_plow(
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     if !output.status.success() {
-        let exit_code = output.status.code().unwrap_or(-1);
-
-        if exit_code == 1 {
-            let text = if stdout.is_empty() {
-                "{}".to_string()
-            } else {
-                stdout.to_string()
-            };
-            return Ok(CallToolResult::success(vec![Content::text(text)]));
-        }
-
-        if !stdout.is_empty() && serde_json::from_str::<serde_json::Value>(&stdout).is_ok() {
-            return Ok(CallToolResult::error(vec![Content::text(
-                stdout.to_string(),
-            )]));
-        }
-
-        let message = if stderr.is_empty() {
-            format!("plow exited with code {exit_code}")
-        } else {
-            stderr.trim().to_string()
-        };
-
-        let error_json = serde_json::json!({
-            "error": true,
-            "message": message,
-            "exit_code": exit_code,
-        });
-
-        return Ok(CallToolResult::error(vec![Content::text(
-            error_json.to_string(),
-        )]));
+        return Ok(non_success_result(
+            output.status.code().unwrap_or(-1),
+            &stdout,
+            &stderr,
+        ));
     }
 
     if stdout.is_empty() {
@@ -294,6 +245,38 @@ async fn spawn_plow(
     Ok(CallToolResult::success(vec![Content::text(
         stdout.to_string(),
     )]))
+}
+
+/// Translate a non-zero CLI exit into the MCP result envelope. Exit 1 (issues
+/// found) is a success carrying the JSON; structured stdout passes through as an
+/// error; otherwise an error JSON is synthesized from stderr.
+fn non_success_result(exit_code: i32, stdout: &str, stderr: &str) -> CallToolResult {
+    if exit_code == 1 {
+        let text = if stdout.is_empty() {
+            "{}".to_string()
+        } else {
+            stdout.to_string()
+        };
+        return CallToolResult::success(vec![Content::text(text)]);
+    }
+
+    if !stdout.is_empty() && serde_json::from_str::<serde_json::Value>(stdout).is_ok() {
+        return CallToolResult::error(vec![Content::text(stdout.to_string())]);
+    }
+
+    let message = if stderr.is_empty() {
+        format!("plow exited with code {exit_code}")
+    } else {
+        stderr.trim().to_string()
+    };
+
+    let error_json = serde_json::json!({
+        "error": true,
+        "message": message,
+        "exit_code": exit_code,
+    });
+
+    CallToolResult::error(vec![Content::text(error_json.to_string())])
 }
 
 /// Execute plow and ensure successful JSON responses have a top-level

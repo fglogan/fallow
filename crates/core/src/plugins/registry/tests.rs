@@ -1527,7 +1527,8 @@ fn discover_config_files_skips_resolved_plugins() {
         resolved.insert(plugin.name());
     }
 
-    let json_configs = discover_config_files(&matchers, &resolved, &[Path::new("/project")], false);
+    let json_configs =
+        discover_config_files(&matchers, &resolved, &[Path::new("/project")], false, None);
     assert!(
         json_configs.is_empty(),
         "discover_config_files should skip all resolved plugins"
@@ -1545,6 +1546,7 @@ fn discover_config_files_returns_empty_for_nonexistent_root() {
         &resolved,
         &[Path::new("/nonexistent-root-xyz-abc")],
         false,
+        None,
     );
     assert!(
         json_configs.is_empty(),
@@ -1702,15 +1704,16 @@ fn run_workspace_fast_returns_empty_for_no_active_plugins() {
     let matchers = registry.precompile_config_matchers();
     let pkg = PackageJson::default();
     let relative_files = vec![];
-    let result = registry.run_workspace_fast(
-        &pkg,
-        Path::new("/workspace/pkg"),
-        Path::new("/workspace"),
-        &matchers,
-        &relative_files,
-        &FxHashSet::default(),
-        false,
-    );
+    let result = registry.run_workspace_fast(&WorkspacePluginRunInput {
+        pkg: &pkg,
+        root: Path::new("/workspace/pkg"),
+        project_root: Path::new("/workspace"),
+        precompiled_config_matchers: &matchers,
+        relative_files: &relative_files,
+        skip_config_plugins: &FxHashSet::default(),
+        production_mode: false,
+        candidate_index: None,
+    });
     assert!(result.active_plugins.is_empty());
     assert!(result.entry_patterns.is_empty());
     assert!(result.config_patterns.is_empty());
@@ -1780,15 +1783,16 @@ fn run_workspace_fast_eslint_config_parsed_when_eslint_active_at_root() {
     skip_config_plugins.insert("eslint");
 
     let workspace_relative = vec![(config_path, "eslint.config.mjs".to_string())];
-    let result = registry.run_workspace_fast(
-        &pkg,
-        &app_dir,
-        monorepo_root,
-        &matchers,
-        &workspace_relative,
-        &skip_config_plugins,
-        false,
-    );
+    let result = registry.run_workspace_fast(&WorkspacePluginRunInput {
+        pkg: &pkg,
+        root: &app_dir,
+        project_root: monorepo_root,
+        precompiled_config_matchers: &matchers,
+        relative_files: &workspace_relative,
+        skip_config_plugins: &skip_config_plugins,
+        production_mode: false,
+        candidate_index: None,
+    });
 
     assert!(
         result
@@ -1806,15 +1810,16 @@ fn run_workspace_fast_detects_active_plugins() {
     let matchers = registry.precompile_config_matchers();
     let pkg = make_pkg(&["next"]);
     let relative_files = vec![];
-    let result = registry.run_workspace_fast(
-        &pkg,
-        Path::new("/workspace/pkg"),
-        Path::new("/workspace"),
-        &matchers,
-        &relative_files,
-        &FxHashSet::default(),
-        false,
-    );
+    let result = registry.run_workspace_fast(&WorkspacePluginRunInput {
+        pkg: &pkg,
+        root: Path::new("/workspace/pkg"),
+        project_root: Path::new("/workspace"),
+        precompiled_config_matchers: &matchers,
+        relative_files: &relative_files,
+        skip_config_plugins: &FxHashSet::default(),
+        production_mode: false,
+        candidate_index: None,
+    });
     assert!(result.active_plugins.contains(&"nextjs".to_string()));
     assert!(!result.entry_patterns.is_empty());
 }
@@ -1825,15 +1830,16 @@ fn run_workspace_fast_detects_script_activated_plugins() {
     let matchers = registry.precompile_config_matchers();
     let pkg = make_pkg_with_script("opennextjs-cloudflare build");
     let relative_files = vec![];
-    let result = registry.run_workspace_fast(
-        &pkg,
-        Path::new("/workspace/pkg"),
-        Path::new("/workspace"),
-        &matchers,
-        &relative_files,
-        &FxHashSet::default(),
-        false,
-    );
+    let result = registry.run_workspace_fast(&WorkspacePluginRunInput {
+        pkg: &pkg,
+        root: Path::new("/workspace/pkg"),
+        project_root: Path::new("/workspace"),
+        precompiled_config_matchers: &matchers,
+        relative_files: &relative_files,
+        skip_config_plugins: &FxHashSet::default(),
+        production_mode: false,
+        candidate_index: None,
+    });
 
     assert!(
         result
@@ -1850,15 +1856,16 @@ fn run_workspace_fast_filters_matchers_to_active_plugins() {
 
     let pkg = make_pkg(&["next"]);
     let relative_files = vec![];
-    let result = registry.run_workspace_fast(
-        &pkg,
-        Path::new("/workspace/pkg"),
-        Path::new("/workspace"),
-        &matchers,
-        &relative_files,
-        &FxHashSet::default(),
-        false,
-    );
+    let result = registry.run_workspace_fast(&WorkspacePluginRunInput {
+        pkg: &pkg,
+        root: Path::new("/workspace/pkg"),
+        project_root: Path::new("/workspace"),
+        precompiled_config_matchers: &matchers,
+        relative_files: &relative_files,
+        skip_config_plugins: &FxHashSet::default(),
+        production_mode: false,
+        candidate_index: None,
+    });
     assert!(result.active_plugins.contains(&"nextjs".to_string()));
     assert!(
         !result.active_plugins.contains(&"jest".to_string()),
@@ -1886,15 +1893,16 @@ fn run_workspace_fast_resolves_config_from_workspace_relative_paths() {
     .unwrap();
 
     let workspace_relative = vec![(config_path, "vite.config.ts".to_string())];
-    let result = registry.run_workspace_fast(
-        &pkg,
-        &workspace_root,
+    let result = registry.run_workspace_fast(&WorkspacePluginRunInput {
+        pkg: &pkg,
+        root: &workspace_root,
         project_root,
-        &matchers,
-        &workspace_relative,
-        &FxHashSet::default(),
-        false,
-    );
+        precompiled_config_matchers: &matchers,
+        relative_files: &workspace_relative,
+        skip_config_plugins: &FxHashSet::default(),
+        production_mode: false,
+        candidate_index: None,
+    });
 
     let entry_patterns: Vec<String> = result
         .entry_patterns
@@ -2224,7 +2232,7 @@ fn discover_config_files_finds_in_subdirectory() {
     let resolved: FxHashSet<&str> = FxHashSet::default();
 
     let json_configs =
-        discover_config_files(&matchers, &resolved, &[root, subdir.as_path()], false);
+        discover_config_files(&matchers, &resolved, &[root, subdir.as_path()], false, None);
     let found_project_json = json_configs
         .iter()
         .any(|(path, _)| path.ends_with("project.json"));
@@ -2244,13 +2252,76 @@ fn discover_config_files_expands_root_brace_patterns_for_dotfile_configs() {
     let matchers = registry.precompile_config_matchers();
     let resolved: FxHashSet<&str> = FxHashSet::default();
 
-    let configs = discover_config_files(&matchers, &resolved, &[root], false);
+    let configs = discover_config_files(&matchers, &resolved, &[root], false, None);
     let found_babelrc = configs
         .iter()
         .any(|(path, plugin)| plugin.name() == "babel" && path.ends_with(".babelrc.json"));
     assert!(
         found_babelrc,
         "discover_config_files should expand `.babelrc.{{js,cjs,mjs,json}}` at the root"
+    );
+}
+
+#[test]
+fn in_memory_config_discovery_matches_filesystem() {
+    // Pin the byte-identical contract at the unit level: resolving config
+    // patterns against the in-memory candidate index must produce exactly the
+    // same hits as the filesystem probe, across plain / nested / dotfile /
+    // nested-non-source / toml pattern shapes.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join("packages/a")).unwrap();
+    std::fs::create_dir_all(root.join("prisma")).unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    let files = [
+        root.join("tsconfig.json"),
+        root.join("packages/a/tsconfig.json"),
+        root.join(".eslintrc.json"),
+        root.join("prisma/schema.prisma"),
+        root.join("bunfig.toml"),
+        root.join("src/index.ts"),
+    ];
+    for path in &files {
+        std::fs::write(path, "{}").unwrap();
+    }
+
+    let registry = PluginRegistry::default();
+    let matchers = registry.precompile_config_matchers();
+    let resolved: FxHashSet<&str> = FxHashSet::default();
+    let pkg_a = root.join("packages/a");
+    let prisma = root.join("prisma");
+    let src = root.join("src");
+    let roots: Vec<&Path> = vec![root, pkg_a.as_path(), prisma.as_path(), src.as_path()];
+
+    let index = ConfigCandidateIndex::build(files.iter().map(PathBuf::as_path));
+
+    let normalize = |hits: Vec<(PathBuf, &dyn super::Plugin)>| {
+        let mut out: Vec<(PathBuf, &str)> = hits
+            .into_iter()
+            .map(|(p, plugin)| (p, plugin.name()))
+            .collect();
+        out.sort();
+        out
+    };
+
+    let fs_hits = normalize(discover_config_files(
+        &matchers, &resolved, &roots, false, None,
+    ));
+    let mem_hits = normalize(discover_config_files(
+        &matchers,
+        &resolved,
+        &roots,
+        false,
+        Some(&index),
+    ));
+
+    assert_eq!(
+        fs_hits, mem_hits,
+        "in-memory config discovery must match the filesystem probe"
+    );
+    assert!(
+        fs_hits.iter().any(|(p, _)| p.ends_with("tsconfig.json")),
+        "the fixture should surface a tsconfig.json so the parity assertion is non-vacuous"
     );
 }
 
@@ -2264,7 +2335,7 @@ fn discover_config_files_skips_source_ext_root_patterns() {
     let matchers = registry.precompile_config_matchers();
     let resolved: FxHashSet<&str> = FxHashSet::default();
 
-    let configs = discover_config_files(&matchers, &resolved, &[root], false);
+    let configs = discover_config_files(&matchers, &resolved, &[root], false, None);
     let found_vite_config = configs
         .iter()
         .any(|(path, plugin)| plugin.name() == "vite" && path.ends_with("vite.config.ts"));

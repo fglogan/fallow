@@ -1,31 +1,16 @@
 use std::cell::RefCell;
+#[cfg(test)]
 use std::fs;
-use std::io::{Read, Seek, SeekFrom};
-use std::process::{Command, Stdio};
+#[cfg(test)]
+use std::process::Command;
 use std::rc::Rc;
-use std::thread;
 use std::time::{Duration, Instant};
 
 use rquickjs::prelude::{Func, MutFn};
 use rquickjs::{Context, Ctx, Error as JsError, Exception, FromJs, Object, Runtime, Value};
 use serde_json::json;
 
-use crate::params::{
-    AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, CodeExecuteParams,
-    ExplainParams, FeatureFlagsParams, FindDupesParams, HealthParams, ImpactParams,
-    ListBoundariesParams, ProjectInfoParams, SecurityCandidatesParams, TraceCloneParams,
-    TraceDependencyParams, TraceExportParams, TraceFileParams,
-};
-
-use super::{
-    build_analyze_args, build_audit_args, build_check_changed_args,
-    build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
-    build_find_dupes_args, build_get_blast_radius_args, build_get_cleanup_candidates_args,
-    build_get_hot_paths_args, build_get_importance_args, build_health_args, build_impact_args,
-    build_list_boundaries_args, build_project_info_args, build_security_candidates_args,
-    build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
-    build_trace_file_args,
-};
+use crate::params::CodeExecuteParams;
 
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 const MAX_TIMEOUT_MS: u64 = 30_000;
@@ -35,8 +20,18 @@ const MAX_OUTPUT_BYTES: usize = 4_000_000;
 const MEMORY_LIMIT_BYTES: usize = 32 * 1024 * 1024;
 const MAX_STACK_BYTES: usize = 512 * 1024;
 const MAX_HOST_CALLS: usize = 8;
-const STDERR_LIMIT_BYTES: usize = 64 * 1024;
-const POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+#[path = "code_mode_subprocess.rs"]
+mod code_mode_subprocess;
+#[path = "code_mode_tools.rs"]
+mod code_mode_tools;
+
+#[cfg(test)]
+use code_mode_subprocess::normalize_output;
+use code_mode_subprocess::run_plow_sync;
+use code_mode_tools::{
+    CODE_MODE_ALIASES, CodeModeTool, build_tool_args, merge_default_root, run_api_tool,
+};
 
 pub fn execute_code_mode(binary: String, params: CodeExecuteParams) -> Result<String, String> {
     let timeout_ms = params
@@ -47,27 +42,20 @@ pub fn execute_code_mode(binary: String, params: CodeExecuteParams) -> Result<St
         .max_output_bytes
         .unwrap_or(DEFAULT_MAX_OUTPUT_BYTES)
         .min(MAX_OUTPUT_BYTES);
+    let limits = code_mode_limits(timeout_ms, max_output_bytes);
     if params.code.len() > MAX_CODE_BYTES {
         return Err(json!({
             "schema_version": "mcp-code-execute/v1",
             "ok": false,
             "error": format!("code mode snippet exceeded {MAX_CODE_BYTES} bytes"),
             "calls": [],
-            "limits": {
-                "timeout_ms": timeout_ms,
-                "max_output_bytes": max_output_bytes,
-                "max_host_calls": MAX_HOST_CALLS
-            }
+            "limits": limits
         })
         .to_string());
     }
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
 
-    let runtime = Runtime::new().map_err(|err| format!("failed to create JS runtime: {err}"))?;
-    runtime.set_memory_limit(MEMORY_LIMIT_BYTES);
-    runtime.set_max_stack_size(MAX_STACK_BYTES);
-    runtime.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
-
+    let runtime = build_code_mode_runtime(deadline)?;
     let context =
         Context::full(&runtime).map_err(|err| format!("failed to create JS context: {err}"))?;
     let state = Rc::new(RefCell::new(CodeModeState {
@@ -79,48 +67,62 @@ pub fn execute_code_mode(binary: String, params: CodeExecuteParams) -> Result<St
         calls: Vec::new(),
     }));
 
-    let result = context.with(|ctx| -> Result<String, String> {
-        install_globals(&ctx, &state).map_err(|err| js_error_message(&ctx, &err))?;
-        let source = user_source(&params.code);
+    let result = run_code_mode_eval(&context, &state, &params.code);
+
+    let calls = &state.borrow().calls;
+    match result {
+        Ok(result_json) => Ok(json!({
+            "schema_version": "mcp-code-execute/v1",
+            "ok": true,
+            "result": serde_json::from_str::<serde_json::Value>(&result_json)
+                .unwrap_or(serde_json::Value::Null),
+            "calls": calls,
+            "limits": limits
+        })
+        .to_string()),
+        Err(err) => Err(json!({
+            "schema_version": "mcp-code-execute/v1",
+            "ok": false,
+            "error": normalize_code_mode_error(&err, deadline),
+            "calls": calls,
+            "limits": limits
+        })
+        .to_string()),
+    }
+}
+
+/// Build the `limits` JSON block echoed on every code-mode response.
+fn code_mode_limits(timeout_ms: u64, max_output_bytes: usize) -> serde_json::Value {
+    json!({
+        "timeout_ms": timeout_ms,
+        "max_output_bytes": max_output_bytes,
+        "max_host_calls": MAX_HOST_CALLS
+    })
+}
+
+/// Install the host API into `context` and evaluate the user snippet, returning
+/// the JSON-stringified result or a normalized error message.
+fn run_code_mode_eval(
+    context: &Context,
+    state: &Rc<RefCell<CodeModeState>>,
+    code: &str,
+) -> Result<String, String> {
+    context.with(|ctx| -> Result<String, String> {
+        install_globals(&ctx, state).map_err(|err| js_error_message(&ctx, &err))?;
+        let source = user_source(code);
         ctx.eval::<Value, _>(source)
             .and_then(|value| stringify_json(&ctx, value))
             .map_err(|err| js_error_message(&ctx, &err))
-    });
+    })
+}
 
-    match result {
-        Ok(result_json) => {
-            let state = state.borrow();
-            let output = json!({
-                "schema_version": "mcp-code-execute/v1",
-                "ok": true,
-                "result": serde_json::from_str::<serde_json::Value>(&result_json)
-                    .unwrap_or(serde_json::Value::Null),
-                "calls": state.calls,
-                "limits": {
-                    "timeout_ms": timeout_ms,
-                    "max_output_bytes": max_output_bytes,
-                    "max_host_calls": MAX_HOST_CALLS
-                }
-            });
-            Ok(output.to_string())
-        }
-        Err(err) => {
-            let err = normalize_code_mode_error(&err, deadline);
-            let state = state.borrow();
-            let output = json!({
-                "schema_version": "mcp-code-execute/v1",
-                "ok": false,
-                "error": err,
-                "calls": state.calls,
-                "limits": {
-                    "timeout_ms": timeout_ms,
-                    "max_output_bytes": max_output_bytes,
-                    "max_host_calls": MAX_HOST_CALLS
-                }
-            });
-            Err(output.to_string())
-        }
-    }
+/// Build the sandboxed QuickJS runtime with memory, stack, and deadline limits.
+fn build_code_mode_runtime(deadline: Instant) -> Result<Runtime, String> {
+    let runtime = Runtime::new().map_err(|err| format!("failed to create JS runtime: {err}"))?;
+    runtime.set_memory_limit(MEMORY_LIMIT_BYTES);
+    runtime.set_max_stack_size(MAX_STACK_BYTES);
+    runtime.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
+    Ok(runtime)
 }
 
 fn normalize_code_mode_error(err: &str, deadline: Instant) -> String {
@@ -327,7 +329,6 @@ impl CodeModeState {
         let tool = CodeModeTool::from_name(tool)?;
         call.tool = tool.name().to_string();
         let params = merge_default_root(params_json, self.default_root.as_deref())?;
-        let args = build_tool_args(tool, params)?;
         let remaining_output_bytes = self.max_output_bytes.saturating_sub(self.output_bytes);
         if remaining_output_bytes == 0 {
             return Err(format!(
@@ -335,13 +336,18 @@ impl CodeModeState {
                 self.max_output_bytes
             ));
         }
-        let stdout = run_plow_sync(
-            &self.binary,
-            "code_execute",
-            &args,
-            self.deadline,
-            remaining_output_bytes,
-        )?;
+        let stdout = if let Some(value) = run_api_tool(tool, params.clone())? {
+            serde_json::to_string(&value).unwrap_or_else(|_| "{}".to_string())
+        } else {
+            let args = build_tool_args(tool, params)?;
+            run_plow_sync(
+                &self.binary,
+                "code_execute",
+                &args,
+                self.deadline,
+                remaining_output_bytes,
+            )?
+        };
         call.output_bytes = stdout.len();
         self.output_bytes = self
             .output_bytes
@@ -386,338 +392,6 @@ fn classify_host_error(message: &str) -> &'static str {
         return "invalid_params";
     }
     "subprocess"
-}
-
-#[derive(Clone, Copy)]
-enum CodeModeTool {
-    Analyze,
-    CheckChanged,
-    SecurityCandidates,
-    FindDupes,
-    ProjectInfo,
-    TraceExport,
-    TraceFile,
-    TraceDependency,
-    TraceClone,
-    CheckHealth,
-    Audit,
-    PlowExplain,
-    ListBoundaries,
-    FeatureFlags,
-    Impact,
-    CheckRuntimeCoverage,
-    GetHotPaths,
-    GetBlastRadius,
-    GetImportance,
-    GetCleanupCandidates,
-}
-
-impl CodeModeTool {
-    fn from_name(name: &str) -> Result<Self, String> {
-        match name {
-            "analyze" => Ok(Self::Analyze),
-            "check_changed" => Ok(Self::CheckChanged),
-            "security_candidates" => Ok(Self::SecurityCandidates),
-            "find_dupes" => Ok(Self::FindDupes),
-            "project_info" => Ok(Self::ProjectInfo),
-            "trace_export" => Ok(Self::TraceExport),
-            "trace_file" => Ok(Self::TraceFile),
-            "trace_dependency" => Ok(Self::TraceDependency),
-            "trace_clone" => Ok(Self::TraceClone),
-            "check_health" => Ok(Self::CheckHealth),
-            "audit" => Ok(Self::Audit),
-            "plow_explain" => Ok(Self::PlowExplain),
-            "list_boundaries" => Ok(Self::ListBoundaries),
-            "feature_flags" => Ok(Self::FeatureFlags),
-            "impact" => Ok(Self::Impact),
-            "check_runtime_coverage" => Ok(Self::CheckRuntimeCoverage),
-            "get_hot_paths" => Ok(Self::GetHotPaths),
-            "get_blast_radius" => Ok(Self::GetBlastRadius),
-            "get_importance" => Ok(Self::GetImportance),
-            "get_cleanup_candidates" => Ok(Self::GetCleanupCandidates),
-            "fix_preview" | "fix_apply" => Err(
-                "code mode does not expose fix tools; use standalone MCP tools for previews"
-                    .to_string(),
-            ),
-            _ => Err(format!("unsupported code mode plow tool '{name}'")),
-        }
-    }
-
-    fn name(self) -> &'static str {
-        match self {
-            Self::Analyze => "analyze",
-            Self::CheckChanged => "check_changed",
-            Self::SecurityCandidates => "security_candidates",
-            Self::FindDupes => "find_dupes",
-            Self::ProjectInfo => "project_info",
-            Self::TraceExport => "trace_export",
-            Self::TraceFile => "trace_file",
-            Self::TraceDependency => "trace_dependency",
-            Self::TraceClone => "trace_clone",
-            Self::CheckHealth => "check_health",
-            Self::Audit => "audit",
-            Self::PlowExplain => "plow_explain",
-            Self::ListBoundaries => "list_boundaries",
-            Self::FeatureFlags => "feature_flags",
-            Self::Impact => "impact",
-            Self::CheckRuntimeCoverage => "check_runtime_coverage",
-            Self::GetHotPaths => "get_hot_paths",
-            Self::GetBlastRadius => "get_blast_radius",
-            Self::GetImportance => "get_importance",
-            Self::GetCleanupCandidates => "get_cleanup_candidates",
-        }
-    }
-}
-
-const CODE_MODE_ALIASES: &[(&str, &str)] = &[
-    ("analyze", "analyze"),
-    ("checkChanged", "check_changed"),
-    ("securityCandidates", "security_candidates"),
-    ("findDupes", "find_dupes"),
-    ("projectInfo", "project_info"),
-    ("traceExport", "trace_export"),
-    ("traceFile", "trace_file"),
-    ("traceDependency", "trace_dependency"),
-    ("traceClone", "trace_clone"),
-    ("checkHealth", "check_health"),
-    ("audit", "audit"),
-    ("explain", "plow_explain"),
-    ("listBoundaries", "list_boundaries"),
-    ("featureFlags", "feature_flags"),
-    ("impact", "impact"),
-    ("checkRuntimeCoverage", "check_runtime_coverage"),
-    ("getHotPaths", "get_hot_paths"),
-    ("getBlastRadius", "get_blast_radius"),
-    ("getImportance", "get_importance"),
-    ("getCleanupCandidates", "get_cleanup_candidates"),
-];
-
-fn merge_default_root(
-    params_json: &str,
-    default_root: Option<&str>,
-) -> Result<serde_json::Value, String> {
-    let mut params: serde_json::Value =
-        serde_json::from_str(params_json).map_err(|err| format!("invalid params JSON: {err}"))?;
-    if !params.is_object() {
-        return Err("plow host call params must be an object".to_string());
-    }
-    if let Some(root) = default_root
-        && params.get("root").is_none()
-        && let Some(object) = params.as_object_mut()
-    {
-        object.insert(
-            "root".to_string(),
-            serde_json::Value::String(root.to_string()),
-        );
-    }
-    Ok(params)
-}
-
-fn build_tool_args(tool: CodeModeTool, params: serde_json::Value) -> Result<Vec<String>, String> {
-    match tool {
-        CodeModeTool::Analyze => {
-            let params: AnalyzeParams = parse_params(params)?;
-            build_analyze_args(&params)
-        }
-        CodeModeTool::CheckChanged => {
-            let params: CheckChangedParams = parse_params(params)?;
-            Ok(build_check_changed_args(params))
-        }
-        CodeModeTool::SecurityCandidates => {
-            let params: SecurityCandidatesParams = parse_params(params)?;
-            build_security_candidates_args(&params)
-        }
-        CodeModeTool::FindDupes => {
-            let params: FindDupesParams = parse_params(params)?;
-            build_find_dupes_args(&params)
-        }
-        CodeModeTool::ProjectInfo => {
-            let params: ProjectInfoParams = parse_params(params)?;
-            Ok(build_project_info_args(&params))
-        }
-        CodeModeTool::TraceExport => {
-            let params: TraceExportParams = parse_params(params)?;
-            build_trace_export_args(&params)
-        }
-        CodeModeTool::TraceFile => {
-            let params: TraceFileParams = parse_params(params)?;
-            build_trace_file_args(&params)
-        }
-        CodeModeTool::TraceDependency => {
-            let params: TraceDependencyParams = parse_params(params)?;
-            build_trace_dependency_args(&params)
-        }
-        CodeModeTool::TraceClone => {
-            let params: TraceCloneParams = parse_params(params)?;
-            build_trace_clone_args(&params)
-        }
-        CodeModeTool::CheckHealth => {
-            let params: HealthParams = parse_params(params)?;
-            Ok(build_health_args(&params))
-        }
-        CodeModeTool::Audit => {
-            let params: AuditParams = parse_params(params)?;
-            build_audit_args(&params)
-        }
-        CodeModeTool::PlowExplain => {
-            let params: ExplainParams = parse_params(params)?;
-            Ok(build_explain_args(&params))
-        }
-        CodeModeTool::ListBoundaries => {
-            let params: ListBoundariesParams = parse_params(params)?;
-            Ok(build_list_boundaries_args(&params))
-        }
-        CodeModeTool::FeatureFlags => {
-            let params: FeatureFlagsParams = parse_params(params)?;
-            Ok(build_feature_flags_args(&params))
-        }
-        CodeModeTool::Impact => {
-            let params: ImpactParams = parse_params(params)?;
-            Ok(build_impact_args(&params))
-        }
-        CodeModeTool::CheckRuntimeCoverage => {
-            let params: CheckRuntimeCoverageParams = parse_params(params)?;
-            Ok(build_check_runtime_coverage_args(&params))
-        }
-        CodeModeTool::GetHotPaths => {
-            let params: CheckRuntimeCoverageParams = parse_params(params)?;
-            Ok(build_get_hot_paths_args(&params))
-        }
-        CodeModeTool::GetBlastRadius => {
-            let params: CheckRuntimeCoverageParams = parse_params(params)?;
-            Ok(build_get_blast_radius_args(&params))
-        }
-        CodeModeTool::GetImportance => {
-            let params: CheckRuntimeCoverageParams = parse_params(params)?;
-            Ok(build_get_importance_args(&params))
-        }
-        CodeModeTool::GetCleanupCandidates => {
-            let params: CheckRuntimeCoverageParams = parse_params(params)?;
-            Ok(build_get_cleanup_candidates_args(&params))
-        }
-    }
-}
-
-fn parse_params<T>(params: serde_json::Value) -> Result<T, String>
-where
-    T: serde::de::DeserializeOwned,
-{
-    serde_json::from_value(params).map_err(|err| format!("invalid tool params: {err}"))
-}
-
-fn run_plow_sync(
-    binary: &str,
-    tool: &'static str,
-    args: &[String],
-    deadline: Instant,
-    max_output_bytes: usize,
-) -> Result<String, String> {
-    let mut stdout_file = tempfile::NamedTempFile::new()
-        .map_err(|err| format!("failed to create stdout temp file: {err}"))?;
-    let mut stderr_file = tempfile::NamedTempFile::new()
-        .map_err(|err| format!("failed to create stderr temp file: {err}"))?;
-    let mut child = Command::new(binary)
-        .args(args)
-        .stdout(Stdio::from(
-            stdout_file
-                .reopen()
-                .map_err(|err| format!("failed to reopen stdout temp file: {err}"))?,
-        ))
-        .stderr(Stdio::from(
-            stderr_file
-                .reopen()
-                .map_err(|err| format!("failed to reopen stderr temp file: {err}"))?,
-        ))
-        .env("PLOW_INTEGRATION_SURFACE", "mcp")
-        .env("PLOW_MCP_TOOL", tool)
-        .spawn()
-        .map_err(|err| {
-            format!(
-                "failed to execute plow binary '{binary}': {err}. Ensure plow is installed and available in PATH, or set PLOW_BIN."
-            )
-        })?;
-
-    loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|err| format!("failed to wait for plow subprocess: {err}"))?
-        {
-            let stdout_len = file_len(stdout_file.as_file())?;
-            if stdout_len > max_output_bytes as u64 {
-                return Err(format!(
-                    "code mode host output exceeded {max_output_bytes} bytes"
-                ));
-            }
-
-            let stdout = read_file(stdout_file.as_file_mut(), "stdout")?;
-            let stderr = read_limited_file(stderr_file.as_file_mut(), STDERR_LIMIT_BYTES)?;
-            return normalize_output(status.code().unwrap_or(-1), &stdout, &stderr);
-        }
-
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err("code mode execution timed out while running plow".to_string());
-        }
-        if file_len(stdout_file.as_file())? > max_output_bytes as u64 {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(format!(
-                "code mode host output exceeded {max_output_bytes} bytes"
-            ));
-        }
-
-        thread::sleep(POLL_INTERVAL);
-    }
-}
-
-fn file_len(file: &fs::File) -> Result<u64, String> {
-    file.metadata()
-        .map(|metadata| metadata.len())
-        .map_err(|err| format!("failed to inspect plow output file: {err}"))
-}
-
-fn read_file(file: &mut fs::File, label: &str) -> Result<Vec<u8>, String> {
-    file.seek(SeekFrom::Start(0))
-        .map_err(|err| format!("failed to rewind plow {label}: {err}"))?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|err| format!("failed to read plow {label}: {err}"))?;
-    Ok(bytes)
-}
-
-fn read_limited_file(file: &mut fs::File, limit: usize) -> Result<Vec<u8>, String> {
-    let len = file_len(file)?;
-    if len > limit as u64 {
-        return Ok(format!("stderr exceeded {limit} bytes").into_bytes());
-    }
-    read_file(file, "stderr")
-}
-
-fn normalize_output(exit_code: i32, stdout: &[u8], stderr: &[u8]) -> Result<String, String> {
-    let stdout = String::from_utf8_lossy(stdout).to_string();
-    let stderr = String::from_utf8_lossy(stderr).trim().to_string();
-
-    match exit_code {
-        0 | 1 => Ok(if stdout.is_empty() {
-            "{}".to_string()
-        } else {
-            stdout
-        }),
-        _ if !stdout.is_empty() && serde_json::from_str::<serde_json::Value>(&stdout).is_ok() => {
-            Err(stdout)
-        }
-        _ => Err(json!({
-            "error": true,
-            "message": if stderr.is_empty() {
-                format!("plow exited with code {exit_code}")
-            } else {
-                stderr
-            },
-            "exit_code": exit_code
-        })
-        .to_string()),
-    }
 }
 
 #[cfg(test)]
@@ -799,6 +473,290 @@ mod tests {
     }
 
     #[test]
+    fn api_backed_analyze_does_not_spawn_binary() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir(temp.path().join("src")).expect("src dir");
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"name":"code-mode-api-test","type":"module"}"#,
+        )
+        .expect("package json");
+        fs::write(
+            temp.path().join("src/index.ts"),
+            "export const unused = 1;\n",
+        )
+        .expect("source");
+
+        let output = execute_code_mode(
+            "/definitely/not/plow".to_string(),
+            CodeExecuteParams {
+                code:
+                    r#"return plow.analyze({ issue_types: ["unused-exports"], no_cache: true });"#
+                        .to_string(),
+                root: Some(temp.path().display().to_string()),
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(200_000),
+            },
+        )
+        .expect("api-backed analyze should not need the binary");
+
+        let json: serde_json::Value = serde_json::from_str(&output).expect("code mode json");
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"]["kind"].as_str(), Some("dead-code"));
+        assert_eq!(json["calls"][0]["tool"].as_str(), Some("analyze"));
+        assert_eq!(json["calls"][0]["ok"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn api_backed_analyze_circular_only_uses_family_output() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir(temp.path().join("src")).expect("src dir");
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"name":"code-mode-circular-test","type":"module","main":"src/a.ts"}"#,
+        )
+        .expect("package json");
+        fs::write(temp.path().join("src/a.ts"), "import './b';\n").expect("source a");
+        fs::write(temp.path().join("src/b.ts"), "import './a';\n").expect("source b");
+
+        let output = execute_code_mode(
+            "/definitely/not/plow".to_string(),
+            CodeExecuteParams {
+                code: r#"return plow.analyze({ issue_types: ["circular-deps"], no_cache: true });"#
+                    .to_string(),
+                root: Some(temp.path().display().to_string()),
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(200_000),
+            },
+        )
+        .expect("api-backed circular analyze should not need the binary");
+
+        let json: serde_json::Value = serde_json::from_str(&output).expect("code mode json");
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"]["kind"].as_str(), Some("dead-code"));
+        assert!(json["result"]["circular_dependencies"].is_array());
+        assert_eq!(
+            json["result"]["unused_exports"].as_array().map(Vec::len),
+            Some(0)
+        );
+        assert_eq!(json["calls"][0]["tool"].as_str(), Some("analyze"));
+        assert_eq!(json["calls"][0]["ok"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn api_backed_check_changed_does_not_spawn_binary() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir(temp.path().join("src")).expect("src dir");
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"name":"code-mode-changed-test","type":"module","main":"src/index.ts"}"#,
+        )
+        .expect("package json");
+        fs::write(temp.path().join("src/index.ts"), "console.log('entry');\n").expect("source");
+        fs::write(
+            temp.path().join("src/feature.ts"),
+            "export const used = 1;\n",
+        )
+        .expect("feature source");
+        git(temp.path(), &["init"]);
+        git(temp.path(), &["add", "."]);
+        git(
+            temp.path(),
+            &[
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        );
+        fs::write(
+            temp.path().join("src/feature.ts"),
+            "export const unused = 1;\n",
+        )
+        .expect("changed source");
+
+        let output = execute_code_mode(
+            "/definitely/not/plow".to_string(),
+            CodeExecuteParams {
+                code: r#"return plow.checkChanged({ since: "HEAD", no_cache: true });"#.to_string(),
+                root: Some(temp.path().display().to_string()),
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(200_000),
+            },
+        )
+        .expect("api-backed checkChanged should not need the binary");
+
+        let json: serde_json::Value = serde_json::from_str(&output).expect("code mode json");
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"]["kind"].as_str(), Some("dead-code"));
+        assert!(json["result"]["summary"].is_object());
+        assert_eq!(json["calls"][0]["tool"].as_str(), Some("check_changed"));
+        assert_eq!(json["calls"][0]["ok"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn api_backed_feature_flags_does_not_spawn_binary() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir(temp.path().join("src")).expect("src dir");
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"name":"code-mode-flags-test","type":"module","main":"src/index.ts"}"#,
+        )
+        .expect("package json");
+        fs::write(
+            temp.path().join("src/index.ts"),
+            "if (process.env.FEATURE_ALPHA) {\n  console.log('on');\n}\n",
+        )
+        .expect("source");
+
+        let output = execute_code_mode(
+            "/definitely/not/plow".to_string(),
+            CodeExecuteParams {
+                code: "return plow.featureFlags({ no_cache: true });".to_string(),
+                root: Some(temp.path().display().to_string()),
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(200_000),
+            },
+        )
+        .expect("api-backed feature flags should not need the binary");
+
+        let json: serde_json::Value = serde_json::from_str(&output).expect("code mode json");
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"]["kind"].as_str(), Some("feature-flags"));
+        assert_eq!(
+            json["result"]["feature_flags"][0]["flag_name"].as_str(),
+            Some("FEATURE_ALPHA")
+        );
+        assert_eq!(json["calls"][0]["tool"].as_str(), Some("feature_flags"));
+        assert_eq!(json["calls"][0]["ok"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn api_backed_list_boundaries_does_not_spawn_binary() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src/app")).expect("app dir");
+        fs::create_dir_all(temp.path().join("src/shared")).expect("shared dir");
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"name":"code-mode-boundaries-test","type":"module","main":"src/app/index.ts"}"#,
+        )
+        .expect("package json");
+        fs::write(
+            temp.path().join(".plowrc.json"),
+            r#"{
+                "boundaries": {
+                    "zones": [
+                        { "name": "app", "patterns": ["src/app/**"] },
+                        { "name": "shared", "patterns": ["src/shared/**"] }
+                    ],
+                    "rules": [
+                        { "from": "app", "allow": ["shared"] }
+                    ]
+                }
+            }"#,
+        )
+        .expect("config");
+        fs::write(
+            temp.path().join("src/app/index.ts"),
+            "export const app = 1;\n",
+        )
+        .expect("app source");
+        fs::write(
+            temp.path().join("src/shared/index.ts"),
+            "export const shared = 1;\n",
+        )
+        .expect("shared source");
+
+        let output = execute_code_mode(
+            "/definitely/not/plow".to_string(),
+            CodeExecuteParams {
+                code: "return plow.listBoundaries({ no_cache: true });".to_string(),
+                root: Some(temp.path().display().to_string()),
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(200_000),
+            },
+        )
+        .expect("api-backed list boundaries should not need the binary");
+
+        let json: serde_json::Value = serde_json::from_str(&output).expect("code mode json");
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"]["kind"].as_str(), Some("list-boundaries"));
+        assert_eq!(json["result"]["boundaries"]["zone_count"], 2);
+        assert_eq!(json["result"]["boundaries"]["rule_count"], 1);
+        assert_eq!(json["calls"][0]["tool"].as_str(), Some("list_boundaries"));
+        assert_eq!(json["calls"][0]["ok"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn api_backed_explain_does_not_spawn_binary() {
+        let output = execute_code_mode(
+            "/definitely/not/plow".to_string(),
+            CodeExecuteParams {
+                code: "return plow.explain({ issue_type: 'unused-export' });".to_string(),
+                root: None,
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(200_000),
+            },
+        )
+        .expect("api-backed explain should not need the binary");
+
+        let json: serde_json::Value = serde_json::from_str(&output).expect("code mode json");
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"]["kind"].as_str(), Some("explain"));
+        assert_eq!(json["result"]["id"].as_str(), Some("plow/unused-export"));
+        assert_eq!(json["calls"][0]["tool"].as_str(), Some("plow_explain"));
+        assert_eq!(json["calls"][0]["ok"].as_bool(), Some(true));
+    }
+
+    fn git(root: &std::path::Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .status()
+            .expect("git command starts");
+        assert!(status.success(), "git command failed: {args:?}");
+    }
+
+    #[test]
+    fn api_backed_project_info_does_not_spawn_binary() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir(temp.path().join("src")).expect("src dir");
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"name":"code-mode-project-info-test","type":"module","main":"src/index.ts"}"#,
+        )
+        .expect("package json");
+        fs::write(
+            temp.path().join("src/index.ts"),
+            "export const value = 1;\n",
+        )
+        .expect("source");
+
+        let output = execute_code_mode(
+            "/definitely/not/plow".to_string(),
+            CodeExecuteParams {
+                code: "return plow.projectInfo({ files: true, no_cache: true });".to_string(),
+                root: Some(temp.path().display().to_string()),
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(200_000),
+            },
+        )
+        .expect("api-backed projectInfo should not need the binary");
+
+        let json: serde_json::Value = serde_json::from_str(&output).expect("code mode json");
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"]["file_count"], 1);
+        assert_eq!(json["result"]["files"][0], "src/index.ts");
+        assert_eq!(json["calls"][0]["tool"].as_str(), Some("project_info"));
+        assert_eq!(json["calls"][0]["ok"].as_bool(), Some(true));
+    }
+
+    #[test]
     fn cpu_bound_snippets_report_timeout() {
         let output = execute_code_mode(
             "plow".to_string(),
@@ -817,6 +775,860 @@ mod tests {
             json["error"].as_str(),
             Some("code mode execution timed out")
         );
+        assert_eq!(json["calls"].as_array().map(Vec::len), Some(0));
+    }
+
+    // ---- CodeModeTool::from_name round-trip --------------------------------
+
+    #[test]
+    fn all_valid_tool_names_parse_successfully() {
+        let valid = [
+            "analyze",
+            "check_changed",
+            "security_candidates",
+            "find_dupes",
+            "project_info",
+            "trace_export",
+            "trace_file",
+            "trace_dependency",
+            "trace_clone",
+            "check_health",
+            "audit",
+            "plow_explain",
+            "list_boundaries",
+            "feature_flags",
+            "impact",
+            "check_runtime_coverage",
+            "get_hot_paths",
+            "get_blast_radius",
+            "get_importance",
+            "get_cleanup_candidates",
+        ];
+        for name in valid {
+            assert!(
+                CodeModeTool::from_name(name).is_ok(),
+                "expected '{name}' to parse"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_tool_name_returns_unsupported_error() {
+        let Err(err) = CodeModeTool::from_name("nonexistent_tool") else {
+            panic!("expected Err for unknown tool")
+        };
+        assert!(
+            err.contains("unsupported code mode plow tool"),
+            "error was: {err}"
+        );
+        assert!(err.contains("nonexistent_tool"), "error was: {err}");
+    }
+
+    #[test]
+    fn fix_preview_returns_no_fix_tools_error() {
+        let Err(err) = CodeModeTool::from_name("fix_preview") else {
+            panic!("expected Err for fix_preview")
+        };
+        assert!(
+            err.contains("does not expose fix tools"),
+            "error was: {err}"
+        );
+    }
+
+    #[test]
+    fn fix_apply_returns_no_fix_tools_error() {
+        let Err(err) = CodeModeTool::from_name("fix_apply") else {
+            panic!("expected Err for fix_apply")
+        };
+        assert!(
+            err.contains("does not expose fix tools"),
+            "error was: {err}"
+        );
+    }
+
+    #[test]
+    fn tool_name_round_trips_through_from_name_and_name() {
+        let pairs: &[(&str, &str)] = &[
+            ("analyze", "analyze"),
+            ("check_changed", "check_changed"),
+            ("security_candidates", "security_candidates"),
+            ("find_dupes", "find_dupes"),
+            ("project_info", "project_info"),
+            ("trace_export", "trace_export"),
+            ("trace_file", "trace_file"),
+            ("trace_dependency", "trace_dependency"),
+            ("trace_clone", "trace_clone"),
+            ("check_health", "check_health"),
+            ("audit", "audit"),
+            ("plow_explain", "plow_explain"),
+            ("list_boundaries", "list_boundaries"),
+            ("feature_flags", "feature_flags"),
+            ("impact", "impact"),
+            ("check_runtime_coverage", "check_runtime_coverage"),
+            ("get_hot_paths", "get_hot_paths"),
+            ("get_blast_radius", "get_blast_radius"),
+            ("get_importance", "get_importance"),
+            ("get_cleanup_candidates", "get_cleanup_candidates"),
+        ];
+        for (input, expected_name) in pairs {
+            let tool = CodeModeTool::from_name(input).unwrap();
+            assert_eq!(
+                tool.name(),
+                *expected_name,
+                "name() mismatch for input '{input}'"
+            );
+        }
+    }
+
+    // ---- classify_host_error -----------------------------------------------
+
+    #[test]
+    fn classify_unsupported_tool_via_does_not_expose() {
+        assert_eq!(
+            classify_host_error("code mode does not expose fix tools; use standalone MCP tools"),
+            "unsupported_tool"
+        );
+    }
+
+    #[test]
+    fn classify_unsupported_tool_via_unsupported_code_mode() {
+        assert_eq!(
+            classify_host_error("unsupported code mode plow tool 'bad_name'"),
+            "unsupported_tool"
+        );
+    }
+
+    #[test]
+    fn classify_timeout_error() {
+        assert_eq!(
+            classify_host_error("code mode execution timed out"),
+            "timeout"
+        );
+    }
+
+    #[test]
+    fn classify_output_limit_via_host_output_exceeded() {
+        assert_eq!(
+            classify_host_error("code mode host output exceeded 1000000 bytes"),
+            "output_limit"
+        );
+    }
+
+    #[test]
+    fn classify_output_limit_via_output_byte_counter() {
+        assert_eq!(
+            classify_host_error("code mode output byte counter overflowed"),
+            "output_limit"
+        );
+    }
+
+    #[test]
+    fn classify_invalid_params_via_invalid_params_json() {
+        assert_eq!(
+            classify_host_error("invalid params JSON: unexpected end of input"),
+            "invalid_params"
+        );
+    }
+
+    #[test]
+    fn classify_invalid_params_via_params_must_be_object() {
+        assert_eq!(
+            classify_host_error("plow host call params must be an object"),
+            "invalid_params"
+        );
+    }
+
+    #[test]
+    fn classify_invalid_params_via_invalid_tool_params() {
+        assert_eq!(
+            classify_host_error("invalid tool params: missing field `file`"),
+            "invalid_params"
+        );
+    }
+
+    #[test]
+    fn classify_unknown_error_falls_back_to_subprocess() {
+        assert_eq!(
+            classify_host_error("failed to execute plow binary 'plow': No such file"),
+            "subprocess"
+        );
+    }
+
+    // ---- merge_default_root ------------------------------------------------
+
+    #[test]
+    fn merge_default_root_no_default_leaves_params_unchanged() {
+        let params = merge_default_root(r#"{"files":true}"#, None).unwrap();
+        assert_eq!(params["files"], true);
+        assert!(params.get("root").is_none());
+    }
+
+    #[test]
+    fn merge_default_root_invalid_json_returns_error() {
+        let err = merge_default_root("{invalid", Some("/tmp/p")).unwrap_err();
+        assert!(err.contains("invalid params JSON"), "error was: {err}");
+    }
+
+    #[test]
+    fn merge_default_root_numeric_value_is_rejected() {
+        let err = merge_default_root("42", Some("/tmp/p")).unwrap_err();
+        assert!(err.contains("params must be an object"), "error was: {err}");
+    }
+
+    #[test]
+    fn merge_default_root_string_value_is_rejected() {
+        let err = merge_default_root(r#""hello""#, Some("/tmp/p")).unwrap_err();
+        assert!(err.contains("params must be an object"), "error was: {err}");
+    }
+
+    #[test]
+    fn merge_default_root_boolean_value_is_rejected() {
+        let err = merge_default_root("true", Some("/tmp/p")).unwrap_err();
+        assert!(err.contains("params must be an object"), "error was: {err}");
+    }
+
+    #[test]
+    fn merge_default_root_empty_object_gets_root_injected() {
+        let params = merge_default_root("{}", Some("/repo")).unwrap();
+        assert_eq!(params["root"], "/repo");
+    }
+
+    // ---- normalize_code_mode_error -----------------------------------------
+
+    #[test]
+    fn interrupted_before_deadline_is_not_timeout() {
+        let future_deadline = std::time::Instant::now() + std::time::Duration::from_mins(1);
+        let result = normalize_code_mode_error("interrupted", future_deadline);
+        assert_eq!(result, "interrupted");
+    }
+
+    #[test]
+    fn interrupted_after_deadline_becomes_timeout_message() {
+        let past_deadline = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_millis(1))
+            .unwrap();
+        let result = normalize_code_mode_error("interrupted", past_deadline);
+        assert_eq!(result, "code mode execution timed out");
+    }
+
+    #[test]
+    fn non_interrupted_error_is_passed_through() {
+        let past_deadline = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_millis(1))
+            .unwrap();
+        let result = normalize_code_mode_error("some other error", past_deadline);
+        assert_eq!(result, "some other error");
+    }
+
+    // ---- code_mode_limits --------------------------------------------------
+
+    #[test]
+    fn code_mode_limits_contains_expected_fields() {
+        let limits = code_mode_limits(5_000, 1_000_000);
+        assert_eq!(limits["timeout_ms"], 5_000_u64);
+        assert_eq!(limits["max_output_bytes"], 1_000_000_u64);
+        assert_eq!(limits["max_host_calls"], MAX_HOST_CALLS as u64);
+    }
+
+    // ---- user_source -------------------------------------------------------
+
+    #[test]
+    fn function_keyword_expression_is_preserved() {
+        let source = user_source("function myFn() { return 42; }");
+        assert!(source.contains("function myFn()"), "source was: {source}");
+    }
+
+    #[test]
+    fn parenthesized_expression_is_preserved() {
+        let source = user_source("({ plow }) => ({ ok: true })");
+        assert!(
+            source.contains("({ plow }) => ({ ok: true })"),
+            "source was: {source}"
+        );
+    }
+
+    #[test]
+    fn user_source_always_includes_use_strict() {
+        let source = user_source("return 1;");
+        assert!(source.contains("\"use strict\""), "source was: {source}");
+    }
+
+    #[test]
+    fn user_source_wraps_non_function_check() {
+        let source = user_source("return 1;");
+        assert!(
+            source.contains("code must evaluate to a function or function body"),
+            "source was: {source}"
+        );
+    }
+
+    // ---- normalize_output --------------------------------------------------
+
+    #[test]
+    fn exit_code_zero_with_stdout_returns_stdout() {
+        let result = normalize_output(0, b"{ \"ok\": true }", b"");
+        assert_eq!(result.unwrap(), "{ \"ok\": true }");
+    }
+
+    #[test]
+    fn exit_code_one_with_stdout_returns_stdout() {
+        let result = normalize_output(1, b"{ \"findings\": [] }", b"");
+        assert_eq!(result.unwrap(), "{ \"findings\": [] }");
+    }
+
+    #[test]
+    fn exit_code_zero_with_empty_stdout_returns_empty_object() {
+        let result = normalize_output(0, b"", b"");
+        assert_eq!(result.unwrap(), "{}");
+    }
+
+    #[test]
+    fn exit_code_one_with_empty_stdout_returns_empty_object() {
+        let result = normalize_output(1, b"", b"");
+        assert_eq!(result.unwrap(), "{}");
+    }
+
+    #[test]
+    fn nonzero_exit_with_valid_json_stdout_returns_err_with_stdout() {
+        let json_stdout = b"{ \"error\": true, \"message\": \"config error\" }";
+        let err = normalize_output(2, json_stdout, b"").unwrap_err();
+        assert_eq!(err, String::from_utf8_lossy(json_stdout));
+    }
+
+    #[test]
+    fn nonzero_exit_with_empty_stdout_returns_err_with_exit_code() {
+        let err = normalize_output(2, b"", b"").unwrap_err();
+        let parsed: serde_json::Value = serde_json::from_str(&err).unwrap();
+        assert_eq!(parsed["error"], true);
+        assert_eq!(parsed["exit_code"], 2);
+        assert!(
+            parsed["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("exit")),
+            "message was: {}",
+            parsed["message"]
+        );
+    }
+
+    #[test]
+    fn nonzero_exit_with_stderr_uses_stderr_as_message() {
+        let err = normalize_output(3, b"", b"  some stderr text  ").unwrap_err();
+        let parsed: serde_json::Value = serde_json::from_str(&err).unwrap();
+        assert_eq!(parsed["error"], true);
+        assert_eq!(parsed["exit_code"], 3);
+        assert_eq!(parsed["message"], "some stderr text");
+    }
+
+    #[test]
+    fn nonzero_exit_with_invalid_json_stdout_and_empty_stderr_returns_exit_code_message() {
+        let err = normalize_output(5, b"not-json", b"").unwrap_err();
+        let parsed: serde_json::Value = serde_json::from_str(&err).unwrap();
+        assert_eq!(parsed["error"], true);
+        assert_eq!(parsed["exit_code"], 5);
+        assert!(
+            parsed["message"].as_str().is_some_and(|m| m.contains('5')),
+            "message was: {}",
+            parsed["message"]
+        );
+    }
+
+    #[test]
+    fn nonzero_exit_negative_one_with_stderr_uses_stderr() {
+        let err = normalize_output(-1, b"", b"process killed by signal").unwrap_err();
+        let parsed: serde_json::Value = serde_json::from_str(&err).unwrap();
+        assert_eq!(parsed["exit_code"], -1);
+        assert_eq!(parsed["message"], "process killed by signal");
+    }
+
+    // ---- build_tool_args dispatch ------------------------------------------
+
+    #[test]
+    fn build_tool_args_analyze_includes_dead_code_subcommand() {
+        let params = serde_json::json!({ "root": "/tmp/proj" });
+        let args =
+            build_tool_args(CodeModeTool::Analyze, params).expect("analyze args should build");
+        assert!(args.contains(&"dead-code".to_string()));
+        assert!(args.contains(&"--format".to_string()));
+        assert!(args.contains(&"json".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_find_dupes_includes_dupes_subcommand() {
+        let params = serde_json::json!({ "root": "/tmp/proj" });
+        let args =
+            build_tool_args(CodeModeTool::FindDupes, params).expect("find_dupes args should build");
+        assert!(args.contains(&"dupes".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_project_info_includes_list_subcommand() {
+        let params = serde_json::json!({});
+        let args = build_tool_args(CodeModeTool::ProjectInfo, params)
+            .expect("project_info args should build");
+        assert!(args.contains(&"list".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_check_changed_includes_changed_since_flag() {
+        let params = serde_json::json!({ "since": "main" });
+        let args = build_tool_args(CodeModeTool::CheckChanged, params)
+            .expect("check_changed args should build");
+        assert!(args.contains(&"--changed-since".to_string()));
+        assert!(args.contains(&"main".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_security_candidates_includes_security_subcommand() {
+        let params = serde_json::json!({});
+        let args = build_tool_args(CodeModeTool::SecurityCandidates, params)
+            .expect("security_candidates args should build");
+        assert!(args.contains(&"security".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_trace_export_includes_trace_flag() {
+        let params = serde_json::json!({
+            "file": "src/index.ts",
+            "export_name": "MyFn"
+        });
+        let args = build_tool_args(CodeModeTool::TraceExport, params)
+            .expect("trace_export args should build");
+        assert!(args.contains(&"--trace".to_string()));
+        assert!(args.iter().any(|a| a.contains("src/index.ts")));
+    }
+
+    #[test]
+    fn build_tool_args_trace_file_includes_trace_file_flag() {
+        let params = serde_json::json!({ "file": "src/utils.ts" });
+        let args =
+            build_tool_args(CodeModeTool::TraceFile, params).expect("trace_file args should build");
+        assert!(args.contains(&"--trace-file".to_string()));
+        assert!(args.contains(&"src/utils.ts".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_trace_dependency_includes_trace_dependency_flag() {
+        let params = serde_json::json!({ "package_name": "lodash" });
+        let args = build_tool_args(CodeModeTool::TraceDependency, params)
+            .expect("trace_dependency args should build");
+        assert!(args.contains(&"--trace-dependency".to_string()));
+        assert!(args.contains(&"lodash".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_trace_clone_with_fingerprint_includes_trace_flag() {
+        let params = serde_json::json!({ "fingerprint": "dup:abcd1234" });
+        let args = build_tool_args(CodeModeTool::TraceClone, params)
+            .expect("trace_clone args should build");
+        assert!(args.contains(&"--trace".to_string()));
+        assert!(args.contains(&"dup:abcd1234".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_check_health_includes_health_subcommand() {
+        let params = serde_json::json!({});
+        let args = build_tool_args(CodeModeTool::CheckHealth, params)
+            .expect("check_health args should build");
+        assert!(args.contains(&"health".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_audit_includes_audit_subcommand() {
+        let params = serde_json::json!({});
+        let args = build_tool_args(CodeModeTool::Audit, params).expect("audit args should build");
+        assert!(args.contains(&"audit".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_plow_explain_includes_explain_subcommand() {
+        let params = serde_json::json!({ "issue_type": "unused-export" });
+        let args = build_tool_args(CodeModeTool::PlowExplain, params)
+            .expect("plow_explain args should build");
+        assert!(args.contains(&"explain".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_list_boundaries_includes_boundaries_flag() {
+        let params = serde_json::json!({});
+        let args = build_tool_args(CodeModeTool::ListBoundaries, params)
+            .expect("list_boundaries args should build");
+        assert!(args.contains(&"--boundaries".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_feature_flags_includes_flags_subcommand() {
+        let params = serde_json::json!({});
+        let args = build_tool_args(CodeModeTool::FeatureFlags, params)
+            .expect("feature_flags args should build");
+        assert!(args.contains(&"flags".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_impact_includes_impact_subcommand() {
+        let params = serde_json::json!({});
+        let args = build_tool_args(CodeModeTool::Impact, params).expect("impact args should build");
+        assert!(args.contains(&"impact".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_check_runtime_coverage_includes_runtime_coverage_flag() {
+        let params = serde_json::json!({ "coverage": "./coverage" });
+        let args = build_tool_args(CodeModeTool::CheckRuntimeCoverage, params)
+            .expect("check_runtime_coverage args should build");
+        assert!(args.contains(&"--runtime-coverage".to_string()));
+        assert!(args.contains(&"./coverage".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_get_hot_paths_includes_runtime_coverage_flag() {
+        let params = serde_json::json!({ "coverage": "./cov" });
+        let args = build_tool_args(CodeModeTool::GetHotPaths, params)
+            .expect("get_hot_paths args should build");
+        assert!(args.contains(&"--runtime-coverage".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_get_blast_radius_includes_runtime_coverage_flag() {
+        let params = serde_json::json!({ "coverage": "./cov" });
+        let args = build_tool_args(CodeModeTool::GetBlastRadius, params)
+            .expect("get_blast_radius args should build");
+        assert!(args.contains(&"--runtime-coverage".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_get_importance_includes_runtime_coverage_flag() {
+        let params = serde_json::json!({ "coverage": "./cov" });
+        let args = build_tool_args(CodeModeTool::GetImportance, params)
+            .expect("get_importance args should build");
+        assert!(args.contains(&"--runtime-coverage".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_get_cleanup_candidates_includes_runtime_coverage_flag() {
+        let params = serde_json::json!({ "coverage": "./cov" });
+        let args = build_tool_args(CodeModeTool::GetCleanupCandidates, params)
+            .expect("get_cleanup_candidates args should build");
+        assert!(args.contains(&"--runtime-coverage".to_string()));
+    }
+
+    // ---- build_tool_args invalid-params rejection --------------------------
+
+    #[test]
+    fn build_tool_args_check_changed_missing_since_returns_error() {
+        let params = serde_json::json!({});
+        let err = build_tool_args(CodeModeTool::CheckChanged, params).unwrap_err();
+        assert!(err.contains("invalid tool params"), "error was: {err}");
+    }
+
+    #[test]
+    fn build_tool_args_trace_export_missing_file_returns_error() {
+        let params = serde_json::json!({ "export_name": "MyFn" });
+        let err = build_tool_args(CodeModeTool::TraceExport, params).unwrap_err();
+        assert!(
+            err.contains("invalid tool params") || err.contains("must not be empty"),
+            "error was: {err}"
+        );
+    }
+
+    #[test]
+    fn build_tool_args_trace_file_missing_file_returns_error() {
+        let params = serde_json::json!({});
+        let err = build_tool_args(CodeModeTool::TraceFile, params).unwrap_err();
+        assert!(
+            err.contains("invalid tool params") || err.contains("must not be empty"),
+            "error was: {err}"
+        );
+    }
+
+    #[test]
+    fn build_tool_args_trace_dependency_missing_package_name_returns_error() {
+        let params = serde_json::json!({});
+        let err = build_tool_args(CodeModeTool::TraceDependency, params).unwrap_err();
+        assert!(
+            err.contains("invalid tool params") || err.contains("must not be empty"),
+            "error was: {err}"
+        );
+    }
+
+    // ---- execute_code_mode: sandbox behavior (no real plow binary) -------
+
+    #[test]
+    fn snippet_that_is_not_a_function_is_rejected() {
+        // A string literal like "hello" parses as a paren-expression that wraps
+        // to a non-function value, triggering the type-check throw.
+        let output = execute_code_mode(
+            "plow".to_string(),
+            CodeExecuteParams {
+                code: r#"("hello")"#.to_string(),
+                root: None,
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect_err("non-function snippet should be rejected");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["ok"].as_bool(), Some(false));
+        assert!(
+            json["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("code must evaluate to a function")),
+            "error was: {}",
+            json["error"]
+        );
+    }
+
+    #[test]
+    fn snippet_returning_json_value_succeeds() {
+        let output = execute_code_mode(
+            "plow".to_string(),
+            CodeExecuteParams {
+                code: "return { status: \"ok\", count: 3 };".to_string(),
+                root: None,
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect("returning a plain object should succeed");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"]["status"], "ok");
+        assert_eq!(json["result"]["count"], 3);
+        assert_eq!(json["schema_version"], "mcp-code-execute/v1");
+    }
+
+    #[test]
+    fn snippet_can_access_root_from_params() {
+        let output = execute_code_mode(
+            "plow".to_string(),
+            CodeExecuteParams {
+                code: "return root;".to_string(),
+                root: Some("/my/project".to_string()),
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect("root access should succeed");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"], "/my/project");
+    }
+
+    #[test]
+    fn snippet_returning_null_produces_null_result() {
+        let output = execute_code_mode(
+            "plow".to_string(),
+            CodeExecuteParams {
+                code: "return null;".to_string(),
+                root: None,
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect("null return should succeed");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn snippet_throwing_error_populates_error_field() {
+        let output = execute_code_mode(
+            "plow".to_string(),
+            CodeExecuteParams {
+                code: r#"throw new Error("intentional test error");"#.to_string(),
+                root: None,
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect_err("throwing should produce Err");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["ok"].as_bool(), Some(false));
+        assert!(
+            json["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("intentional test error")),
+            "error was: {}",
+            json["error"]
+        );
+    }
+
+    #[test]
+    fn response_always_includes_limits_block() {
+        let output = execute_code_mode(
+            "plow".to_string(),
+            CodeExecuteParams {
+                code: "return 1;".to_string(),
+                root: None,
+                timeout_ms: Some(2_000),
+                max_output_bytes: Some(50_000),
+            },
+        )
+        .expect("should succeed");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["limits"]["timeout_ms"], 2_000_u64);
+        assert_eq!(json["limits"]["max_output_bytes"], 50_000_u64);
+        assert_eq!(json["limits"]["max_host_calls"], MAX_HOST_CALLS as u64);
+    }
+
+    #[test]
+    fn timeout_is_capped_at_max_timeout_ms() {
+        let output = execute_code_mode(
+            "plow".to_string(),
+            CodeExecuteParams {
+                code: "return 1;".to_string(),
+                root: None,
+                timeout_ms: Some(MAX_TIMEOUT_MS + 99_999),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect("should succeed with capped timeout");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["limits"]["timeout_ms"], MAX_TIMEOUT_MS);
+    }
+
+    #[test]
+    fn max_output_bytes_is_capped_at_max_output_bytes_constant() {
+        let output = execute_code_mode(
+            "plow".to_string(),
+            CodeExecuteParams {
+                code: "return 1;".to_string(),
+                root: None,
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(MAX_OUTPUT_BYTES + 1),
+            },
+        )
+        .expect("should succeed with capped output limit");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["limits"]["max_output_bytes"], MAX_OUTPUT_BYTES as u64);
+    }
+
+    #[test]
+    fn missing_timeout_uses_default() {
+        let output = execute_code_mode(
+            "plow".to_string(),
+            CodeExecuteParams {
+                code: "return 1;".to_string(),
+                root: None,
+                timeout_ms: None,
+                max_output_bytes: None,
+            },
+        )
+        .expect("should succeed with defaults");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["limits"]["timeout_ms"], DEFAULT_TIMEOUT_MS);
+        assert_eq!(
+            json["limits"]["max_output_bytes"],
+            DEFAULT_MAX_OUTPUT_BYTES as u64
+        );
+    }
+
+    #[test]
+    fn hardened_globals_are_inaccessible_in_snippet() {
+        for blocked in ["fetch", "process", "require", "Deno", "Bun"] {
+            let output = execute_code_mode(
+                "plow".to_string(),
+                CodeExecuteParams {
+                    code: format!("return typeof {blocked};"),
+                    root: None,
+                    timeout_ms: Some(5_000),
+                    max_output_bytes: Some(10_000),
+                },
+            )
+            .expect("typeof check should not throw");
+
+            let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+            assert_eq!(
+                json["result"], "undefined",
+                "{blocked} should be undefined in sandbox"
+            );
+        }
+    }
+
+    #[test]
+    fn plow_object_is_accessible_in_snippet() {
+        let output = execute_code_mode(
+            "plow".to_string(),
+            CodeExecuteParams {
+                code: "return typeof plow;".to_string(),
+                root: None,
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect("plow typeof should succeed");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["result"], "object");
+    }
+
+    #[test]
+    fn plow_run_is_callable_and_fails_fast_on_missing_binary() {
+        let output = execute_code_mode(
+            "nonexistent-binary-xyz-12345".to_string(),
+            CodeExecuteParams {
+                code: r#"return plow.run("impact", {});"#.to_string(),
+                root: Some("/tmp".to_string()),
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect_err("missing binary should produce Err");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["ok"].as_bool(), Some(false));
+        assert_eq!(json["calls"].as_array().map(Vec::len), Some(1));
+        let call = &json["calls"][0];
+        assert_eq!(call["tool"], "impact");
+        assert_eq!(call["ok"], false);
+        assert_eq!(call["error_kind"], "subprocess");
+    }
+
+    #[test]
+    fn plow_run_with_unsupported_tool_records_unsupported_tool_error_kind() {
+        let output = execute_code_mode(
+            "plow".to_string(),
+            CodeExecuteParams {
+                code: r#"return plow.run("fix_apply", {});"#.to_string(),
+                root: None,
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect_err("fix_apply should be rejected");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["ok"].as_bool(), Some(false));
+        assert_eq!(json["calls"].as_array().map(Vec::len), Some(1));
+        let call = &json["calls"][0];
+        assert_eq!(call["error_kind"], "unsupported_tool");
+        assert_eq!(call["ok"], false);
+    }
+
+    #[test]
+    fn successful_response_has_empty_calls_array_when_no_host_calls_made() {
+        let output = execute_code_mode(
+            "plow".to_string(),
+            CodeExecuteParams {
+                code: "return { computed: 1 + 2 };".to_string(),
+                root: None,
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect("pure computation should succeed");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["ok"], true);
         assert_eq!(json["calls"].as_array().map(Vec::len), Some(0));
     }
 }

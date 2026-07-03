@@ -157,10 +157,51 @@ else
   fail "install: rejects dash-prefixed extra args in spec" "expected non-zero exit"
 fi
 
+# PLOW_SKIP_INSTALL: reuse a plow already on PATH instead of npm install.
+SKIP_BIN="$INSTALL_TMP/skip-bin"
+mkdir -p "$SKIP_BIN"
+cat > "$SKIP_BIN/plow" <<'SH'
+#!/usr/bin/env bash
+echo "plow 9.9.9"
+SH
+chmod +x "$SKIP_BIN/plow"
+
+# PLOW_INSTALL_DRY_RUN=true stays set so the assertion proves the skip path
+# short-circuits before the npm-install dry-run hook ever runs.
+rm -f /tmp/plow-version-spec
+OUT=$(PATH="$SKIP_BIN:$PATH" PLOW_ROOT="$INSTALL_TMP/empty" \
+  PLOW_SKIP_INSTALL=true PLOW_INSTALL_DRY_RUN=true \
+  /bin/sh -c "$GITLAB_INSTALL_SCRIPT" 2>&1)
+skip_status=$?
+if [ "$skip_status" -eq 0 ]; then
+  pass "install: PLOW_SKIP_INSTALL succeeds when plow is on PATH"
+else
+  fail "install: PLOW_SKIP_INSTALL succeeds when plow is on PATH" "exit=$skip_status: $OUT"
+fi
+assert_contains "$OUT" "using pre-installed plow 9.9.9" "install: PLOW_SKIP_INSTALL reuses plow on PATH"
+assert_not_contains "$OUT" "DRY RUN: npm install" "install: PLOW_SKIP_INSTALL skips npm install"
+# The skip path must record the binary's semver to /tmp/plow-version-spec so the
+# MR-integration script-prep block can pin remote scripts (parity with install path).
+assert_contains "$(cat /tmp/plow-version-spec 2>/dev/null || true)" "9.9.9" "install: PLOW_SKIP_INSTALL records binary semver for script-prep parity"
+
+# No plow on PATH -> clear, early error (controlled PATH keeps this hermetic).
+OUT=$(PATH="/usr/bin:/bin" PLOW_ROOT="$INSTALL_TMP/empty" \
+  PLOW_SKIP_INSTALL=true PLOW_INSTALL_DRY_RUN=true \
+  /bin/sh -c "$GITLAB_INSTALL_SCRIPT" 2>&1)
+skip_status=$?
+if [ "$skip_status" -eq 2 ]; then
+  pass "install: PLOW_SKIP_INSTALL fails with exit 2 when plow is missing"
+else
+  fail "install: PLOW_SKIP_INSTALL fails with exit 2 when plow is missing" "expected exit 2, got $skip_status"
+fi
+assert_contains "$OUT" "no 'plow' binary is on PATH" "install: PLOW_SKIP_INSTALL explains missing binary"
+assert_not_contains "$OUT" "DRY RUN: npm install" "install: missing-binary path never reaches npm install"
+
 SCRIPT_PREP_TMP="$INSTALL_TMP/script-prep"
 mkdir -p "$SCRIPT_PREP_TMP/ci/scripts"
 printf '%s\n' '#!/usr/bin/env bash' 'echo comment' > "$SCRIPT_PREP_TMP/ci/scripts/comment.sh"
 printf '%s\n' '#!/usr/bin/env bash' 'echo review' > "$SCRIPT_PREP_TMP/ci/scripts/review.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'echo common' > "$SCRIPT_PREP_TMP/ci/scripts/gitlab_common.sh"
 rm -rf /tmp/plow-scripts
 OUT=$(cd "$SCRIPT_PREP_TMP" && PLOW_COMMENT=true PLOW_REVIEW=false /bin/sh -c "$GITLAB_SCRIPT_PREP_SCRIPT" 2>&1)
 cmd_status=$?
@@ -169,7 +210,7 @@ if [ "$cmd_status" -eq 0 ]; then
 else
   fail "script prep: wrapped block runs under sh" "$OUT"
 fi
-if [ -x /tmp/plow-scripts/comment.sh ] && [ -x /tmp/plow-scripts/review.sh ]; then
+if [ -x /tmp/plow-scripts/comment.sh ] && [ -x /tmp/plow-scripts/review.sh ] && [ -x /tmp/plow-scripts/gitlab_common.sh ]; then
   pass "script prep: copies vendored scripts"
 else
   fail "script prep: copies vendored scripts" "expected executable scripts in /tmp/plow-scripts"
@@ -498,6 +539,43 @@ assert_contains "$OUT_ICE" '`metadata` | `"use client"` |' "ice: directive colum
 OUT_MD_SERVER=$(jq '.misplaced_directives = [{"path": "src/action.ts", "line": 3, "col": 0, "directive": "use server", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
 assert_contains "$OUT_MD_SERVER" '`"use server"` |' "md: use-server directive renders in section row"
 
+# Vue/Next framework IssueKinds: summary row + section render in the GitLab variant.
+OUT_USA=$(jq '.unused_server_actions = [{"path": "src/actions.ts", "line": 9, "col": 0, "action_name": "submitForm", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_USA" "Unused server actions" "usa: shows summary row and section"
+assert_contains "$OUT_USA" "submitForm" "usa: shows action name in section"
+
+OUT_URC=$(jq '.unrendered_components = [{"path": "src/Foo.vue", "line": 1, "col": 0, "component_name": "Foo", "framework": "vue", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_URC" "Unrendered components" "urc: shows summary row and section"
+assert_contains "$OUT_URC" "Foo" "urc: shows component name in section"
+
+OUT_UCP=$(jq '.unused_component_props = [{"path": "src/Widget.vue", "line": 12, "col": 0, "component_name": "Widget", "prop_name": "variant", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_UCP" "Unused component props" "ucp: shows summary row and section"
+assert_contains "$OUT_UCP" "variant" "ucp: shows prop name in section"
+
+OUT_UCI=$(jq '.unused_component_inputs = [{"path": "src/widget.component.ts", "line": 12, "col": 0, "component_name": "Widget", "input_name": "variant", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_UCI" "Unused component inputs" "uci: shows summary row and section"
+assert_contains "$OUT_UCI" "variant" "uci: shows input name in section"
+
+OUT_UCE=$(jq '.unused_component_emits = [{"path": "src/Widget.vue", "line": 14, "col": 0, "component_name": "Widget", "emit_name": "submit", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_UCE" "Unused component emits" "uce: shows summary row and section"
+assert_contains "$OUT_UCE" "submit" "uce: shows emit name in section"
+
+OUT_UCO=$(jq '.unused_component_outputs = [{"path": "src/widget.component.ts", "line": 14, "col": 0, "component_name": "Widget", "output_name": "submit", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_UCO" "Unused component outputs" "uco: shows summary row and section"
+assert_contains "$OUT_UCO" "submit" "uco: shows output name in section"
+
+OUT_USE=$(jq '.unused_svelte_events = [{"path": "src/Child.svelte", "line": 6, "col": 0, "component_name": "Child", "event_name": "dead", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_USE" "Unused Svelte events" "use: shows summary row and section"
+assert_contains "$OUT_USE" "dead" "use: shows event name in section"
+
+OUT_UPI=$(jq '.unprovided_injects = [{"path": "src/useTheme.ts", "line": 7, "col": 0, "key_name": "themeKey", "framework": "vue", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_UPI" "Unprovided injects" "upi: shows summary row and section"
+assert_contains "$OUT_UPI" "themeKey" "upi: shows inject key in section"
+
+# Missing keys must never crash jq (defensive `// []` / null-safe helpers).
+OUT_NO_FRAMEWORK_KEYS=$(jq 'del(.unused_server_actions, .unrendered_components, .unused_component_props, .unused_component_inputs, .unused_component_emits, .unused_component_outputs, .unused_svelte_events, .unprovided_injects, .route_collisions, .dynamic_segment_name_conflicts, .invalid_client_exports, .mixed_client_server_barrels, .misplaced_directives)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_NO_FRAMEWORK_KEYS" "Plow Analysis" "missing-keys: GitLab summary-check survives absent framework keys"
+
 OUT_CLEAN=$(jq -r -f "$CI_JQ_DIR/summary-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "No issues found" "clean: shows no issues"
 
@@ -621,6 +699,11 @@ assert_contains "$OUT" "Across 2 files" "dupes: footer reports file count"
 assert_contains "$OUT" "2 groups · 66 lines" "dupes: header carries group count and total lines"
 assert_not_contains "$OUT" "| [Duplicated lines]" "dupes: old metric table is gone"
 
+OUT_EMPTY_DUPES_GL=$(jq '.dupes.clone_groups = [] | .dupes.clone_families = [] | .dupes.stats.clone_groups = 2 | .dupes.stats.clone_instances = 5 | .dupes.stats.files_with_clones = 4 | .dupes.stats.duplicated_lines = 59 | .dupes.stats.duplication_percentage = 0.16' "$FIXTURES/combined-clean.json" | jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_EMPTY_DUPES_GL" "No issues found" "combined: empty dupes groups keep clean GitLab summary"
+assert_contains "$OUT_EMPTY_DUPES_GL" "No duplication" "combined: empty dupes groups render no GitLab duplication"
+assert_not_contains "$OUT_EMPTY_DUPES_GL" "2 groups" "combined: nonzero dupes stats do not render GitLab actionable groups"
+
 # Linkified cells engage when CI_PROJECT_URL + CI_COMMIT_SHA are set; GitLab fragment is #L<start>-<end> (single L)
 OUT_LINKED_GL=$(CI_PROJECT_URL="https://gitlab.com/foo/bar" CI_COMMIT_SHA="deadbeef" jq -r -f "$CI_JQ_DIR/summary-combined.jq" "$FIXTURES/combined.json" 2>&1)
 assert_contains "$OUT_LINKED_GL" "https://gitlab.com/foo/bar/-/blob/deadbeef/src/helpers/content-parser.ts#L27-50" "dupes: file_link engages with GitLab env vars"
@@ -654,6 +737,23 @@ OUT_RSC_GL=$(jq '.check.invalid_client_exports = [{"path": "src/app.tsx", "line"
 assert_contains "$OUT_RSC_GL" "| [Invalid client exports](" "combined: RSC invalid-client-exports row in breakdown"
 assert_contains "$OUT_RSC_GL" "| [Mixed client/server barrels](" "combined: RSC mixed-barrel row in breakdown"
 assert_contains "$OUT_RSC_GL" "| [Misplaced directives](" "combined: RSC misplaced-directives row in breakdown"
+
+# Next.js routing keys (route_collisions + dynamic_segment_name_conflicts) were previously
+# absent from the GitLab combined-mode Code issues breakdown; assert they now render.
+OUT_ROUTING_GL=$(jq '.check.route_collisions = [{"path": "src/app/(a)/p/page.tsx", "url": "/p", "conflicting_paths": ["src/app/(b)/p/page.tsx"], "actions": []}] | .check.dynamic_segment_name_conflicts = [{"path": "src/app/[id]/page.tsx", "position": "0", "conflicting_segments": ["id", "slug"], "actions": []}] | .check.total_issues = (.check.total_issues + 2)' "$FIXTURES/combined.json" | jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_ROUTING_GL" "| [Route collisions](" "combined: route-collisions row in breakdown"
+assert_contains "$OUT_ROUTING_GL" "| [Dynamic segment conflicts](" "combined: dynamic-segment-conflicts row in breakdown"
+
+# Vue/Next framework keys appear in the GitLab combined-mode Code issues breakdown table.
+OUT_FRAMEWORK_GL=$(jq '.check.unused_server_actions = [{"path": "src/actions.ts", "line": 9, "col": 0, "action_name": "submitForm", "actions": []}] | .check.unrendered_components = [{"path": "src/Foo.vue", "line": 1, "col": 0, "component_name": "Foo", "framework": "vue", "actions": []}] | .check.unused_component_props = [{"path": "src/Widget.vue", "line": 12, "col": 0, "component_name": "Widget", "prop_name": "variant", "actions": []}] | .check.unused_component_inputs = [{"path": "src/widget.component.ts", "line": 12, "col": 0, "component_name": "Widget", "input_name": "variant", "actions": []}] | .check.unused_component_emits = [{"path": "src/Widget.vue", "line": 14, "col": 0, "component_name": "Widget", "emit_name": "submit", "actions": []}] | .check.unused_component_outputs = [{"path": "src/widget.component.ts", "line": 14, "col": 0, "component_name": "Widget", "output_name": "submit", "actions": []}] | .check.unused_svelte_events = [{"path": "src/Child.svelte", "line": 6, "col": 0, "component_name": "Child", "event_name": "dead", "actions": []}] | .check.unprovided_injects = [{"path": "src/useTheme.ts", "line": 7, "col": 0, "key_name": "themeKey", "framework": "vue", "actions": []}] | .check.total_issues = (.check.total_issues + 8)' "$FIXTURES/combined.json" | jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_FRAMEWORK_GL" "| [Unused server actions](" "combined: unused-server-actions row in breakdown"
+assert_contains "$OUT_FRAMEWORK_GL" "| [Unrendered components](" "combined: unrendered-components row in breakdown"
+assert_contains "$OUT_FRAMEWORK_GL" "| [Unused component props](" "combined: unused-component-props row in breakdown"
+assert_contains "$OUT_FRAMEWORK_GL" "| [Unused component inputs](" "combined: unused-component-inputs row in breakdown"
+assert_contains "$OUT_FRAMEWORK_GL" "| [Unused component emits](" "combined: unused-component-emits row in breakdown"
+assert_contains "$OUT_FRAMEWORK_GL" "| [Unused component outputs](" "combined: unused-component-outputs row in breakdown"
+assert_contains "$OUT_FRAMEWORK_GL" "| [Unused Svelte events](" "combined: unused-svelte-events row in breakdown"
+assert_contains "$OUT_FRAMEWORK_GL" "| [Unprovided injects](" "combined: unprovided-injects row in breakdown"
 
 # Worst-case truncation: 50 groups (paths differentiated per-group via `. as $g |`),
 # top-5 + overflow line, output stays under 65k chars.
@@ -754,6 +854,118 @@ assert_contains "$OUT_COMBINED_PROD" "Runtime coverage" "combined prod: has runt
 assert_contains "$OUT_COMBINED_PROD" "hotPath" "combined prod: shows hot path"
 assert_contains "$OUT_COMBINED_PROD" "hot path touched" "combined prod (GitLab, verdict hot-path-touched): header uses 'touched' framing"
 
+echo "  renderer semantic parity (GitHub vs GitLab):"
+PARITY_OUT=$(node - "$SHARED_JQ_DIR" "$CI_JQ_DIR" "$DIR/../../action/tests/fixtures" <<'NODE'
+const { execFileSync } = require("node:child_process");
+const { readFileSync } = require("node:fs");
+const [actionJqDir, gitlabJqDir, fixturesDir] = process.argv.slice(2);
+
+const readFixture = (fixture) => JSON.parse(readFileSync(`${fixturesDir}/${fixture}`, "utf8"));
+const checkFixture = readFixture("check.json");
+const healthFixture = readFixture("health.json");
+const dupesFixture = readFixture("dupes.json");
+const auditFixture = {
+  schema_version: 3,
+  command: "audit",
+  verdict: "fail",
+  changed_files_count: 2,
+  elapsed_ms: 42,
+  summary: { dead_code_issues: 1, complexity_findings: 3, duplication_clone_groups: 1 },
+  attribution: {
+    gate: "new-only",
+    dead_code_introduced: 1,
+    dead_code_inherited: 0,
+    complexity_introduced: 2,
+    complexity_inherited: 1,
+    duplication_introduced: 0,
+    duplication_inherited: 1,
+  },
+  dead_code: {
+    ...checkFixture,
+    unused_exports: checkFixture.unused_exports.map((item) => ({ ...item, introduced: true })),
+    unused_dependencies: checkFixture.unused_dependencies.map((item) => ({
+      ...item,
+      introduced: false,
+    })),
+  },
+  complexity: {
+    ...healthFixture,
+    findings: [
+      { ...healthFixture.findings[0], coverage_tier: "partial" },
+      { ...healthFixture.findings[1], coverage_tier: "high" },
+      healthFixture.findings[2],
+    ],
+    summary: {
+      ...healthFixture.summary,
+      coverage_model: "istanbul",
+      istanbul_matched: 8,
+      istanbul_total: 10,
+    },
+  },
+  duplication: {
+    ...dupesFixture,
+    clone_groups: dupesFixture.clone_groups.map((item) => ({ ...item, introduced: false })),
+  },
+};
+
+const cases = [
+  { name: "summary-check", fixture: "check.json" },
+  { name: "summary-health", fixture: "health.json" },
+  { name: "summary-audit", input: auditFixture },
+  { name: "summary-combined", fixture: "combined.json" },
+];
+
+const render = (dir, testCase) => {
+  const args = ["-r", "-f", `${dir}/${testCase.name}.jq`];
+  const options = { encoding: "utf8" };
+  if (testCase.fixture) {
+    args.push(`${fixturesDir}/${testCase.fixture}`);
+  } else {
+    options.input = JSON.stringify(testCase.input);
+  }
+  return execFileSync("jq", args, options);
+};
+
+const normalize = (text) =>
+  text
+    .split(/\r?\n/)
+    .map((line) =>
+      line
+        .replace(/^> \[![A-Z]+\]$/, "")
+        .replace(/^> :warning: /, "> ")
+        .replace(/^> :bulb: /, "> ")
+        .replace(/^> :chart_with_upwards_trend: /, "> ")
+        .replace(/^# :seedling: Plow$/, "# Plow")
+        .replace(/^# .* Plow$/, "# Plow"),
+    )
+    .filter((line) => line.trim() !== "")
+    .filter((line) => !line.startsWith("> Run `plow fix --dry-run`"))
+    .filter((line) => !line.startsWith("> Intentionally public?"))
+    .filter((line) => !line.startsWith("> Add [`/** @public */`"))
+    .filter((line) => !line.startsWith("> Add [`// plow-ignore-next-line`"))
+    .join("\n");
+
+const failures = [];
+for (const testCase of cases) {
+  const github = normalize(render(actionJqDir, testCase));
+  const gitlab = normalize(render(gitlabJqDir, testCase));
+  if (github !== gitlab) {
+    failures.push(`${testCase.name}: normalized output drifted`);
+  }
+}
+
+if (failures.length > 0) {
+  console.log(failures.join("\n"));
+  process.exit(1);
+}
+NODE
+)
+if [ -z "$PARITY_OUT" ]; then
+  pass "renderer parity: normalized GitHub and GitLab summaries match"
+else
+  fail "renderer parity: normalized GitHub and GitLab summaries match" "$PARITY_OUT"
+fi
+
 # =========================================================================
 # Shared summary scripts (reused from action/jq/, should still work)
 # =========================================================================
@@ -811,14 +1023,17 @@ assert_contains "$(cat "$CI_YAML")" "PLOW_COMMENT" "has PLOW_COMMENT variable"
 assert_contains "$(cat "$CI_YAML")" "PLOW_SUMMARY_SCOPE" "has PLOW_SUMMARY_SCOPE variable"
 assert_contains "$(cat "$CI_YAML")" "PLOW_CODEQUALITY" "has PLOW_CODEQUALITY variable"
 assert_contains "$(cat "$CI_YAML")" "PLOW_SECURITY_GATE" "has PLOW_SECURITY_GATE variable"
+assert_contains "$(cat "$CI_YAML")" '((.dupes.clone_groups // []) | length)' "combined issues use actionable dupes groups"
 assert_contains "$(cat "$CI_YAML")" "project_plow_spec" "reads package.json plow pin"
 assert_contains "$(cat "$CI_YAML")" "is_safe_version_spec" "validates plow install spec"
 assert_contains "$(cat "$CI_YAML")" "PLOW_INSTALL_DRY_RUN" "supports install dry-run testing"
+assert_contains "$(cat "$CI_YAML")" "PLOW_SKIP_INSTALL" "supports skip-install for pre-installed plow"
 assert_contains "$(cat "$CI_YAML")" "GIT_STRATEGY" "overrides shared template git strategy"
 assert_contains "$(cat "$CI_YAML")" "GIT_DEPTH" "fetches full history for changed-since"
 assert_contains "$(cat "$CI_YAML")" "CI_MERGE_REQUEST_DIFF_BASE_SHA" "auto changed-since uses diff base SHA"
 assert_contains "$(cat "$CI_YAML")" "comment.sh" "references comment.sh"
 assert_contains "$(cat "$CI_YAML")" "review.sh" "references review.sh"
+assert_contains "$(cat "$CI_YAML")" "gitlab_common.sh" "references shared GitLab helper script"
 assert_contains "$(cat "$CI_YAML")" "gl-code-quality-report" "generates Code Quality report"
 assert_contains "$(cat "$CI_YAML")" 'type == "array"' "preserves valid Code Quality reports from nonzero audit exits"
 assert_contains "$(cat "$CI_YAML")" '.error == true' "fails on structured plow error JSON"
@@ -833,6 +1048,7 @@ echo ""
 echo "=== Bash script structure ==="
 
 SCRIPTS_DIR="$DIR/../scripts"
+GITLAB_COMMON="$(cat "$SCRIPTS_DIR/gitlab_common.sh")"
 
 echo "  comment.sh:"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "PRIVATE-TOKEN" "supports GITLAB_TOKEN"
@@ -840,8 +1056,9 @@ assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "CI_JOB_TOKEN is read-only" "
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "plow-results" "uses plow-results marker"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "PUT" "can update existing comment"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "POST" "can create new comment"
-assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "curl_retry" "wraps GitLab API calls with retry"
-assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "rate limit response; retrying" "retries GitLab rate-limit responses"
+assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "gitlab_common.sh" "loads shared GitLab API helpers"
+assert_contains "$GITLAB_COMMON" "curl_retry" "wraps GitLab API calls with retry"
+assert_contains "$GITLAB_COMMON" "rate limit response; retrying" "retries GitLab rate-limit responses"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "Unsupported PLOW_SUMMARY_SCOPE" "comment.sh warns on invalid summary scope"
 
 echo "  review.sh:"
@@ -853,8 +1070,7 @@ assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "position" "posts with positio
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "suggestion" "adds suggestion blocks"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "plow-review" "uses plow-review marker"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "plow-fingerprint" "deduplicates by typed fingerprint"
-assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "curl_retry" "wraps GitLab API calls with retry"
-assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "rate limit response; retrying" "retries GitLab rate-limit responses"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "gitlab_common.sh" "loads shared GitLab API helpers"
 assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "merge-comments" "does not keep legacy jq merge fallback"
 assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "PLOW_SHARED_JQ_DIR" "does not use shared jq fallback scripts"
 assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "PLOW_SUMMARY_SCOPE" "review.sh does not consume summary scope"
@@ -1005,14 +1221,13 @@ rm -rf "$CI_TYPED_WORK"
 echo ""
 echo "=== curl_paginate Link-header walk ==="
 
-# Extract curl_paginate at top level (outside any nested $()) so the awk
-# pattern parses cleanly, then define paginate_test_run as a regular
-# function and capture its output once. Disable pipefail just for the test
-# run because curl_paginate uses `url=$(grep | tr | sed | head -1)` and
-# `head -1` SIGPIPE-cancels the upstream pipeline on the no-Link-header
-# page, which under pipefail propagates as a non-zero exit.
-PAGINATE_FN_SRC=$(awk '/^curl_paginate\(\) \{/,/^\}$/' "$SCRIPTS_DIR/comment.sh")
-eval "$PAGINATE_FN_SRC"
+# Load the shared helper, then define paginate_test_run as a regular function
+# and capture its output once. Disable pipefail just for the test run because
+# curl_paginate uses `url=$(grep | tr | sed | head -1)` and `head -1`
+# SIGPIPE-cancels the upstream pipeline on the no-Link-header page, which
+# under pipefail propagates as a non-zero exit.
+# shellcheck source=../scripts/gitlab_common.sh
+source "$SCRIPTS_DIR/gitlab_common.sh"
 
 paginate_test_run() {
   set +o pipefail
@@ -1404,6 +1619,54 @@ else
 fi
 
 rm -rf "$CI_API_FAIL_WORK"
+
+# --- IssueKind summary drift guard ---
+#
+# Same guard as the GitHub Action suite, run against every GitLab jq surface
+# that carries the full dead-code set. A new dead-code IssueKind not wired into
+# one of these would otherwise vanish silently from MR output. GitLab has no
+# annotations / filter-changed surfaces, so all three are gated "all".
+#
+#   summary-check.jq      dead-code summary table
+#   summary-combined.jq   combined-mode Code-issues breakdown
+#   summary-audit.jq      audit dead_code_rows
+
+echo ""
+echo "=== IssueKind summary drift guard (GitLab) ==="
+
+GUARD_DIR="$DIR/../../action/tests"
+# shellcheck source=action/tests/issuekind-drift-guard.sh
+. "$GUARD_DIR/issuekind-drift-guard.sh"
+fallback_rows="$(
+  PLOW_BIN="$INSTALL_TMP/missing-plow-binary"
+  PLOW_DEAD_CODE_SCHEMA_ROWS_CACHE="__unset__"
+  plow_dead_code_schema_rows
+)"
+assert_contains "$fallback_rows" $'unused-optional-dependency\tunused_optional_dependencies\ttrue' \
+  "issuekind guard: source fallback includes optional dependencies"
+assert_contains "$fallback_rows" $'boundary-coverage\tboundary_coverage_violations\ttrue' \
+  "issuekind guard: source fallback includes boundary coverage"
+assert_contains "$fallback_rows" $'boundary-call-violation\tboundary_call_violations\ttrue' \
+  "issuekind guard: source fallback includes boundary call violations"
+if issuekind_key_present '# .unused_files' "unused_files"; then
+  fail "issuekind guard: comments do not satisfy key coverage" "comment-only jq source matched unused_files"
+else
+  pass "issuekind guard: comments do not satisfy key coverage"
+fi
+if issuekind_key_present 'true # .unused_files' "unused_files"; then
+  fail "issuekind guard: inline comments do not satisfy key coverage" "inline comment matched unused_files"
+else
+  pass "issuekind guard: inline comments do not satisfy key coverage"
+fi
+if issuekind_key_present '["unused_files"] # rendered table row' "unused_files"; then
+  pass "issuekind guard: string tokens still satisfy key coverage"
+else
+  fail "issuekind guard: string tokens still satisfy key coverage" "quoted key token did not match"
+fi
+assert_issuekind_summary_coverage "gitlab summary-check"    "$CI_JQ_DIR/summary-check.jq"
+assert_issuekind_summary_table_contract "gitlab summary-check" "$CI_JQ_DIR/summary-check.jq"
+assert_issuekind_summary_coverage "gitlab summary-combined" "$CI_JQ_DIR/summary-combined.jq"
+assert_issuekind_summary_coverage "gitlab summary-audit"    "$CI_JQ_DIR/summary-audit.jq"
 
 # --- Summary ---
 

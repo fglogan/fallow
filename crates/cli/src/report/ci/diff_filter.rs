@@ -2,20 +2,9 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+pub use plow_output::{DiffIndex, MAX_DIFF_BYTES, parse_new_hunk_start, relative_to_diff_path};
 
-use super::pr_comment::CiIssue;
-
-/// Refuse to parse a unified diff larger than this. The cap matches the
-/// SARIF upload limit (10 MiB) and is also far above what any sane PR
-/// produces. A pathologically large diff (binary blob, vendored dump) would
-/// otherwise eat memory proportional to its size before we can inspect it.
-pub const MAX_DIFF_BYTES: u64 = 10 * 1024 * 1024;
-
-/// Stop indexing added lines past this count. A 1M-line "diff" is a sign of
-/// a regenerated lockfile or vendored bundle and is not useful for filtering;
-/// emit a warning and proceed with whatever we already indexed.
-const MAX_ADDED_LINES: usize = 1_000_000;
+use plow_output::CiIssue;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiffFilterMode {
@@ -64,203 +53,6 @@ impl SummaryScope {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct DiffIndex {
-    added_lines: FxHashMap<String, FxHashSet<u64>>,
-    touched_files: FxHashSet<String>,
-    added_line_count: usize,
-    /// `head_path -> base_path` pairs for renames in the diff. Populated by
-    /// parsing `rename from <old>` and `rename to <new>` extended-header
-    /// lines that git diff emits between the `diff --git` line and the
-    /// `--- a/...` / `+++ b/...` body. Consumed by
-    /// `crates/cli/src/report/ci/review.rs` to populate GitLab's
-    /// `position.old_path` with the base-side filename, which the GitLab
-    /// API requires when anchoring an inline comment on a renamed file.
-    rename_pairs: FxHashMap<String, String>,
-}
-
-impl DiffIndex {
-    #[must_use]
-    pub fn from_unified_diff(diff: &str) -> Self {
-        let mut index = Self::default();
-        let mut current_file: Option<String> = None;
-        let mut new_line = 0_u64;
-        let mut warned_overflow = false;
-        let mut pending_rename_from: Option<String> = None;
-
-        for line in diff.lines() {
-            if line.starts_with("diff --git ") {
-                pending_rename_from = None;
-                continue;
-            }
-            if let Some(rest) = line.strip_prefix("rename from ") {
-                pending_rename_from = Some(rest.to_owned());
-                continue;
-            }
-            if let Some(rest) = line.strip_prefix("rename to ") {
-                if let Some(from) = pending_rename_from.take() {
-                    index.rename_pairs.insert(rest.to_owned(), from);
-                    index.touched_files.insert(rest.to_owned());
-                }
-                continue;
-            }
-            if let Some(path) = line.strip_prefix("+++ b/") {
-                current_file = Some(path.to_string());
-                index.touched_files.insert(path.to_string());
-                continue;
-            }
-            if line.starts_with("+++ /dev/null") {
-                current_file = None;
-                continue;
-            }
-            if let Some(header) = line.strip_prefix("@@ ") {
-                if let Some(start) = parse_new_hunk_start(header) {
-                    new_line = start;
-                }
-                continue;
-            }
-            let Some(path) = current_file.as_ref() else {
-                continue;
-            };
-            if line.starts_with('+') && !line.starts_with("+++") {
-                if index.added_line_count < MAX_ADDED_LINES {
-                    index
-                        .added_lines
-                        .entry(path.clone())
-                        .or_default()
-                        .insert(new_line);
-                    index.added_line_count += 1;
-                } else if !warned_overflow {
-                    eprintln!(
-                        "plow: diff exceeds {MAX_ADDED_LINES} added lines; \
-                         indexed prefix only, later additions skipped"
-                    );
-                    warned_overflow = true;
-                }
-                new_line += 1;
-            } else if !line.starts_with('-') {
-                new_line += 1;
-            }
-        }
-
-        index
-    }
-
-    /// Base-side path for a renamed file whose head-side path is
-    /// `head_path`. Returns `None` when `head_path` is not part of any
-    /// rename pair in the indexed diff (the common case: edits, additions,
-    /// deletions). Consumed by the review envelope formatter at
-    /// `crates/cli/src/report/ci/review.rs::render_comment` to populate the
-    /// GitLab `position.old_path` field for renamed files; without this the
-    /// inline comment fails to anchor in GitLab's position API.
-    #[must_use]
-    pub fn old_path_for(&self, head_path: &str) -> Option<&str> {
-        self.rename_pairs.get(head_path).map(String::as_str)
-    }
-
-    /// Count of `+` lines indexed across every file. Used by the
-    /// finding-level filter to warn when an opt-in `--diff-file` produced
-    /// an empty index (typo, wrong path, pure-rename diff with no body),
-    /// since `from_unified_diff` is intentionally infallible and would
-    /// otherwise silently drop every finding.
-    #[must_use]
-    pub fn added_line_count(&self) -> usize {
-        self.added_line_count
-    }
-
-    /// True when `path` (repo-root-relative, forward-slashed) appears as a
-    /// `+++ b/<path>` header in the diff. Used by the finding-level filter
-    /// to short-circuit before line-range checks: a file not in the diff
-    /// has no overlapping ranges by definition.
-    #[must_use]
-    pub fn touches_file(&self, path: &str) -> bool {
-        self.touched_files.contains(path)
-    }
-
-    /// True when the closed line range `[start..=end]` for `path` overlaps
-    /// any added line indexed from the diff. `start == 0` collapses to
-    /// `1..=end` so callers can pass an unsigned `line + line_count` shape
-    /// without a special case for zero-length ranges. When `end < start`,
-    /// returns `false` (degenerate range).
-    ///
-    /// Range semantics: a complexity hotspot at `[10..=120]` with a PR that
-    /// touches line 115 returns `true` (115 is in the closed range and is
-    /// also an added line). A clone instance at `[200..=210]` with the PR
-    /// touching only line 50 returns `false`.
-    #[must_use]
-    pub fn range_overlaps_added(&self, path: &str, start: u64, end: u64) -> bool {
-        if end < start {
-            return false;
-        }
-        let Some(added) = self.added_lines.get(path) else {
-            return false;
-        };
-        let lo = start.max(1);
-        added.iter().any(|&line| line >= lo && line <= end)
-    }
-
-    #[cfg(test)]
-    #[must_use]
-    pub fn keeps(&self, issue: &CiIssue, mode: DiffFilterMode) -> bool {
-        self.keeps_with_context(issue, mode, context_radius_from_env())
-    }
-
-    #[must_use]
-    pub fn keeps_with_context(&self, issue: &CiIssue, mode: DiffFilterMode, radius: u64) -> bool {
-        match mode {
-            DiffFilterMode::NoFilter => true,
-            DiffFilterMode::File => self.touched_files.contains(&issue.path),
-            DiffFilterMode::DiffContext => self.added_lines.get(&issue.path).is_some_and(|lines| {
-                lines
-                    .iter()
-                    .any(|line| issue.line.abs_diff(*line) <= radius)
-            }),
-            DiffFilterMode::Added => self
-                .added_lines
-                .get(&issue.path)
-                .is_some_and(|lines| lines.contains(&issue.line)),
-        }
-    }
-
-    /// Added-line numbers for `path` (repo-root-relative, forward-slashed),
-    /// or `None` when the file does not appear in the diff. Used by the
-    /// runtime-coverage filter to do line-overlap matching against hot-path
-    /// `[start_line, end_line]` ranges, so a PR touching the body of a hot
-    /// function flips the verdict to `hot-path-touched` while edits to
-    /// other functions in the same file do not.
-    #[must_use]
-    pub fn added_lines_in(&self, path: &str) -> Option<&FxHashSet<u64>> {
-        self.added_lines.get(path)
-    }
-}
-
-/// Reduce `path` to a forward-slashed string suitable for matching against
-/// a unified diff's `+++ b/<path>` keys. Strips the project root prefix
-/// when `path` is absolute. Returns `None` when `path` lives outside
-/// `root` (different drive, traversal escape) so the caller can keep the
-/// finding rather than silently drop it on an unfilterable path.
-///
-/// Windows checkouts emit backslash-separated paths from `to_string_lossy`;
-/// the replace normalizes them so they compare equal to the forward-slash
-/// keys `git diff` writes.
-///
-/// Implementation note: `strip_prefix` is attempted first regardless of
-/// platform because [`std::path::Path::is_absolute`] misclassifies
-/// POSIX-style absolute paths (`/project/...`) as relative on Windows.
-/// A `CiIssue.path` deserialized from JSON output on a Unix host and
-/// passed into a Windows-hosted post-processing step would otherwise
-/// silently leak through as "relative" and never get root-stripped.
-#[must_use]
-pub fn relative_to_diff_path(path: &Path, root: &Path) -> Option<String> {
-    if let Ok(stripped) = path.strip_prefix(root) {
-        return Some(stripped.to_string_lossy().replace('\\', "/"));
-    }
-    if crate::path_util::is_absolute_path_any_platform(path) {
-        return None;
-    }
-    Some(path.to_string_lossy().replace('\\', "/"))
-}
-
 /// How a diff source was located. Tracked separately from the parsed
 /// `DiffIndex` so callers can compose precedence + empty-parse warnings
 /// that name the source the user actually supplied.
@@ -290,11 +82,17 @@ impl DiffSource {
 }
 
 /// Result of [`load_diff_index_for_findings`]. Carries the parsed
-/// `DiffIndex`; the source breadcrumb is consumed by the function during
-/// load to compose warning messages and is not retained beyond that.
+/// `DiffIndex` plus the raw unified-diff text it was parsed from; the source
+/// breadcrumb is consumed by the function during load to compose warning
+/// messages and is not retained beyond that. The raw text is retained so the
+/// walkthrough guide can derive per-hunk `change_anchors` from the SAME diff
+/// source the finding filter used (a `--diff-stdin` staged diff, not the
+/// committed `base...HEAD`), keeping emission and validation anchored to one
+/// changed set.
 #[derive(Debug)]
 pub struct LoadedDiff {
     pub index: DiffIndex,
+    pub raw: String,
 }
 
 /// Resolve a diff source from CLI input.
@@ -373,72 +171,79 @@ pub fn resolve_diff_source(
 #[must_use]
 pub fn load_diff_index_for_findings(source: &DiffSource, quiet: bool) -> Option<LoadedDiff> {
     match source {
-        DiffSource::Stdin => {
-            let mut buf = String::new();
-            match std::io::stdin().read_to_string(&mut buf) {
-                Ok(_) => {
-                    let index = DiffIndex::from_unified_diff(&buf);
-                    if !quiet && index.added_line_count() == 0 {
-                        eprintln!(
-                            "plow: warning [diff-file]: --diff-stdin parsed \
-                             0 added lines; no findings will pass the diff filter. \
-                             Did you pipe a non-unified diff or an empty stream? \
-                             (Pure-rename, binary-only, and deletion-only diffs \
-                             also produce empty indices.)"
-                        );
-                    }
-                    Some(LoadedDiff { index })
-                }
-                Err(err) => {
-                    if !quiet {
-                        eprintln!(
-                            "plow: warning [diff-file]: could not read stdin: {err} \
-                             (line-level filtering disabled; rerun with \
-                             --diff-file PATH to point at a file on disk)"
-                        );
-                    }
-                    None
-                }
-            }
-        }
+        DiffSource::Stdin => load_diff_index_from_stdin(quiet),
         DiffSource::Flag(path) | DiffSource::EnvVar(path) => {
-            let label = source.label();
-            if let Ok(meta) = std::fs::metadata(path)
-                && meta.len() > MAX_DIFF_BYTES
-            {
-                if !quiet {
-                    eprintln!(
-                        "plow: warning [diff-file]: {label} is {} bytes (cap {MAX_DIFF_BYTES}); \
-                         line-level filtering disabled, reporting all findings",
-                        meta.len()
-                    );
-                }
-                return None;
+            load_diff_index_from_file(path, &source.label(), quiet)
+        }
+    }
+}
+
+/// Drain stdin once and parse it into a `LoadedDiff`, warning on failure / empty index.
+fn load_diff_index_from_stdin(quiet: bool) -> Option<LoadedDiff> {
+    let mut buf = String::new();
+    match std::io::stdin().read_to_string(&mut buf) {
+        Ok(_) => {
+            let index = DiffIndex::from_unified_diff(&buf);
+            if !quiet && index.added_line_count() == 0 {
+                eprintln!(
+                    "plow: warning [diff-file]: --diff-stdin parsed \
+                     0 added lines; no findings will pass the diff filter. \
+                     Did you pipe a non-unified diff or an empty stream? \
+                     (Pure-rename, binary-only, and deletion-only diffs \
+                     also produce empty indices.)"
+                );
             }
-            match std::fs::read_to_string(path) {
-                Ok(text) => {
-                    let index = DiffIndex::from_unified_diff(&text);
-                    if !quiet && index.added_line_count() == 0 {
-                        eprintln!(
-                            "plow: warning [diff-file]: {label} parsed 0 added \
-                             lines; no findings will pass the diff filter. \
-                             Verify the file is a unified diff (look for \
-                             `+++ b/<path>` headers). Pure-rename, binary-only, \
-                             and deletion-only diffs also produce empty indices."
-                        );
-                    }
-                    Some(LoadedDiff { index })
-                }
-                Err(err) => {
-                    if !quiet {
-                        eprintln!(
-                            "plow: warning [diff-file]: could not read {label}: {err} \
-                             (line-level filtering disabled)"
-                        );
-                    }
-                    None
-                }
+            Some(LoadedDiff { index, raw: buf })
+        }
+        Err(err) => {
+            if !quiet {
+                eprintln!(
+                    "plow: warning [diff-file]: could not read stdin: {err} \
+                     (line-level filtering disabled; rerun with \
+                     --diff-file PATH to point at a file on disk)"
+                );
             }
+            None
+        }
+    }
+}
+
+/// Read a diff file (respecting the size cap) and parse it into a `LoadedDiff`.
+fn load_diff_index_from_file(path: &Path, label: &str, quiet: bool) -> Option<LoadedDiff> {
+    if let Ok(meta) = std::fs::metadata(path)
+        && meta.len() > MAX_DIFF_BYTES
+    {
+        if !quiet {
+            eprintln!(
+                "plow: warning [diff-file]: {label} is {} bytes (cap {MAX_DIFF_BYTES}); \
+                 line-level filtering disabled, reporting all findings",
+                meta.len()
+            );
+        }
+        return None;
+    }
+    match std::fs::read_to_string(path) {
+        Ok(text) => {
+            let index = DiffIndex::from_unified_diff(&text);
+            if !quiet && index.added_line_count() == 0 {
+                eprintln!(
+                    "plow: warning [diff-file]: {label} parsed 0 added \
+                     lines; no findings will pass the diff filter. \
+                     Verify the file is a unified diff (look for \
+                     `+++ b/<path>` headers). Pure-rename, binary-only, \
+                     and deletion-only diffs also produce empty indices."
+                );
+            }
+            Some(LoadedDiff { index, raw: text })
+        }
+        Err(err) => {
+            if !quiet {
+                eprintln!(
+                    "plow: warning [diff-file]: could not read {label}: {err} \
+                     (line-level filtering disabled)"
+                );
+            }
+            None
         }
     }
 }
@@ -478,20 +283,24 @@ pub fn shared_diff_index() -> Option<&'static DiffIndex> {
     SHARED_DIFF.get().and_then(|v| v.as_ref()).map(|l| &l.index)
 }
 
+/// Read the RAW unified-diff text of the cached diff (the bytes
+/// [`init_shared_diff`] parsed). `None` when no diff was supplied. Used by the
+/// walkthrough guide to derive `change_anchors` from the same opt-in diff source
+/// (e.g. a `--diff-stdin` staged diff) the finding filter used, rather than
+/// recomputing a committed `base...HEAD` diff that would not match.
+#[must_use]
+pub fn shared_diff_raw() -> Option<&'static str> {
+    SHARED_DIFF
+        .get()
+        .and_then(|v| v.as_ref())
+        .map(|l| l.raw.as_str())
+}
+
 fn context_radius_from_env() -> u64 {
     std::env::var("PLOW_DIFF_CONTEXT")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(3)
-}
-
-fn parse_new_hunk_start(header: &str) -> Option<u64> {
-    let plus = header.find('+')?;
-    let rest = &header[plus + 1..];
-    let end = rest
-        .find(|c: char| c == ',' || c.is_ascii_whitespace())
-        .unwrap_or(rest.len());
-    rest[..end].parse().ok()
 }
 
 #[must_use]
@@ -544,7 +353,7 @@ where
 
     let (project_level, diff_relevant): (Vec<CiIssue>, Vec<CiIssue>) = issues
         .into_iter()
-        .partition(|issue| super::pr_comment::is_project_level_rule(&issue.rule_id));
+        .partition(|issue| plow_output::is_project_level_rule(&issue.rule_id));
     let mut kept = source_filter(diff_relevant);
     kept.extend(project_level);
     kept.sort_by(|a, b| (&a.path, a.line, &a.fingerprint).cmp(&(&b.path, b.line, &b.fingerprint)));
@@ -590,8 +399,24 @@ pub fn filter_issues_from_path(
     let index = DiffIndex::from_unified_diff(&diff);
     issues
         .into_iter()
-        .filter(|issue| index.keeps_with_context(issue, mode, radius))
+        .filter(|issue| diff_index_keeps_issue(&index, issue, mode, radius))
         .collect()
+}
+
+fn diff_index_keeps_issue(
+    index: &DiffIndex,
+    issue: &CiIssue,
+    mode: DiffFilterMode,
+    radius: u64,
+) -> bool {
+    match mode {
+        DiffFilterMode::NoFilter => true,
+        DiffFilterMode::File => index.touches_file(&issue.path),
+        DiffFilterMode::DiffContext => {
+            index.line_within_added_context(&issue.path, issue.line, radius)
+        }
+        DiffFilterMode::Added => index.line_is_added(&issue.path, issue.line),
+    }
 }
 
 #[cfg(test)]
@@ -599,26 +424,6 @@ mod tests {
     use std::io::Write as _;
 
     use super::*;
-
-    #[test]
-    fn from_unified_diff_caps_added_lines_at_threshold() {
-        let header =
-            "diff --git a/big.txt b/big.txt\n--- a/big.txt\n+++ b/big.txt\n@@ -0,0 +1,100 @@\n";
-        let mut body = String::with_capacity(MAX_ADDED_LINES * 16);
-        for _ in 0..(MAX_ADDED_LINES + 100) {
-            body.push_str("+x\n");
-        }
-        let mut diff = String::with_capacity(header.len() + body.len());
-        diff.push_str(header);
-        diff.push_str(&body);
-
-        let index = DiffIndex::from_unified_diff(&diff);
-        let total: usize = index.added_lines.values().map(FxHashSet::len).sum();
-        assert!(
-            total <= MAX_ADDED_LINES,
-            "indexed {total} lines, cap is {MAX_ADDED_LINES}"
-        );
-    }
 
     #[test]
     fn filter_issues_from_path_skips_oversize_diff() {
@@ -1012,9 +817,29 @@ diff --git a/src/a.ts b/src/a.ts
             line: 3,
             ..keep.clone()
         };
-        assert!(index.keeps(&keep, DiffFilterMode::Added));
-        assert!(!index.keeps(&drop, DiffFilterMode::Added));
-        assert!(index.keeps(&drop, DiffFilterMode::DiffContext));
-        assert!(index.keeps(&drop, DiffFilterMode::File));
+        assert!(diff_index_keeps_issue(
+            &index,
+            &keep,
+            DiffFilterMode::Added,
+            3
+        ));
+        assert!(!diff_index_keeps_issue(
+            &index,
+            &drop,
+            DiffFilterMode::Added,
+            3
+        ));
+        assert!(diff_index_keeps_issue(
+            &index,
+            &drop,
+            DiffFilterMode::DiffContext,
+            3
+        ));
+        assert!(diff_index_keeps_issue(
+            &index,
+            &drop,
+            DiffFilterMode::File,
+            3
+        ));
     }
 }

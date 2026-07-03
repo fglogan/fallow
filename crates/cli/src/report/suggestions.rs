@@ -1,37 +1,24 @@
-//! Command-level `next_steps[]` builder.
+//! Runtime fact adapters for `next_steps[]` builders.
 //!
-//! Computes a small list of read-only, runnable follow-up commands from a run's
-//! findings, surfaced at the JSON root (and as a one-line human `Next:` hint).
-//! The purpose is to point agents and humans sideways to plow's adjacent
-//! verification capabilities (trace, complexity breakdown, audit, workspace
-//! scoping) that telemetry shows agents rarely discover, because they act on the
-//! output in front of them rather than on reference docs.
-//!
-//! Two hard contracts, both enforced by the tests in this module and by the
-//! `next_step` constructor's debug assertions:
-//!
-//! 1. **Read-only.** A step NEVER suggests `plow fix` or any mutating command.
-//! 2. **Runnable, placeholder-free.** Every `command` runs as-is; it never
-//!    contains an angle-bracket placeholder. Finding-derived values come from a
-//!    real, deterministically-selected finding; values that cannot be made
-//!    concrete (a coverage path) are dropped from v1 rather than shipped as a
-//!    placeholder, and an unresolvable git ref omits its step entirely.
+//! The stable command strings, ordering, caps, and read-only contract live in
+//! `plow-output`. This module keeps the CLI-specific probes: environment
+//! toggles, project setup state, git refs, and changed-branch applicability.
 
 use std::path::Path;
 use std::process::Command;
 
-use plow_core::results::AnalysisResults;
+use plow_api::DupesReportPayload;
+use plow_output::{
+    CombinedNextStepsInput, DeadCodeNextStepsInput, DupesNextStepsInput, HealthNextStepsInput,
+    ImpactDigestCounts, build_combined_next_steps as build_combined_next_steps_contract,
+    build_dead_code_next_steps as build_dead_code_next_steps_contract,
+    build_dupes_next_steps as build_dupes_next_steps_contract, impact_digest_summary,
+    trace_unused_export_input,
+};
 use plow_types::output::NextStep;
+use plow_types::results::AnalysisResults;
 
-use crate::health_types::HealthReport;
-use crate::output_dupes::DupesReportPayload;
-
-/// Maximum number of next-steps emitted per envelope. Keeps the array a glance,
-/// not a wall; the priority order decides which survive the cap.
-const MAX_NEXT_STEPS: usize = 3;
-
-/// Mutating verbs a next-step must never suggest (the read-only contract).
-const MUTATING_VERBS: [&str; 5] = ["fix", "init", "hooks", "migrate", "setup-hooks"];
+use plow_output::HealthReport;
 
 /// `PLOW_SUGGESTIONS=off` (or `0`/`false`/`no`/`disabled`) disables next-steps
 /// entirely. Default on. This is the documented escape hatch for CI consumers
@@ -55,78 +42,6 @@ fn suggestions_enabled_from(value: Option<&str>) -> bool {
     }
 }
 
-/// Construct a next-step, asserting the two contracts in debug builds so a new
-/// trigger that violates them trips the test suite rather than shipping.
-fn next_step(id: &str, command: String, reason: &str) -> NextStep {
-    debug_assert!(
-        !command.contains('<') && !command.contains('>'),
-        "next-step command must be runnable (no placeholder): {command}"
-    );
-    debug_assert!(
-        !command
-            .split_whitespace()
-            .any(|token| MUTATING_VERBS.contains(&token)),
-        "next-step command must be read-only (no mutating verb): {command}"
-    );
-    NextStep {
-        id: id.to_string(),
-        command,
-        reason: reason.to_string(),
-    }
-}
-
-/// Project-root-relative, forward-slash path for embedding in a command string,
-/// matching the wire form of finding paths.
-fn relative_command_path(path: &Path, root: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
-}
-
-// ---------------------------------------------------------------------------
-// Individual triggers. Each returns `Some(step)` only when its evidence exists.
-// ---------------------------------------------------------------------------
-
-/// `trace-unused-export`: verify an export is truly unused before deleting.
-/// Uses the lexicographically smallest `(path, name)` finding so the embedded
-/// command is deterministic across runs (independent of internal vec order).
-fn trace_unused_export(results: &AnalysisResults, root: &Path) -> Option<NextStep> {
-    let target = results
-        .unused_exports
-        .iter()
-        .map(|finding| {
-            (
-                relative_command_path(&finding.export.path, root),
-                finding.export.export_name.clone(),
-            )
-        })
-        .min()?;
-    Some(next_step(
-        "trace-unused-export",
-        format!("plow dead-code --trace {}:{}", target.0, target.1),
-        "verify an export is truly unused before deleting",
-    ))
-}
-
-/// `setup`: first-contact pointer for unconfigured projects. The command is the
-/// read-only capability manifest (`plow schema`), whose `task_matrix` and
-/// commands list name the guided-setup surface (`init --agents`, the hooks
-/// installer); the mutating commands themselves are never embedded here (the
-/// read-only contract), the agent offers them to the user instead. Callers gate
-/// this via [`setup_pointer_applicable`] so CI runs, configured projects, and
-/// projects that declined onboarding never see it.
-fn setup_pointer(offer_setup: bool) -> Option<NextStep> {
-    if !offer_setup {
-        return None;
-    }
-    Some(next_step(
-        "setup",
-        "plow schema".to_string(),
-        "plow has no config here; the manifest lists guided-setup commands (agent guide, commit gate) to offer the user",
-    ))
-}
-
 /// Shared first-contact gate for the `setup` next-step and the human setup hint
 /// on bare `plow`: the project has no plow config (searched up to the repo
 /// root, same as config loading), the run is not in CI, and onboarding has not
@@ -144,48 +59,17 @@ pub fn setup_pointer_applicable(root: &Path) -> bool {
 /// Worded as an offer, not a deficiency: zero-config is a supported happy path.
 pub const SETUP_HINT: &str = "Setup: `plow init --agents` writes an agent guide; `plow hooks install --target agent` adds a commit gate (hide this hint: `plow init --decline`).";
 
-/// `impact-report`: the periodic local value digest. Emitted at most once per
-/// week per project (the cadence stamp lives in the impact store, not the
-/// agent, so it is consistent across agents and sessions), only when impact
-/// tracking is enabled and has non-zero value to report, never in CI. Unlike
-/// every other trigger this one may surface on a CLEAN run: a clean project
-/// after a period of gate containment is exactly the moment the value report
-/// is informative.
-fn impact_digest_step(digest: Option<crate::impact::ImpactDigest>) -> Option<NextStep> {
-    let digest = digest?;
-    Some(next_step(
-        "impact-report",
-        "plow impact".to_string(),
-        &format!(
-            "local value report: {}; share the non-zero numbers with the user",
-            digest_summary(digest)
-        ),
-    ))
+/// Real-counter summary fragment shared by the next-step reason and the human
+/// one-liner. The output crate owns the `impact-report` command contract.
+pub fn impact_counts(digest: crate::impact::ImpactDigest) -> ImpactDigestCounts {
+    ImpactDigestCounts {
+        containment_count: digest.containment_count,
+        resolved_total: digest.resolved_total,
+    }
 }
 
-/// Real-counter summary fragment shared by the next-step reason and the human
-/// one-liner (the placeholder-free contract: numbers come from the store).
 fn digest_summary(digest: crate::impact::ImpactDigest) -> String {
-    let mut parts = Vec::new();
-    if digest.containment_count > 0 {
-        parts.push(format!(
-            "{} commit{} contained at the gate",
-            digest.containment_count,
-            if digest.containment_count == 1 {
-                ""
-            } else {
-                "s"
-            }
-        ));
-    }
-    if digest.resolved_total > 0 {
-        parts.push(format!(
-            "{} finding{} resolved",
-            digest.resolved_total,
-            if digest.resolved_total == 1 { "" } else { "s" }
-        ));
-    }
-    parts.join(", ")
+    impact_digest_summary(impact_counts(digest))
 }
 
 /// One-line human counterpart of the `impact-report` next-step, printed with
@@ -210,60 +94,17 @@ pub fn due_impact_digest(root: &Path) -> Option<crate::impact::ImpactDigest> {
     crate::impact::take_due_digest(root)
 }
 
-/// `trace-clone`: see sibling locations and an extract-function suggestion for a
-/// duplicated block. Uses the smallest fingerprint for run-to-run determinism.
-fn trace_clone(payload: &DupesReportPayload) -> Option<NextStep> {
-    let fingerprint = payload
-        .clone_groups
-        .iter()
-        .map(|group| group.fingerprint.as_str())
-        .min()?;
-    Some(next_step(
-        "trace-clone",
-        format!("plow dupes --trace {fingerprint}"),
-        "see sibling locations and an extract-function suggestion",
-    ))
-}
-
-/// `complexity-breakdown`: see the per-decision-point contributions behind a
-/// high-complexity finding.
-fn complexity_breakdown(report: &HealthReport) -> Option<NextStep> {
-    if report.findings.is_empty() {
-        return None;
-    }
-    Some(next_step(
-        "complexity-breakdown",
-        "plow health --complexity-breakdown".to_string(),
-        "see per-decision-point contributions for a hotspot",
-    ))
-}
-
-/// `scope-workspaces`: scope a monorepo run to the packages touched since the
-/// default branch. Emitted only when the project is a monorepo AND a concrete
-/// default ref resolves, so the embedded ref is real (never a placeholder).
-fn scope_workspaces(root: &Path) -> Option<NextStep> {
+fn default_workspace_ref_for_next_step(root: &Path) -> Option<String> {
     if plow_config::discover_workspaces(root).is_empty() {
         return None;
     }
-    let reference = resolve_default_workspace_ref(root)?;
-    Some(next_step(
-        "scope-workspaces",
-        format!("plow dead-code --changed-workspaces {reference}"),
-        "scope a monorepo run to the packages your branch touched",
-    ))
+    resolve_default_workspace_ref(root)
 }
 
 /// `audit-changed`: gate only the files the current branch changed. `plow
 /// audit` auto-detects its base, so no ref needs embedding.
-fn audit_changed(root: &Path) -> Option<NextStep> {
-    if !plow_core::churn::is_git_repo(root) {
-        return None;
-    }
-    Some(next_step(
-        "audit-changed",
-        "plow audit".to_string(),
-        "gate only the files your branch changed (auto-detects the base)",
-    ))
+pub fn audit_changed_applicable(root: &Path) -> bool {
+    plow_engine::is_git_repo(root)
 }
 
 // ---------------------------------------------------------------------------
@@ -333,52 +174,34 @@ pub fn build_dead_code_next_steps(
     offer_setup: bool,
     digest: Option<crate::impact::ImpactDigest>,
 ) -> Vec<NextStep> {
-    if !suggestions_enabled() {
-        return Vec::new();
-    }
-    if results.total_issues() == 0 {
-        return impact_digest_step(digest).into_iter().collect();
-    }
-    let mut steps: Vec<NextStep> = [
-        setup_pointer(offer_setup),
-        impact_digest_step(digest),
-        trace_unused_export(results, root),
-        scope_workspaces(root),
-        audit_changed(root),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    steps.truncate(MAX_NEXT_STEPS);
-    steps
+    let workspace_ref = default_workspace_ref_for_next_step(root);
+    build_dead_code_next_steps_contract(DeadCodeNextStepsInput {
+        suggestions_enabled: suggestions_enabled(),
+        results,
+        root,
+        offer_setup,
+        impact_digest: digest.map(impact_counts),
+        workspace_ref: workspace_ref.as_deref(),
+        audit_changed: audit_changed_applicable(root),
+    })
 }
 
 /// Next-steps for standalone `plow health`. See [`build_dead_code_next_steps`]
 /// for the `offer_setup` parameter contract.
 #[must_use]
-pub fn build_health_next_steps(
+pub fn health_next_steps_input(
     report: &HealthReport,
     root: &Path,
     offer_setup: bool,
     digest: Option<crate::impact::ImpactDigest>,
-) -> Vec<NextStep> {
-    if !suggestions_enabled() {
-        return Vec::new();
-    }
-    if report.findings.is_empty() {
-        return impact_digest_step(digest).into_iter().collect();
-    }
-    let mut steps: Vec<NextStep> = [
-        setup_pointer(offer_setup),
-        impact_digest_step(digest),
-        complexity_breakdown(report),
-        audit_changed(root),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    steps.truncate(MAX_NEXT_STEPS);
-    steps
+) -> HealthNextStepsInput {
+    plow_output::build_health_next_steps_input(
+        report,
+        suggestions_enabled(),
+        offer_setup,
+        digest.map(impact_counts),
+        audit_changed_applicable(root),
+    )
 }
 
 /// Next-steps for standalone `plow dupes`. See [`build_dead_code_next_steps`]
@@ -390,23 +213,18 @@ pub fn build_dupes_next_steps(
     offer_setup: bool,
     digest: Option<crate::impact::ImpactDigest>,
 ) -> Vec<NextStep> {
-    if !suggestions_enabled() {
-        return Vec::new();
-    }
-    if payload.clone_groups.is_empty() {
-        return impact_digest_step(digest).into_iter().collect();
-    }
-    let mut steps: Vec<NextStep> = [
-        setup_pointer(offer_setup),
-        impact_digest_step(digest),
-        trace_clone(payload),
-        audit_changed(root),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    steps.truncate(MAX_NEXT_STEPS);
-    steps
+    let clone_fingerprints = payload
+        .clone_groups
+        .iter()
+        .map(|group| group.fingerprint.as_str())
+        .collect::<Vec<_>>();
+    build_dupes_next_steps_contract(DupesNextStepsInput {
+        suggestions_enabled: suggestions_enabled(),
+        clone_fingerprints: &clone_fingerprints,
+        offer_setup,
+        impact_digest: digest.map(impact_counts),
+        audit_changed: audit_changed_applicable(root),
+    })
 }
 
 /// Aggregated next-steps for bare `plow` (combined). Candidates are pushed in
@@ -424,29 +242,27 @@ pub fn build_combined_next_steps(
     offer_setup: bool,
     digest: Option<crate::impact::ImpactDigest>,
 ) -> Vec<NextStep> {
-    if !suggestions_enabled() {
-        return Vec::new();
-    }
-    let has_findings = results.is_some_and(|r| r.total_issues() > 0)
-        || dupes.is_some_and(|d| !d.clone_groups.is_empty())
-        || health.is_some_and(|h| !h.findings.is_empty());
-    if !has_findings {
-        return impact_digest_step(digest).into_iter().collect();
-    }
-    let mut steps: Vec<NextStep> = [
-        setup_pointer(offer_setup),
-        impact_digest_step(digest),
-        results.and_then(|r| trace_unused_export(r, root)),
-        scope_workspaces(root),
-        dupes.and_then(trace_clone),
-        health.and_then(complexity_breakdown),
-        audit_changed(root),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    steps.truncate(MAX_NEXT_STEPS);
-    steps
+    let workspace_ref = default_workspace_ref_for_next_step(root);
+    let clone_fingerprints = dupes
+        .map(|payload| {
+            payload
+                .clone_groups
+                .iter()
+                .map(|group| group.fingerprint.as_str())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    build_combined_next_steps_contract(&CombinedNextStepsInput {
+        suggestions_enabled: suggestions_enabled(),
+        has_dead_code_findings: results.is_some_and(|r| r.total_issues() > 0),
+        trace_unused_export: results.and_then(|r| trace_unused_export_input(r, root)),
+        workspace_ref: workspace_ref.as_deref(),
+        clone_fingerprints: &clone_fingerprints,
+        has_complexity_findings: health.is_some_and(|h| !h.findings.is_empty()),
+        offer_setup,
+        impact_digest: digest.map(impact_counts),
+        audit_changed: audit_changed_applicable(root),
+    })
 }
 
 /// Next-steps for `plow audit`. No `audit-changed` (audit IS the changed
@@ -455,22 +271,16 @@ pub fn build_combined_next_steps(
 /// so the trace anchor is made root-relative the same way every other surface
 /// does it (in-memory finding paths are absolute; the wire form is relative).
 #[must_use]
+#[cfg(test)]
 pub fn build_audit_next_steps(
     check: Option<(&AnalysisResults, &Path)>,
     complexity: Option<&HealthReport>,
 ) -> Vec<NextStep> {
-    if !suggestions_enabled() {
-        return Vec::new();
-    }
-    let mut steps: Vec<NextStep> = [
-        check.and_then(|(results, root)| trace_unused_export(results, root)),
-        complexity.and_then(complexity_breakdown),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    steps.truncate(MAX_NEXT_STEPS);
-    steps
+    plow_output::build_audit_next_steps(&plow_output::build_audit_next_steps_input(
+        check,
+        complexity,
+        suggestions_enabled(),
+    ))
 }
 
 /// The single highest-priority next-step for the human `Next:` line, computed
@@ -495,6 +305,11 @@ pub fn top_combined_next_step(
 mod tests {
     use std::path::PathBuf;
 
+    use plow_output::build_health_next_steps as build_health_next_steps_contract;
+    use plow_output::{
+        ComplexityViolation, ExceededThreshold, FindingSeverity, HealthFinding, HealthReport,
+    };
+    use plow_types::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
     use plow_types::output_dead_code::UnusedExportFinding;
     use plow_types::results::{AnalysisResults, UnusedExport};
 
@@ -519,7 +334,68 @@ mod tests {
         }
     }
 
+    fn clone_instance(path: &str, fragment: &str) -> CloneInstance {
+        CloneInstance {
+            file: PathBuf::from(path),
+            start_line: 1,
+            end_line: 8,
+            start_col: 0,
+            end_col: 0,
+            fragment: fragment.to_string(),
+        }
+    }
+
+    fn dupes_payload() -> DupesReportPayload {
+        let group = CloneGroup {
+            instances: vec![
+                clone_instance("/project/src/a.ts", "export const shared = 1;"),
+                clone_instance("/project/src/b.ts", "export const shared = 1;"),
+            ],
+            token_count: 20,
+            line_count: 8,
+        };
+        DupesReportPayload::from_report(&DuplicationReport {
+            clone_groups: vec![group],
+            clone_families: Vec::new(),
+            mirrored_directories: Vec::new(),
+            stats: DuplicationStats::default(),
+        })
+    }
+
+    fn health_report_with_finding() -> HealthReport {
+        HealthReport {
+            findings: vec![HealthFinding::from(ComplexityViolation {
+                path: PathBuf::from("/project/src/hot.ts"),
+                name: "hot".to_string(),
+                line: 1,
+                col: 0,
+                cyclomatic: 21,
+                cognitive: 16,
+                line_count: 42,
+                param_count: 0,
+                react_hook_count: 0,
+                react_jsx_max_depth: 0,
+                react_prop_count: 0,
+                react_hook_profile: None,
+                exceeded: ExceededThreshold::Both,
+                severity: FindingSeverity::High,
+                crap: None,
+                coverage_pct: None,
+                coverage_tier: None,
+                coverage_source: None,
+                inherited_from: None,
+                component_rollup: None,
+                contributions: Vec::new(),
+                effective_thresholds: None,
+                threshold_source: None,
+            })],
+            ..HealthReport::default()
+        }
+    }
+
     fn assert_valid(step: &NextStep) {
+        const MUTATING_VERBS: [&str; 5] = ["fix", "init", "hooks", "migrate", "setup-hooks"];
+
         assert!(
             !step.command.contains('<') && !step.command.contains('>'),
             "command must be placeholder-free: {}",
@@ -536,17 +412,19 @@ mod tests {
     }
 
     #[test]
-    fn trace_unused_export_emits_runnable_relative_command() {
+    fn audit_next_steps_emit_runnable_relative_trace_command() {
         let root = PathBuf::from("/project");
         let results = results_with_exports(vec![unused_export("/project/src/util.ts", "foo")]);
-        let step = trace_unused_export(&results, &root).expect("step");
-        assert_eq!(step.id, "trace-unused-export");
-        assert_eq!(step.command, "plow dead-code --trace src/util.ts:foo");
-        assert_valid(&step);
+        let steps = build_audit_next_steps(Some((&results, &root)), None);
+
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].id, "trace-unused-export");
+        assert_eq!(steps[0].command, "plow dead-code --trace src/util.ts:foo");
+        assert_valid(&steps[0]);
     }
 
     #[test]
-    fn trace_unused_export_is_deterministic_regardless_of_vec_order() {
+    fn audit_next_steps_select_deterministic_trace_target() {
         let root = PathBuf::from("/project");
         let forward = results_with_exports(vec![
             unused_export("/project/src/b.ts", "beta"),
@@ -556,10 +434,10 @@ mod tests {
             unused_export("/project/src/a.ts", "alpha"),
             unused_export("/project/src/b.ts", "beta"),
         ]);
-        let a = trace_unused_export(&forward, &root).expect("step");
-        let b = trace_unused_export(&reverse, &root).expect("step");
-        assert_eq!(a.command, b.command);
-        assert_eq!(a.command, "plow dead-code --trace src/a.ts:alpha");
+        let a = build_audit_next_steps(Some((&forward, &root)), None);
+        let b = build_audit_next_steps(Some((&reverse, &root)), None);
+        assert_eq!(a[0].command, b[0].command);
+        assert_eq!(a[0].command, "plow dead-code --trace src/a.ts:alpha");
     }
 
     #[test]
@@ -567,15 +445,6 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         assert!(build_dead_code_next_steps(&results, &root, true, None).is_empty());
-    }
-
-    #[test]
-    fn setup_pointer_emits_only_when_applicable() {
-        assert!(setup_pointer(false).is_none());
-        let step = setup_pointer(true).expect("step");
-        assert_eq!(step.id, "setup");
-        assert_eq!(step.command, "plow schema");
-        assert_valid(&step);
     }
 
     #[test]
@@ -612,20 +481,6 @@ mod tests {
     }
 
     #[test]
-    fn impact_digest_step_carries_real_counters() {
-        assert!(impact_digest_step(None).is_none());
-        let step = impact_digest_step(Some(digest(4, 12))).expect("step");
-        assert_eq!(step.id, "impact-report");
-        assert_eq!(step.command, "plow impact");
-        assert!(step.reason.contains("4 commits contained at the gate"));
-        assert!(step.reason.contains("12 findings resolved"));
-        assert_valid(&step);
-        let singular = impact_digest_step(Some(digest(1, 0))).expect("step");
-        assert!(singular.reason.contains("1 commit contained at the gate"));
-        assert!(!singular.reason.contains("resolved"));
-    }
-
-    #[test]
     fn due_digest_rides_a_clean_run() {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
@@ -642,6 +497,101 @@ mod tests {
         let ids: Vec<&str> = steps.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids[0], "setup");
         assert_eq!(ids[1], "impact-report");
+    }
+
+    #[test]
+    fn health_steps_keep_complexity_breakdown_from_output_contract() {
+        let report = health_report_with_finding();
+        let steps = build_health_next_steps_contract(health_next_steps_input(
+            &report,
+            Path::new("/project"),
+            false,
+            None,
+        ));
+        let ids: Vec<&str> = steps.iter().map(|s| s.id.as_str()).collect();
+
+        assert_eq!(ids, ["complexity-breakdown"]);
+        assert_valid(&steps[0]);
+    }
+
+    #[test]
+    fn health_next_steps_input_feeds_output_contract_builder() {
+        let report = health_report_with_finding();
+        let input =
+            health_next_steps_input(&report, Path::new("/project"), true, Some(digest(2, 1)));
+
+        assert!(input.suggestions_enabled);
+        assert!(input.has_findings);
+        assert!(input.offer_setup);
+        assert_eq!(
+            input.impact_digest,
+            Some(ImpactDigestCounts {
+                containment_count: 2,
+                resolved_total: 1,
+            })
+        );
+
+        let steps = build_health_next_steps_contract(input);
+        let ids: Vec<&str> = steps.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["setup", "impact-report", "complexity-breakdown"]);
+    }
+
+    #[test]
+    fn dupes_next_steps_route_payload_fingerprints_to_output_contract() {
+        let payload = dupes_payload();
+
+        let steps = build_dupes_next_steps(&payload, Path::new("/project"), false, None);
+
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].id, "trace-clone");
+        assert!(steps[0].command.starts_with("plow dupes --trace dup:"));
+        assert_valid(&steps[0]);
+    }
+
+    #[test]
+    fn combined_next_steps_route_payload_facts_to_output_contract() {
+        let root = PathBuf::from("/project");
+        let results = results_with_exports(vec![
+            unused_export("/project/src/b.ts", "beta"),
+            unused_export("/project/src/a.ts", "alpha"),
+        ]);
+        let payload = dupes_payload();
+        let report = health_report_with_finding();
+
+        let steps = build_combined_next_steps(
+            Some(&results),
+            Some(&payload),
+            Some(&report),
+            &root,
+            true,
+            Some(digest(2, 1)),
+        );
+        let ids: Vec<&str> = steps.iter().map(|s| s.id.as_str()).collect();
+
+        assert_eq!(ids, ["setup", "impact-report", "trace-unused-export"]);
+        assert_eq!(steps[2].command, "plow dead-code --trace src/a.ts:alpha");
+        for step in &steps {
+            assert_valid(step);
+        }
+    }
+
+    #[test]
+    fn audit_next_steps_route_payload_facts_to_output_contract() {
+        let root = PathBuf::from("/project");
+        let results = results_with_exports(vec![
+            unused_export("/project/src/b.ts", "beta"),
+            unused_export("/project/src/a.ts", "alpha"),
+        ]);
+        let report = health_report_with_finding();
+
+        let steps = build_audit_next_steps(Some((&results, &root)), Some(&report));
+        let ids: Vec<&str> = steps.iter().map(|s| s.id.as_str()).collect();
+
+        assert_eq!(ids, ["trace-unused-export", "complexity-breakdown"]);
+        assert_eq!(steps[0].command, "plow dead-code --trace src/a.ts:alpha");
+        for step in &steps {
+            assert_valid(step);
+        }
     }
 
     #[test]
@@ -666,29 +616,31 @@ mod tests {
 
     #[test]
     fn every_emitted_command_is_runnable_and_read_only() {
-        // Exercise every data-driven trigger and assert both contracts.
+        // Exercise CLI adapters and assert the output-owned command contracts.
         let root = PathBuf::from("/project");
         let results = results_with_exports(vec![unused_export("/project/src/a.ts", "alpha")]);
+        let payload = dupes_payload();
+        let report = health_report_with_finding();
         let mut all = Vec::new();
-        all.extend(trace_unused_export(&results, &root));
-        // Static-command triggers (no findings needed to inspect the string).
-        all.push(next_step("audit-changed", "plow audit".to_string(), "x"));
-        all.push(next_step(
-            "scope-workspaces",
-            "plow dead-code --changed-workspaces origin/main".to_string(),
-            "x",
+        all.extend(build_audit_next_steps(Some((&results, &root)), None));
+        all.extend(build_dead_code_next_steps(
+            &results,
+            &root,
+            true,
+            Some(digest(2, 1)),
         ));
-        all.push(next_step(
-            "complexity-breakdown",
-            "plow health --complexity-breakdown".to_string(),
-            "x",
+        all.extend(build_dupes_next_steps(&payload, &root, false, None));
+        all.extend(build_health_next_steps_contract(health_next_steps_input(
+            &report, &root, false, None,
+        )));
+        all.extend(build_combined_next_steps(
+            Some(&results),
+            Some(&payload),
+            Some(&report),
+            &root,
+            true,
+            Some(digest(2, 1)),
         ));
-        all.push(next_step(
-            "trace-clone",
-            "plow dupes --trace dup:abcd1234".to_string(),
-            "x",
-        ));
-        all.extend(setup_pointer(true));
         assert!(!all.is_empty());
         for step in &all {
             assert_valid(step);
@@ -701,6 +653,6 @@ mod tests {
         let results = results_with_exports(vec![unused_export("/project/src/a.ts", "alpha")]);
         // Even if git/workspaces/setup add candidates, the cap holds.
         let steps = build_dead_code_next_steps(&results, &root, true, None);
-        assert!(steps.len() <= MAX_NEXT_STEPS);
+        assert!(steps.len() <= 3);
     }
 }

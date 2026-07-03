@@ -13,7 +13,7 @@
 //! emission path through these types directly, eliminating the drift class
 //! between the augmentation list here and the `serde_json::json!` builders.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// A suggested action attached to a finding in the JSON output. Each finding
 /// carries an `actions` array; consumers (agents, IDE clients, CI bots) can
@@ -34,10 +34,12 @@ use serde::Serialize;
 /// Current per-instance flips:
 ///
 /// - `remove-catalog-entry` (`unused-catalog-entries`): `true` only when the
-///   finding's `hardcoded_consumers` array is empty. When a workspace
-///   package still pins a hardcoded version of the same package, `plow fix`
-///   skips the entry to avoid breaking `pnpm install`, and the action is
-///   emitted with `auto_fixable: false`.
+///   finding's `hardcoded_consumers` array is empty and the source is
+///   `pnpm-workspace.yaml`. When a workspace package still pins a hardcoded
+///   version of the same package, `plow fix` skips the entry to avoid
+///   breaking `pnpm install`. Bun `package.json` catalog entries are also
+///   emitted with `auto_fixable: false` because the current fixer is
+///   YAML-only.
 /// - `remove-dependency` vs `move-dependency` (dependency findings): when the
 ///   finding's `used_in_workspaces` array is non-empty, the primary action
 ///   flips to `move-dependency` with `auto_fixable: false` (`plow fix` will
@@ -62,7 +64,7 @@ use serde::Serialize;
 /// `auto_fixable: false`. The field is non-singleton on the wire so that a
 /// future auto-applier (e.g. an LLM-driven suppression writer) can promote
 /// individual variants without a schema bump.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum IssueAction {
@@ -85,7 +87,7 @@ pub enum IssueAction {
 
 /// A code-change fix. `type` is one of the kebab-case identifiers in
 /// [`FixActionType`].
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FixAction {
     /// Kebab-case identifier for the fix action.
@@ -95,11 +97,12 @@ pub struct FixAction {
     /// FINDING, not per action type: the same `type` may carry
     /// `auto_fixable: true` on one finding and `auto_fixable: false` on
     /// another when per-instance guards in the applier discriminate (e.g.
-    /// `remove-catalog-entry` flips on `hardcoded_consumers`, the primary
-    /// dependency action flips between `remove-dependency` /
-    /// `move-dependency` on `used_in_workspaces`). Filter on this bool of
-    /// each individual action, not on `type`. See the [`IssueAction`]
-    /// enum-level docs for the full list of per-instance flips.
+    /// `remove-catalog-entry` flips on `hardcoded_consumers` and catalog
+    /// source file, the primary dependency action flips between
+    /// `remove-dependency` / `move-dependency` on `used_in_workspaces`).
+    /// Filter on this bool of each individual action, not on `type`. See the
+    /// [`IssueAction`] enum-level docs for the full list of per-instance
+    /// flips.
     pub auto_fixable: bool,
     /// Human-readable description of the fix.
     pub description: String,
@@ -124,7 +127,7 @@ pub struct FixAction {
 
 /// Discriminant string for [`FixAction`]. Kebab-case per the JSON output
 /// contract.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum FixActionType {
@@ -163,9 +166,11 @@ pub enum FixActionType {
     /// Convert an import statement to a type-only import (used by
     /// private-type-leak findings).
     ExportType,
-    /// Remove an unused catalog entry from `pnpm-workspace.yaml`.
+    /// Remove an unused catalog entry. Auto-fix only supports `pnpm-workspace.yaml`;
+    /// Bun `package.json` catalogs are manual.
     RemoveCatalogEntry,
-    /// Remove an empty named catalog group from `pnpm-workspace.yaml`.
+    /// Remove an empty named catalog group. Auto-fix only supports
+    /// `pnpm-workspace.yaml`; Bun `package.json` catalogs are manual.
     RemoveEmptyCatalogGroup,
     /// Update an existing `catalog:` reference in a workspace `package.json`
     /// to point at a different (declared) catalog.
@@ -194,6 +199,27 @@ pub enum FixActionType {
     /// leading prologue of the file (manual; used by misplaced-directive
     /// findings).
     HoistDirective,
+    /// Wire a server action to a project consumer or remove the unused action
+    /// export (manual; used by unused-server-action findings).
+    WireServerAction,
+    /// Add a provider for an injected key or remove the dead inject call
+    /// (manual; used by unprovided-inject findings).
+    ProvideInject,
+    /// Use a SvelteKit load-data key from the route UI or remove the unused
+    /// returned key (manual; used by unused-load-data-key findings).
+    UseLoadData,
+    /// Render a reachable component from project code or remove the component
+    /// (manual; used by unrendered-component findings).
+    RenderComponent,
+    /// Use a declared component prop or remove it from the component API
+    /// (manual; used by unused-component-prop findings).
+    UseComponentProp,
+    /// Emit a declared component event or remove it from the component API
+    /// (manual; used by unused-component-emit findings).
+    EmitComponentEvent,
+    /// Add or forward a Svelte custom-event listener, or remove the dispatch
+    /// (manual; used by unused-svelte-event findings).
+    WireSvelteEvent,
     /// Resolve a Next.js App Router route collision by moving or merging one of
     /// the files that own the same URL (manual; suppressing a guaranteed build
     /// error is never the right fix, so this is the primary action).
@@ -202,10 +228,14 @@ pub enum FixActionType {
     /// segments at the conflicting position to a single consistent slug name
     /// (manual).
     ResolveDynamicSegmentNameConflict,
+    /// Add a human-authored reason to a suppression that requires one.
+    AddSuppressionReason,
+    /// Remove or update a suppression that no longer matches a finding.
+    RemoveStaleSuppression,
 }
 
 /// Inline-comment suppression for a single finding line.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SuppressLineAction {
     /// Action type identifier.
@@ -228,7 +258,7 @@ pub struct SuppressLineAction {
 }
 
 /// Singleton discriminant for [`SuppressLineAction`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum SuppressLineKind {
@@ -237,7 +267,7 @@ pub enum SuppressLineKind {
 }
 
 /// Scope marker for line suppressions that span multiple locations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum SuppressLineScope {
@@ -247,7 +277,7 @@ pub enum SuppressLineScope {
 }
 
 /// File-wide suppression placed at the top of the source file.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SuppressFileAction {
     /// Action type identifier.
@@ -263,7 +293,7 @@ pub struct SuppressFileAction {
 }
 
 /// Singleton discriminant for [`SuppressFileAction`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum SuppressFileKind {
@@ -273,7 +303,7 @@ pub enum SuppressFileKind {
 
 /// Edit a plow config file (`.plowrc.json`, `plow.toml`, etc.) to
 /// add the offending value to an `ignore*` rule.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AddToConfigAction {
     /// Action type identifier.
@@ -321,7 +351,7 @@ pub struct AddToConfigAction {
 }
 
 /// Singleton discriminant for [`AddToConfigAction`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum AddToConfigKind {
@@ -332,7 +362,7 @@ pub enum AddToConfigKind {
 /// Value payload for [`AddToConfigAction::value`]. The variants line up with
 /// the documented per-`config_key` shapes; deserialization is untagged so
 /// downstream consumers can switch on the JSON value's type.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum AddToConfigValue {
@@ -350,7 +380,7 @@ pub enum AddToConfigValue {
 
 /// Single `ignoreExports` rule entry. The plow config accepts an array of
 /// these under the `ignoreExports` key.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct IgnoreExportsRule {
     /// File path (forward slashes, relative to project root) to which this

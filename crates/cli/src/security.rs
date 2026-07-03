@@ -10,346 +10,81 @@
 //! only honest signals.
 
 use crate::report::sink::outln;
+use colored::Colorize;
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
 use plow_config::{OutputFormat, ProductionAnalysis, Severity};
-use plow_core::analyze::derive_security_severity;
-use plow_core::results::{
+use plow_engine::{derive_security_severity, security_catalogue_title};
+pub use plow_output::{
+    SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,
+    SecurityBlindSpotsSchemaVersion, SecurityBlindSpotsSummary, SecurityGateVerdict,
+    SecuritySchemaVersion, SecuritySurvivor, SecuritySurvivorsOutput,
+    SecuritySurvivorsSchemaVersion, SecuritySurvivorsSummary, SecurityUnresolvedCalleeDiagnostics,
+    SecurityUnresolvedCalleeReasonCount, SecurityUnresolvedCalleeSample,
+    SecurityUnresolvedCalleeTopFile, SecurityVerifierVerdict, SecurityVerifierVerdictStatus,
+};
+use plow_types::discover::DiscoveredFile;
+use plow_types::envelope::{ElapsedMs, ToolVersion};
+use plow_types::extract::ModuleInfo;
+use plow_types::results::{
     AnalysisResults, SecurityAttackSurfaceEntry, SecurityDeadCodeKind, SecurityFinding,
     SecurityFindingKind, TraceHop, TraceHopRole,
 };
-use plow_types::discover::DiscoveredFile;
-use plow_types::envelope::{ElapsedMs, Meta, ToolVersion};
-use plow_types::extract::ModuleInfo;
 use plow_types::results::{
     SecurityRuntimeContext, SecurityRuntimeState, SecuritySeverity,
     SecurityUnresolvedCalleeDiagnostic, TaintConfidence,
 };
 use rustc_hash::FxHashSet;
-use serde::Serialize;
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::base_worktree::{BaseWorktree, git_rev_parse};
 use crate::error::emit_error;
-use crate::health::{HealthOptions, SharedParseData, SortBy};
-use crate::health_types::{
+use crate::health::HealthOptions;
+use crate::load_config_for_analysis;
+use plow_output::{
     RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageReport, RuntimeCoverageVerdict,
 };
-use crate::load_config_for_analysis;
+
+pub use plow_api::SecurityGateMode;
 
 const UNRESOLVED_CALLEE_SAMPLE_LIMIT: usize = 25;
 const UNRESOLVED_CALLEE_TOP_FILES_LIMIT: usize = 10;
 
-/// The `plow security --format json` schema version. Independently versioned
-/// from the main contract, mirroring `ImpactReportSchemaVersion`.
-#[derive(Debug, Clone, Copy, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub enum SecuritySchemaVersion {
-    /// First release of the `plow security --format json` shape.
-    #[allow(
-        dead_code,
-        reason = "kept so the generated schema documents historical v1"
-    )]
-    #[serde(rename = "1")]
-    V1,
-    /// Adds per-finding `severity` for verification-priority tiering.
-    #[allow(
-        dead_code,
-        reason = "kept so the generated schema documents historical v2"
-    )]
-    #[serde(rename = "2")]
-    V2,
-    /// Adds version, elapsed time, explain metadata, and safe config metadata.
-    #[allow(
-        dead_code,
-        reason = "kept so the generated schema documents historical v3"
-    )]
-    #[serde(rename = "3")]
-    V3,
-    /// Adds bounded diagnostics for unresolved callee blind spots.
-    #[allow(
-        dead_code,
-        reason = "kept so the generated schema documents historical v4"
-    )]
-    #[serde(rename = "4")]
-    V4,
-    /// Adds summary metadata to security summary JSON.
-    #[allow(
-        dead_code,
-        reason = "kept so the generated schema documents historical v5"
-    )]
-    #[serde(rename = "5")]
-    V5,
-    /// Adds `candidate.sink.url_shape` for URL-shaped security candidates.
-    #[allow(
-        dead_code,
-        reason = "kept so the generated schema documents historical v6"
-    )]
-    #[serde(rename = "6")]
-    V6,
-    /// Adds the server-only-import category on client-server-leak findings when a
-    /// use-client cone reaches a server-only module.
-    #[serde(rename = "7")]
-    V7,
-}
-
-/// Gate mode for `plow security --gate <mode>`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, clap::ValueEnum)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "kebab-case")]
-pub enum SecurityGateMode {
-    /// Fail when the change introduces a NEW security-sink candidate on a changed
-    /// line (not merely a sink in a changed file). There is deliberately no `all`
-    /// mode: gating on the whole candidate backlog is the anti-feature this gate
-    /// exists to avoid.
+/// CLI parser mode for `plow security --gate <mode>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum SecurityGateArg {
+    /// Fail when the change introduces a new security-sink candidate on a
+    /// changed line.
     New,
     /// Fail when a candidate becomes runtime-reachable from an entry point in
     /// head but the matching candidate was not runtime-reachable in base.
     NewlyReachable,
 }
 
-/// Gate verdict on the wire. `fail` is the CI-state token; human output renders
-/// it as "REVIEW REQUIRED" because these stay unverified candidates, never
-/// confirmed vulnerabilities.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "kebab-case")]
-pub enum SecurityGateVerdict {
-    /// No new candidate in the changed lines.
-    Pass,
-    /// At least one new candidate in the changed lines; review required.
-    Fail,
+impl SecurityGateArg {
+    #[must_use]
+    pub const fn into_mode(self) -> SecurityGateMode {
+        match self {
+            Self::New => SecurityGateMode::New,
+            Self::NewlyReachable => SecurityGateMode::NewlyReachable,
+        }
+    }
 }
 
-/// The `gate` block on `SecurityOutput`, present only when `--gate <mode>` ran.
-/// Invariant: `verdict == Fail  IFF  exit code 8  IFF  new_count > 0`.
-#[derive(Debug, Clone, Copy, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityGate {
-    /// Which delta the gate checked.
-    pub mode: SecurityGateMode,
-    /// `pass` or `fail`.
-    pub verdict: SecurityGateVerdict,
-    /// Number of candidates matching the selected gate mode.
-    pub new_count: usize,
-}
+pub type SecurityGate = plow_output::SecurityGate<SecurityGateMode>;
 
-/// Allowlisted config context for `plow security --format json`.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(
-    feature = "schema",
-    schemars(extend("required" = ["rules", "categories_include", "categories_exclude"]))
-)]
-pub struct SecurityOutputConfig {
-    /// Relevant rule severities before and after this command applies its
-    /// default-on behavior for security-only rules.
-    pub rules: SecurityOutputRulesConfig,
-    /// `security.categories.include` from config. `null` means unset, `[]`
-    /// means explicitly empty.
-    pub categories_include: Option<Vec<String>>,
-    /// `security.categories.exclude` from config. `null` means unset, `[]`
-    /// means explicitly empty.
-    pub categories_exclude: Option<Vec<String>>,
-}
+pub type SecurityOutputConfig = plow_output::SecurityOutputConfig<Severity>;
 
-#[derive(Debug, Clone, Copy, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityOutputRulesConfig {
-    pub security_client_server_leak: SecurityRuleSeverityConfig,
-    pub security_sink: SecurityRuleSeverityConfig,
-}
+pub type SecurityOutputRulesConfig = plow_output::SecurityOutputRulesConfig<Severity>;
 
-#[derive(Debug, Clone, Copy, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityRuleSeverityConfig {
-    /// Severity read from resolved config before the security command applies
-    /// its default-on behavior.
-    pub configured: Severity,
-    /// Severity used for this command run.
-    pub effective: Severity,
-}
+pub type SecurityRuleSeverityConfig = plow_output::SecurityRuleSeverityConfig<Severity>;
 
-/// The `plow security --format json` envelope. `PlowOutput` discriminates it
-/// by the `kind: "security"` tag; the optional `gate` block is additive and is
-/// not part of that discrimination.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityOutput {
-    /// Schema version of this envelope.
-    pub schema_version: SecuritySchemaVersion,
-    /// Plow CLI version that produced this output.
-    pub version: ToolVersion,
-    /// Wall-clock milliseconds spent producing the report.
-    pub elapsed_ms: ElapsedMs,
-    /// Privacy-safe config context relevant to security candidate generation.
-    pub config: SecurityOutputConfig,
-    /// Security-specific rule and field metadata, emitted with `--explain`.
-    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
-    pub meta: Option<Meta>,
-    /// Gate verdict, present only when `--gate <mode>` was set (issue #886).
-    /// Emitted on pass too (`verdict: "pass"`, `new_count: 0`) so consumers
-    /// distinguish "gate ran and passed" from "gate did not run" (absent).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gate: Option<SecurityGate>,
-    /// Security candidates. Paths are project-root-relative, forward-slash.
-    pub security_findings: Vec<SecurityFinding>,
-    /// Opt-in attack-surface inventory from untrusted entry points to reachable
-    /// sinks. Present only when `--surface` was requested.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attack_surface: Option<Vec<SecurityAttackSurfaceEntry>>,
-    /// In-band blind spot: number of `"use client"` files whose transitive
-    /// import cone contains a dynamic `import()` the reachability BFS could not
-    /// follow. A leak hidden behind such an edge would not be reported, so a
-    /// zero finding count with a non-zero value here is NOT a clean bill.
-    pub unresolved_edge_files: usize,
-    /// In-band blind spot: number of sink-shaped nodes the catalogue detector
-    /// could not flatten to a static callee path (dynamic dispatch, computed
-    /// members, aliased bindings). A zero finding count with a non-zero value
-    /// here is NOT a clean bill.
-    pub unresolved_callee_sites: usize,
-    /// Bounded diagnostics for unresolved callee blind spots.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub unresolved_callee_diagnostics: Option<SecurityUnresolvedCalleeDiagnostics>,
-}
-
-/// Bounded unresolved-callee diagnostics for `plow security --format json`.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityUnresolvedCalleeDiagnostics {
-    /// Deterministic sample rows, capped by `sample_limit`.
-    pub sampled: Vec<SecurityUnresolvedCalleeSample>,
-    /// Files with the most unresolved callees, capped by `top_files_limit`.
-    pub top_files: Vec<SecurityUnresolvedCalleeTopFile>,
-    /// Full count by unresolved-callee reason, sorted by count then reason.
-    pub by_reason: Vec<SecurityUnresolvedCalleeReasonCount>,
-    /// Maximum number of sample rows emitted.
-    pub sample_limit: usize,
-    /// Maximum number of top-file rows emitted.
-    pub top_files_limit: usize,
-}
-
-/// One sampled unresolved-callee row.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityUnresolvedCalleeSample {
-    /// Project-relative source path.
-    pub path: String,
-    /// 1-based source line.
-    pub line: u32,
-    /// 0-based byte column.
-    pub col: u32,
-    /// Why the callee was skipped.
-    pub reason: plow_types::extract::SkippedSecurityCalleeReason,
-    /// Compact syntax shape of the skipped callee.
-    pub expression_kind: plow_types::extract::SkippedSecurityCalleeExpressionKind,
-}
-
-/// Count of unresolved callees in one file.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityUnresolvedCalleeTopFile {
-    /// Project-relative source path.
-    pub path: String,
-    /// Number of unresolved callees in this file.
-    pub count: usize,
-}
-
-/// Count of unresolved callees for one reason.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityUnresolvedCalleeReasonCount {
-    /// Why the callees were skipped.
-    pub reason: plow_types::extract::SkippedSecurityCalleeReason,
-    /// Number of unresolved callees with this reason.
-    pub count: usize,
-}
-
-/// Compact `plow security --summary --format json` payload. Uses the same
-/// `kind: "security"` discriminator as the full payload, but omits candidate
-/// arrays and exposes only aggregate counts.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecuritySummaryOutput {
-    /// Schema version of this envelope.
-    pub schema_version: SecuritySchemaVersion,
-    /// Plow CLI version that produced this output.
-    pub version: ToolVersion,
-    /// Wall-clock milliseconds spent producing the report.
-    pub elapsed_ms: ElapsedMs,
-    /// Privacy-safe config context relevant to security candidate generation.
-    pub config: SecurityOutputConfig,
-    /// Security-specific rule and field metadata, emitted with `--explain`.
-    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
-    pub meta: Option<Meta>,
-    /// Gate verdict, present only when `--gate <mode>` was set.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gate: Option<SecurityGate>,
-    /// Aggregate security counts after all filters, gates, and scopes.
-    pub summary: SecuritySummary,
-}
-
-/// Aggregate counts for `plow security --summary --format json`.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecuritySummary {
-    /// Number of security candidates after all filters, gates, and scopes.
-    pub security_findings: usize,
-    /// Fixed severity counts for the closed security severity enum.
-    pub by_severity: SecuritySeverityCounts,
-    /// Finding counts by catalogue category, or by kind for findings without a
-    /// catalogue category.
-    pub by_category: BTreeMap<String, usize>,
-    /// Fixed reachability counts for ranking and triage signals.
-    pub by_reachability: SecurityReachabilityCounts,
-    /// Fixed runtime coverage counts for runtime-state triage signals.
-    pub by_runtime_state: SecurityRuntimeStateCounts,
-    /// Number of client files whose dynamic imports could not be followed.
-    pub unresolved_edge_files: usize,
-    /// Number of sink-shaped callees that could not be statically flattened.
-    pub unresolved_callee_sites: usize,
-    /// Number of attack-surface entries included in the prepared full output.
-    pub attack_surface_entries: usize,
-}
-
-/// Fixed severity counters for summary JSON.
-#[derive(Debug, Clone, Copy, Default, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecuritySeverityCounts {
-    pub high: usize,
-    pub medium: usize,
-    pub low: usize,
-}
-
-/// Fixed reachability counters for summary JSON.
-#[derive(Debug, Clone, Copy, Default, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityReachabilityCounts {
-    pub entry_reachable: usize,
-    pub untrusted_source_reachable: usize,
-    pub arg_level: usize,
-    pub module_level: usize,
-    pub crosses_boundary: usize,
-    pub source_backed: usize,
-}
-
-/// Fixed runtime coverage counters for summary JSON.
-#[derive(Debug, Clone, Copy, Default, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityRuntimeStateCounts {
-    pub runtime_hot: usize,
-    pub runtime_cold: usize,
-    pub never_executed: usize,
-    pub low_traffic: usize,
-    pub coverage_unavailable: usize,
-    pub runtime_unknown: usize,
-    pub not_collected: usize,
-}
+pub type SecurityOutput = plow_output::SecurityOutput<SecurityOutputConfig, SecurityGate>;
 
 /// Options for `plow security`, mirroring the global CLI flags it honors.
 pub struct SecurityOptions<'a> {
@@ -396,47 +131,119 @@ pub struct SecurityOptions<'a> {
     pub explain: bool,
 }
 
+/// Options for `plow security survivors`.
+pub struct SecuritySurvivorsOptions<'a> {
+    /// Output format.
+    pub output: OutputFormat,
+    /// Raw `plow security --format json` candidate file.
+    pub candidates: &'a Path,
+    /// Verifier verdict JSON file.
+    pub verdicts: &'a Path,
+    /// Exit with code 2 when any candidate lacks a matching verdict.
+    pub require_verdict_for_each_candidate: bool,
+}
+
+/// Run `plow security survivors`.
+pub fn run_survivors(opts: &SecuritySurvivorsOptions<'_>) -> ExitCode {
+    let started = Instant::now();
+    if let Err(code) = validate_derived_security_output(opts.output, "survivors") {
+        return code;
+    }
+    let output = match build_survivors_output(opts, started) {
+        Ok(output) => output,
+        Err(message) => return emit_error(&message, 2, opts.output),
+    };
+    // Note find-state for telemetry before any exit (issue #1650): the survivors
+    // subcommand emits a `security` workflow event, and without this the
+    // process-global findings-present accumulator stays unset (-> null). The
+    // retained, non-dismissed candidates (survivors + needs-human-review) are
+    // what this run surfaced as actionable; an all-dismissed run is clean.
+    crate::telemetry::note_result_count(
+        output.summary.survivors + output.summary.needs_human_review,
+    );
+    if opts.require_verdict_for_each_candidate && output.summary.unverdicted > 0 {
+        return emit_error(
+            &format!(
+                "Verifier verdict file is missing verdicts for {} candidate{}.",
+                output.summary.unverdicted,
+                crate::report::plural(output.summary.unverdicted)
+            ),
+            2,
+            opts.output,
+        );
+    }
+    outln!("{}", render_survivors_output(opts.output, &output));
+    ExitCode::SUCCESS
+}
+
+/// Run `plow security blind-spots`.
+pub fn run_blind_spots(opts: &SecurityOptions<'_>) -> ExitCode {
+    let started = Instant::now();
+    if let Err(code) = validate_derived_security_output(opts.output, "blind-spots") {
+        return code;
+    }
+    let (security_output, _) = match build_security_command_output(opts, started) {
+        Ok(output) => output,
+        Err(code) => return code,
+    };
+    let output = build_blind_spots_output(&security_output);
+    // Note find-state for telemetry before exit (issue #1650): the blind-spots
+    // subcommand emits a `security` workflow event; without this the
+    // findings-present accumulator stays unset (-> null). Its findings are the
+    // unresolved callee sites it surfaces; zero blind spots is a clean run.
+    crate::telemetry::note_result_count(output.summary.unresolved_callee_sites);
+    outln!("{}", render_blind_spots_output(opts.output, &output));
+    ExitCode::SUCCESS
+}
+
 /// Run `plow security`. Always exits 0 unless the user explicitly raised the
 /// `security-client-server-leak` rule to `error` AND findings exist (the rule
 /// defaults to `off` and the command forces it to `warn`, so the common case is
 /// advisory). Unsupported output formats exit 2.
 pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     let started = Instant::now();
-    if let Err(code) = validate_security_output(opts.output) {
+    let (output, effective_severities) = match build_security_command_output(opts, started) {
+        Ok(output) => output,
+        Err(code) => return code,
+    };
+    crate::telemetry::note_result_count(output.security_findings.len());
+
+    if let Err(code) = maybe_write_security_sarif(opts, &output) {
         return code;
     }
 
-    let mut config = match load_config_for_analysis(
+    outln!("{}", render_security_output(opts, &output));
+    security_exit_code(opts, &output, effective_severities)
+}
+
+fn build_security_command_output(
+    opts: &SecurityOptions<'_>,
+    started: Instant,
+) -> Result<(SecurityOutput, SecurityRuleSeverities), ExitCode> {
+    validate_security_output(opts.output)?;
+
+    let mut config = load_config_for_analysis(
         opts.root,
         opts.config_path,
-        opts.output,
-        opts.no_cache,
-        opts.threads,
-        None,
-        opts.quiet,
+        crate::ConfigLoadOptions {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production_override: None,
+            quiet: opts.quiet,
+        },
         ProductionAnalysis::DeadCode,
-    ) {
-        Ok(config) => config,
-        Err(code) => return code,
-    };
+    )?;
 
     let configured_severities = security_rule_severities(&config);
     force_security_rules(&mut config);
     let effective_severities = security_rule_severities(&config);
 
-    let mut analysis = match analyze_security_candidates(opts, &config) {
-        Ok(analysis) => analysis,
-        Err(code) => return code,
-    };
+    let mut analysis = analyze_security_candidates(opts, &config)?;
 
-    if let Err(code) = apply_security_scopes(opts, &mut analysis) {
-        return code;
-    }
+    apply_security_scopes(opts, &mut analysis)?;
 
-    let gate_mode = match apply_security_gate(opts, &config, &mut analysis.results) {
-        Ok(mode) => mode,
-        Err(code) => return code,
-    };
+    let gate_mode = apply_security_gate(opts, &config, &mut analysis.results)?;
 
     let unresolved_edge_files = analysis.results.security_unresolved_edge_files;
     let unresolved_callee_sites = analysis.results.security_unresolved_callee_sites;
@@ -444,10 +251,7 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         &analysis.results.security_unresolved_callee_diagnostics,
         &config.root,
     );
-    let runtime_report = match security_runtime_report(opts, &mut analysis) {
-        Ok(report) => report,
-        Err(code) => return code,
-    };
+    let runtime_report = security_runtime_report(opts, &mut analysis)?;
     let PreparedSecurityFindings {
         findings,
         attack_surface,
@@ -471,14 +275,7 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         unresolved_callee_sites,
         unresolved_callee_diagnostics,
     });
-    crate::telemetry::note_result_count(output.security_findings.len());
-
-    if let Err(code) = maybe_write_security_sarif(opts, &output) {
-        return code;
-    }
-
-    outln!("{}", render_security_output(opts, &output));
-    security_exit_code(opts, &output, effective_severities)
+    Ok((output, effective_severities))
 }
 
 #[derive(Clone, Copy)]
@@ -513,6 +310,188 @@ fn validate_security_output(output: OutputFormat) -> Result<(), ExitCode> {
             2,
             output,
         ))
+    }
+}
+
+fn validate_derived_security_output(
+    output: OutputFormat,
+    subcommand: &'static str,
+) -> Result<(), ExitCode> {
+    if matches!(output, OutputFormat::Human | OutputFormat::Json) {
+        Ok(())
+    } else {
+        Err(emit_error(
+            &format!("plow security {subcommand} supports --format human or json only."),
+            2,
+            output,
+        ))
+    }
+}
+
+fn build_survivors_output(
+    opts: &SecuritySurvivorsOptions<'_>,
+    started: Instant,
+) -> Result<SecuritySurvivorsOutput, String> {
+    let candidates = load_candidate_map(opts.candidates)?;
+    let verdicts = load_verdicts(opts.verdicts)?;
+    let mut seen = BTreeSet::new();
+    let mut survivors = BTreeMap::new();
+    let mut needs_human_review = BTreeMap::new();
+    let mut dismissed = 0;
+
+    for verdict in &verdicts {
+        validate_verdict(verdict)?;
+        if !seen.insert(verdict.finding_id.clone()) {
+            return Err(format!(
+                "Verifier verdict file has duplicate verdict for finding_id `{}`.",
+                verdict.finding_id
+            ));
+        }
+        let Some(candidate) = candidates.get(&verdict.finding_id) else {
+            return Err(format!(
+                "Verifier verdict references unknown finding_id `{}`.",
+                verdict.finding_id
+            ));
+        };
+        match verdict.verdict {
+            SecurityVerifierVerdictStatus::Survivor => {
+                survivors.insert(
+                    verdict.finding_id.clone(),
+                    survivor_from_verdict(verdict, candidate),
+                );
+            }
+            SecurityVerifierVerdictStatus::Dismissed => dismissed += 1,
+            SecurityVerifierVerdictStatus::NeedsHumanReview => {
+                needs_human_review.insert(
+                    verdict.finding_id.clone(),
+                    survivor_from_verdict(verdict, candidate),
+                );
+            }
+        }
+    }
+
+    let unverdicted = candidates.len().saturating_sub(seen.len());
+
+    Ok(SecuritySurvivorsOutput {
+        schema_version: SecuritySurvivorsSchemaVersion::V2,
+        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
+        elapsed_ms: ElapsedMs(started.elapsed().as_millis() as u64),
+        summary: SecuritySurvivorsSummary {
+            candidates: candidates.len(),
+            verdicts: verdicts.len(),
+            survivors: survivors.len(),
+            dismissed,
+            needs_human_review: needs_human_review.len(),
+            unverdicted,
+        },
+        survivors,
+        needs_human_review,
+    })
+}
+
+fn load_candidate_map(path: &Path) -> Result<BTreeMap<String, SecurityFinding>, String> {
+    let value = load_json_file(path, "candidate")?;
+    let Some(findings) = value
+        .get("security_findings")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return Err(format!(
+            "Candidate file {} must be raw `plow security --format json` output with a security_findings array.",
+            path.display()
+        ));
+    };
+    let mut candidates = BTreeMap::new();
+    for finding in findings {
+        let finding: SecurityFinding = serde_json::from_value(finding.clone()).map_err(|err| {
+            format!(
+                "Candidate file {} contains a malformed security finding: {err}",
+                path.display()
+            )
+        })?;
+        if finding.finding_id.is_empty() {
+            return Err(format!(
+                "Candidate file {} contains a security finding with an empty finding_id.",
+                path.display()
+            ));
+        }
+        if candidates
+            .insert(finding.finding_id.clone(), finding.clone())
+            .is_some()
+        {
+            return Err(format!(
+                "Candidate file {} contains duplicate finding_id `{}`.",
+                path.display(),
+                finding.finding_id
+            ));
+        }
+    }
+    Ok(candidates)
+}
+
+fn load_verdicts(path: &Path) -> Result<Vec<SecurityVerifierVerdict>, String> {
+    let value = load_json_file(path, "verdict")?;
+    let verdicts_value = if let Some(items) = value.get("verdicts") {
+        if value
+            .get("schema_version")
+            .and_then(serde_json::Value::as_str)
+            != Some("plow-security-verdicts/v1")
+        {
+            return Err(format!(
+                "Verifier verdict file {} must use schema_version `plow-security-verdicts/v1`.",
+                path.display()
+            ));
+        }
+        if !items.is_array() {
+            return Err(format!(
+                "Verifier verdict file {} must contain a verdicts array.",
+                path.display()
+            ));
+        }
+        items.clone()
+    } else {
+        value
+    };
+    serde_json::from_value::<Vec<SecurityVerifierVerdict>>(verdicts_value).map_err(|err| {
+        format!(
+            "Failed to parse verifier verdict file {}: {err}",
+            path.display()
+        )
+    })
+}
+
+fn load_json_file(path: &Path, label: &str) -> Result<serde_json::Value, String> {
+    let src = std::fs::read_to_string(path)
+        .map_err(|err| format!("Failed to read {label} file {}: {err}", path.display()))?;
+    serde_json::from_str(&src)
+        .map_err(|err| format!("Failed to parse {label} file {}: {err}", path.display()))
+}
+
+fn validate_verdict(verdict: &SecurityVerifierVerdict) -> Result<(), String> {
+    if verdict.schema_version != "plow-security-verdict/v1" {
+        return Err(format!(
+            "Verifier verdict for finding_id `{}` must use schema_version `plow-security-verdict/v1`.",
+            verdict.finding_id
+        ));
+    }
+    if verdict.finding_id.is_empty() {
+        return Err("Verifier verdict contains an empty finding_id.".to_owned());
+    }
+    Ok(())
+}
+
+fn survivor_from_verdict(
+    verdict: &SecurityVerifierVerdict,
+    candidate: &SecurityFinding,
+) -> SecuritySurvivor {
+    SecuritySurvivor {
+        finding_id: verdict.finding_id.clone(),
+        verdict: verdict.verdict,
+        reason: verdict.reason.clone(),
+        rationale: verdict.rationale.clone(),
+        confidence: verdict.confidence.clone(),
+        impact: verdict.impact.clone(),
+        fix_direction: verdict.fix_direction.clone(),
+        candidate: candidate.clone(),
     }
 }
 
@@ -685,9 +664,9 @@ fn security_output_config(
 
 fn apply_changed_scope(opts: &SecurityOptions<'_>, results: &mut AnalysisResults) {
     if let Some(git_ref) = opts.changed_since
-        && let Some(changed) = plow_core::changed_files::get_changed_files(opts.root, git_ref)
+        && let Some(changed) = plow_engine::get_changed_files(opts.root, git_ref)
     {
-        plow_core::changed_files::filter_results_by_changed_files(results, &changed);
+        plow_engine::filter_results_by_changed_files(results, &changed);
     }
     if opts.use_shared_diff_index
         && let Some(diff_index) = crate::report::ci::diff_filter::shared_diff_index()
@@ -741,7 +720,7 @@ fn apply_security_gate(
         if let Some(shared) = crate::report::ci::diff_filter::shared_diff_index() {
             shared
         } else if let Some(git_ref) = opts.changed_since {
-            match plow_core::changed_files::try_get_changed_diff(opts.root, git_ref) {
+            match plow_engine::try_get_changed_diff(opts.root, git_ref) {
                 Ok(text) => owned_gate_diff
                     .insert(crate::report::ci::diff_filter::DiffIndex::from_unified_diff(&text)),
                 Err(err) => {
@@ -847,51 +826,78 @@ fn compute_base_security_snapshot(
     let mut base_config = load_config_for_analysis(
         &base_root,
         &current_config_path,
-        opts.output,
-        opts.no_cache,
-        opts.threads,
-        None,
-        true,
+        crate::ConfigLoadOptions {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production_override: None,
+            quiet: true,
+        },
         ProductionAnalysis::DeadCode,
     )?;
     base_config.cache_dir =
         remap_cache_dir_for_base_worktree(opts.root, &base_root, &config.cache_dir);
     force_security_rules(&mut base_config);
     let mut base_analysis = analyze_security_candidates(
-        &SecurityOptions {
-            root: &base_root,
-            config_path: &current_config_path,
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            quiet: true,
-            fail_on_issues: false,
-            sarif_file: None,
-            summary: false,
-            changed_since: None,
-            use_shared_diff_index: false,
-            workspace: opts.workspace,
-            changed_workspaces: None,
-            file: &[],
-            surface: false,
-            gate: None,
-            runtime_coverage: None,
-            min_invocations_hot: opts.min_invocations_hot,
-            explain: false,
-        },
+        &base_snapshot_security_options(opts, &base_root, &current_config_path),
         &base_config,
     )?;
+    scope_base_snapshot_to_workspaces(opts, &base_root, &mut base_analysis.results)?;
+    Ok(SecurityKeySnapshot {
+        reachable: security_reachable_keys(&base_analysis.results.security_findings, &base_root),
+    })
+}
+
+/// Build the quiet, non-gating `SecurityOptions` used to re-analyze the base
+/// worktree for the `--gate newly-reachable` snapshot.
+#[expect(
+    clippy::ref_option,
+    reason = "config_path mirrors the SecurityOptions.config_path field which is &Option<PathBuf>"
+)]
+fn base_snapshot_security_options<'a>(
+    opts: &SecurityOptions<'a>,
+    base_root: &'a Path,
+    config_path: &'a Option<PathBuf>,
+) -> SecurityOptions<'a> {
+    SecurityOptions {
+        root: base_root,
+        config_path,
+        output: opts.output,
+        no_cache: opts.no_cache,
+        threads: opts.threads,
+        quiet: true,
+        fail_on_issues: false,
+        sarif_file: None,
+        summary: false,
+        changed_since: None,
+        use_shared_diff_index: false,
+        workspace: opts.workspace,
+        changed_workspaces: None,
+        file: &[],
+        surface: false,
+        gate: None,
+        runtime_coverage: None,
+        min_invocations_hot: opts.min_invocations_hot,
+        explain: false,
+    }
+}
+
+/// Apply the run's `--workspace` scope to the base-snapshot results so the
+/// reachable-key set matches the head scope it is diffed against.
+fn scope_base_snapshot_to_workspaces(
+    opts: &SecurityOptions<'_>,
+    base_root: &Path,
+    results: &mut AnalysisResults,
+) -> Result<(), ExitCode> {
     if let Some(ref roots) = crate::check::filtering::resolve_workspace_scope(
-        &base_root,
+        base_root,
         opts.workspace,
         None,
         opts.output,
     )? {
-        crate::check::filtering::filter_to_workspaces(&mut base_analysis.results, roots);
+        crate::check::filtering::filter_to_workspaces(results, roots);
     }
-    Ok(SecurityKeySnapshot {
-        reachable: security_reachable_keys(&base_analysis.results.security_findings, &base_root),
-    })
+    Ok(())
 }
 
 fn security_reachable_keys(findings: &[SecurityFinding], root: &Path) -> FxHashSet<String> {
@@ -1057,21 +1063,17 @@ struct SecurityAnalysisState {
     results: AnalysisResults,
     modules: Option<Vec<ModuleInfo>>,
     files: Option<Vec<DiscoveredFile>>,
-    analysis_output: Option<plow_core::AnalysisOutput>,
+    analysis_output: Option<plow_engine::DeadCodeAnalysisArtifacts>,
 }
 
-#[expect(
-    deprecated,
-    reason = "ADR-008 deprecates plow_core::analyze APIs externally; the CLI uses the workspace path dependency"
-)]
 fn analyze_security_candidates(
     opts: &SecurityOptions<'_>,
     config: &plow_config::ResolvedConfig,
 ) -> Result<SecurityAnalysisState, ExitCode> {
     if opts.runtime_coverage.is_none() {
-        return plow_core::analyze(config)
-            .map(|results| SecurityAnalysisState {
-                results,
+        return plow_engine::analyze(config)
+            .map(|analysis| SecurityAnalysisState {
+                results: analysis.results,
                 modules: None,
                 files: None,
                 analysis_output: None,
@@ -1079,7 +1081,7 @@ fn analyze_security_candidates(
             .map_err(|err| emit_error(&format!("Analysis error: {err}"), 2, opts.output));
     }
 
-    plow_core::analyze_retaining_modules(config, true, true)
+    plow_engine::analyze_retaining_modules(config, true, true)
         .map(|mut output| {
             let modules = output.modules.take();
             let files = output.files.take();
@@ -1116,7 +1118,7 @@ fn analyze_security_runtime(
     path: &Path,
     modules: Vec<ModuleInfo>,
     files: Vec<DiscoveredFile>,
-    analysis_output: plow_core::AnalysisOutput,
+    analysis_output: plow_engine::DeadCodeAnalysisArtifacts,
 ) -> Result<Option<RuntimeCoverageReport>, ExitCode> {
     let runtime_coverage = crate::health::coverage::prepare_options(
         path,
@@ -1126,64 +1128,69 @@ fn analyze_security_runtime(
         opts.output,
     )?;
     let result = crate::health::execute_health_with_shared_parse(
-        &HealthOptions {
-            root: opts.root,
-            config_path: opts.config_path,
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            quiet: opts.quiet,
-            max_cyclomatic: None,
-            max_cognitive: None,
-            max_crap: None,
-            top: None,
-            sort: SortBy::Cyclomatic,
-            production: true,
-            production_override: Some(true),
-            changed_since: opts.changed_since,
-            diff_index: None,
-            use_shared_diff_index: opts.use_shared_diff_index,
-            workspace: opts.workspace,
-            changed_workspaces: opts.changed_workspaces,
-            baseline: None,
-            save_baseline: None,
-            complexity: false,
-            complexity_breakdown: false,
-            file_scores: false,
-            coverage_gaps: false,
-            config_activates_coverage_gaps: false,
-            hotspots: false,
-            ownership: false,
-            ownership_emails: None,
-            targets: false,
-            force_full: false,
-            score_only_output: false,
-            enforce_coverage_gap_gate: false,
-            effort: None,
-            score: false,
-            min_score: None,
-            since: None,
-            min_commits: None,
-            explain: false,
-            summary: false,
-            save_snapshot: None,
-            trend: false,
-            group_by: None,
-            coverage: None,
-            coverage_root: None,
-            performance: false,
-            min_severity: None,
-            report_only: false,
-            runtime_coverage: Some(runtime_coverage),
-            churn_file: None,
-        },
-        SharedParseData {
+        &security_runtime_health_options(opts, runtime_coverage),
+        plow_engine::HealthSharedParseData {
             files,
             modules,
             analysis_output: Some(analysis_output),
         },
     )?;
     Ok(result.report.runtime_coverage)
+}
+
+/// Build the production-forced `HealthOptions` used to compute runtime coverage
+/// context for security findings (complexity/hotspot/ownership all disabled).
+fn security_runtime_health_options<'a>(
+    opts: &SecurityOptions<'a>,
+    runtime_coverage: plow_engine::RuntimeCoverageOptions,
+) -> HealthOptions<'a> {
+    HealthOptions {
+        root: opts.root,
+        config_path: opts.config_path,
+        output: opts.output,
+        no_cache: opts.no_cache,
+        threads: opts.threads,
+        quiet: opts.quiet,
+        thresholds: plow_engine::HealthThresholdOverrides::default(),
+        top: None,
+        sort: plow_engine::HealthSort::Cyclomatic,
+        production: true,
+        production_override: Some(true),
+        changed_since: opts.changed_since,
+        diff_index: None,
+        use_shared_diff_index: opts.use_shared_diff_index,
+        workspace: opts.workspace,
+        changed_workspaces: opts.changed_workspaces,
+        baseline: None,
+        save_baseline: None,
+        complexity: false,
+        file_scores: false,
+        coverage_gaps: false,
+        config_activates_coverage_gaps: false,
+        hotspots: false,
+        ownership: false,
+        ownership_emails: None,
+        targets: false,
+        css: false,
+        force_full: false,
+        score_only_output: false,
+        enforce_coverage_gap_gate: false,
+        effort: None,
+        score: false,
+        gates: plow_engine::HealthGateOptions::default(),
+        since: None,
+        min_commits: None,
+        explain: false,
+        summary: false,
+        save_snapshot: None,
+        trend: false,
+        coverage_inputs: plow_engine::HealthCoverageInputs::default(),
+        performance: false,
+        runtime_coverage: Some(runtime_coverage),
+        churn_file: None,
+        complexity_breakdown: false,
+        group_by: None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1522,12 +1529,7 @@ fn unresolved_callee_diagnostics(
     })
 }
 
-fn filter_to_files(
-    results: &mut plow_core::results::AnalysisResults,
-    root: &Path,
-    files: &[PathBuf],
-    quiet: bool,
-) {
+fn filter_to_files(results: &mut AnalysisResults, root: &Path, files: &[PathBuf], quiet: bool) {
     if files.is_empty() {
         return;
     }
@@ -1556,7 +1558,7 @@ fn filter_to_files(
     }
 
     let file_set: rustc_hash::FxHashSet<PathBuf> = resolved_files.into_iter().collect();
-    plow_core::changed_files::filter_results_by_changed_files(results, &file_set);
+    plow_engine::filter_results_by_changed_files(results, &file_set);
 }
 
 fn prepare_findings(
@@ -1625,8 +1627,10 @@ fn relativize(path: &Path, root: &Path) -> PathBuf {
 /// JSON: the `SecurityOutput` envelope, pretty-printed.
 #[must_use]
 pub fn render_json(output: &SecurityOutput) -> String {
-    let Ok(value) = crate::output_envelope::serialize_root_output(
-        crate::output_envelope::PlowOutput::Security(output.clone()),
+    let Ok(value) = plow_output::serialize_security_json_output(
+        output.clone(),
+        crate::output_runtime::current_root_envelope_mode(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     ) else {
         return "{\"error\":\"failed to serialize security output\"}".to_owned();
     };
@@ -1637,17 +1641,10 @@ pub fn render_json(output: &SecurityOutput) -> String {
 /// JSON summary: compact aggregate payload without per-finding arrays.
 #[must_use]
 pub fn render_json_summary(output: &SecurityOutput) -> String {
-    let summary = SecuritySummaryOutput {
-        schema_version: output.schema_version,
-        version: output.version.clone(),
-        elapsed_ms: output.elapsed_ms,
-        config: output.config.clone(),
-        meta: output.meta.clone(),
-        gate: output.gate,
-        summary: security_summary(output),
-    };
-    let Ok(value) = crate::output_envelope::serialize_root_output_without_telemetry(
-        crate::output_envelope::PlowOutput::SecuritySummary(summary),
+    let Ok(value) = plow_output::serialize_security_summary_json_output(
+        output,
+        crate::output_runtime::current_root_envelope_mode(),
+        None,
     ) else {
         return "{\"error\":\"failed to serialize security summary output\"}".to_owned();
     };
@@ -1656,66 +1653,296 @@ pub fn render_json_summary(output: &SecurityOutput) -> String {
     })
 }
 
-fn security_summary(output: &SecurityOutput) -> SecuritySummary {
-    let mut by_severity = SecuritySeverityCounts::default();
-    let mut by_reachability = SecurityReachabilityCounts::default();
-    let mut by_runtime_state = SecurityRuntimeStateCounts::default();
-    let mut by_category = BTreeMap::new();
+fn render_survivors_output(
+    output_format: OutputFormat,
+    output: &SecuritySurvivorsOutput,
+) -> String {
+    match output_format {
+        OutputFormat::Json => render_survivors_json(output),
+        _ => render_survivors_human(output),
+    }
+}
 
-    for finding in &output.security_findings {
-        match finding.severity {
-            SecuritySeverity::High => by_severity.high += 1,
-            SecuritySeverity::Medium => by_severity.medium += 1,
-            SecuritySeverity::Low => by_severity.low += 1,
-        }
-        let category = finding
-            .category
-            .clone()
-            .unwrap_or_else(|| security_kind_key(finding.kind).to_owned());
-        *by_category.entry(category).or_insert(0) += 1;
+#[must_use]
+pub fn render_survivors_json(output: &SecuritySurvivorsOutput) -> String {
+    let Ok(value) = plow_output::serialize_security_survivors_json_output(
+        output.clone(),
+        crate::output_runtime::current_root_envelope_mode(),
+    ) else {
+        return "{\"error\":\"failed to serialize security survivors output\"}".to_owned();
+    };
+    serde_json::to_string_pretty(&value).unwrap_or_else(|_| {
+        "{\"error\":\"failed to serialize security survivors output\"}".to_owned()
+    })
+}
 
-        if finding.source_backed {
-            by_reachability.source_backed += 1;
-        }
-        if let Some(reachability) = &finding.reachability {
-            if reachability.reachable_from_entry {
-                by_reachability.entry_reachable += 1;
-            }
-            if reachability.reachable_from_untrusted_source {
-                by_reachability.untrusted_source_reachable += 1;
-            }
-            if reachability.crosses_boundary {
-                by_reachability.crosses_boundary += 1;
-            }
-            match reachability.taint_confidence {
-                Some(TaintConfidence::ArgLevel) => by_reachability.arg_level += 1,
-                Some(TaintConfidence::ModuleLevel) => by_reachability.module_level += 1,
-                None => {}
-            }
-        }
+#[must_use]
+fn render_survivors_human(output: &SecuritySurvivorsOutput) -> String {
+    use crate::report::plural;
+    use std::fmt::Write as _;
 
-        match finding.runtime.as_ref().map(|runtime| runtime.state) {
-            Some(SecurityRuntimeState::RuntimeHot) => by_runtime_state.runtime_hot += 1,
-            Some(SecurityRuntimeState::RuntimeCold) => by_runtime_state.runtime_cold += 1,
-            Some(SecurityRuntimeState::NeverExecuted) => by_runtime_state.never_executed += 1,
-            Some(SecurityRuntimeState::LowTraffic) => by_runtime_state.low_traffic += 1,
-            Some(SecurityRuntimeState::CoverageUnavailable) => {
-                by_runtime_state.coverage_unavailable += 1;
-            }
-            Some(SecurityRuntimeState::RuntimeUnknown) => by_runtime_state.runtime_unknown += 1,
-            None => by_runtime_state.not_collected += 1,
-        }
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "Security survivors: {} verifier-retained candidate{}.",
+        output.summary.survivors,
+        plural(output.summary.survivors)
+    );
+    let _ = writeln!(
+        out,
+        "Verdicts: {}/{} candidates covered, {} dismissed.",
+        output.summary.verdicts, output.summary.candidates, output.summary.dismissed
+    );
+    if output.summary.needs_human_review > 0 {
+        let _ = writeln!(
+            out,
+            "Needs human review: {} candidate{}.",
+            output.summary.needs_human_review,
+            plural(output.summary.needs_human_review)
+        );
+    }
+    if output.summary.unverdicted > 0 {
+        let _ = writeln!(
+            out,
+            "Unreviewed candidates: {} candidate{}.",
+            output.summary.unverdicted,
+            plural(output.summary.unverdicted)
+        );
+    }
+    out.push_str(
+        "Retained and human-review rows are verifier dispositions, not vulnerabilities proven by plow.\n",
+    );
+    if output.summary.unverdicted > 0 {
+        out.push_str("Unreviewed candidates have no verifier disposition yet.\n");
     }
 
-    SecuritySummary {
-        security_findings: output.security_findings.len(),
-        by_severity,
-        by_category,
-        by_reachability,
-        by_runtime_state,
-        unresolved_edge_files: output.unresolved_edge_files,
-        unresolved_callee_sites: output.unresolved_callee_sites,
-        attack_surface_entries: output.attack_surface.as_ref().map_or(0, Vec::len),
+    if output.survivors.is_empty() && output.needs_human_review.is_empty() {
+        if output.summary.unverdicted > 0 {
+            out.push_str("\nNo retained or human-review details to show yet.\n");
+        } else {
+            out.push_str("\nNo retained candidate details to show.\n");
+        }
+        return out;
+    }
+
+    push_survivor_group(&mut out, "Survivors", &output.survivors);
+    push_survivor_group(&mut out, "Needs human review", &output.needs_human_review);
+    out
+}
+
+fn push_survivor_group(
+    out: &mut String,
+    title: &str,
+    survivors: &BTreeMap<String, SecuritySurvivor>,
+) {
+    use std::fmt::Write as _;
+
+    if survivors.is_empty() {
+        return;
+    }
+    let _ = writeln!(out, "\n{title}:");
+    for survivor in survivors.values() {
+        let path = survivor.candidate.path.to_string_lossy().replace('\\', "/");
+        let line = survivor.candidate.line;
+        let category = survivor
+            .candidate
+            .category
+            .as_deref()
+            .unwrap_or_else(|| security_kind_key(survivor.candidate.kind));
+        let _ = writeln!(
+            out,
+            "- {}:{} ({}) [{}]",
+            path, line, category, survivor.finding_id
+        );
+        if let Some(reason) = survivor.reason.as_ref().or(survivor.rationale.as_ref()) {
+            let _ = writeln!(out, "  reason: {reason}");
+        }
+        if let Some(impact) = &survivor.impact {
+            let _ = writeln!(out, "  impact: {impact}");
+        }
+        if let Some(fix_direction) = &survivor.fix_direction {
+            let _ = writeln!(out, "  fix direction: {fix_direction}");
+        }
+        out.push_str("  Next: review the original candidate evidence before editing code.\n");
+    }
+}
+
+fn build_blind_spots_output(output: &SecurityOutput) -> SecurityBlindSpotsOutput {
+    let diagnostics = output.unresolved_callee_diagnostics.as_ref();
+    let groups = diagnostics
+        .map(group_blind_spot_samples)
+        .unwrap_or_default();
+    let sampled_callee_sites = diagnostics.map_or(0, |diagnostics| diagnostics.sampled.len());
+    let unresolved_callee_sites =
+        diagnostics.map_or(output.unresolved_callee_sites, |diagnostics| {
+            diagnostics
+                .by_reason
+                .iter()
+                .map(|reason| reason.count)
+                .sum()
+        });
+
+    SecurityBlindSpotsOutput {
+        schema_version: SecurityBlindSpotsSchemaVersion::V1,
+        version: output.version.clone(),
+        elapsed_ms: output.elapsed_ms,
+        summary: SecurityBlindSpotsSummary {
+            unresolved_edge_files: output.unresolved_edge_files,
+            unresolved_callee_sites,
+            sampled_callee_sites,
+        },
+        groups,
+    }
+}
+
+fn group_blind_spot_samples(
+    diagnostics: &SecurityUnresolvedCalleeDiagnostics,
+) -> Vec<SecurityBlindSpotGroup> {
+    let mut groups: BTreeMap<
+        (
+            plow_types::extract::SkippedSecurityCalleeReason,
+            plow_types::extract::SkippedSecurityCalleeExpressionKind,
+        ),
+        BTreeMap<String, usize>,
+    > = BTreeMap::new();
+
+    for sample in &diagnostics.sampled {
+        let files = groups
+            .entry((sample.reason, sample.expression_kind))
+            .or_default();
+        *files.entry(sample.path.clone()).or_insert(0) += 1;
+    }
+
+    let mut groups: Vec<SecurityBlindSpotGroup> = groups
+        .into_iter()
+        .map(|((reason, expression_kind), files)| {
+            let sampled_count = files.values().sum();
+            let mut files: Vec<SecurityBlindSpotFile> = files
+                .into_iter()
+                .map(|(path, sampled_count)| SecurityBlindSpotFile {
+                    path,
+                    sampled_count,
+                })
+                .collect();
+            files.sort_by(|a, b| {
+                b.sampled_count
+                    .cmp(&a.sampled_count)
+                    .then_with(|| a.path.cmp(&b.path))
+            });
+            SecurityBlindSpotGroup {
+                reason,
+                expression_kind,
+                sampled_count,
+                files,
+                suggestion: blind_spot_suggestion(reason).to_owned(),
+            }
+        })
+        .collect();
+
+    groups.sort_by(|a, b| {
+        b.sampled_count
+            .cmp(&a.sampled_count)
+            .then_with(|| {
+                unresolved_callee_reason_label(a.reason)
+                    .cmp(unresolved_callee_reason_label(b.reason))
+            })
+            .then_with(|| {
+                unresolved_callee_expression_label(a.expression_kind)
+                    .cmp(unresolved_callee_expression_label(b.expression_kind))
+            })
+    });
+    groups
+}
+
+fn render_blind_spots_output(
+    output_format: OutputFormat,
+    output: &SecurityBlindSpotsOutput,
+) -> String {
+    match output_format {
+        OutputFormat::Json => render_blind_spots_json(output),
+        _ => render_blind_spots_human(output),
+    }
+}
+
+#[must_use]
+pub fn render_blind_spots_json(output: &SecurityBlindSpotsOutput) -> String {
+    let Ok(value) = plow_output::serialize_security_blind_spots_json_output(
+        output.clone(),
+        crate::output_runtime::current_root_envelope_mode(),
+    ) else {
+        return "{\"error\":\"failed to serialize security blind-spots output\"}".to_owned();
+    };
+    serde_json::to_string_pretty(&value).unwrap_or_else(|_| {
+        "{\"error\":\"failed to serialize security blind-spots output\"}".to_owned()
+    })
+}
+
+#[must_use]
+fn render_blind_spots_human(output: &SecurityBlindSpotsOutput) -> String {
+    use crate::report::plural;
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+    let callee_count = output.summary.unresolved_callee_sites;
+    let edge_count = output.summary.unresolved_edge_files;
+    if callee_count == 0 && edge_count == 0 {
+        out.push_str("Security blind spots: no unresolved security edges or callees found.\n");
+        return out;
+    }
+
+    let _ = writeln!(
+        out,
+        "Security blind spots: {callee_count} unresolved callee{} and {edge_count} unresolved client import edge{}.",
+        plural(callee_count),
+        plural(edge_count)
+    );
+    out.push_str("A non-zero blind-spot count means plow may have missed security candidates behind dynamic code shapes.\n");
+
+    for group in &output.groups {
+        let reason = unresolved_callee_reason_label(group.reason);
+        let expression = unresolved_callee_expression_label(group.expression_kind);
+        let _ = writeln!(
+            out,
+            "\n{} Blind spot: {reason} / {expression}, {} sampled site{}.",
+            "[I]".blue().bold(),
+            group.sampled_count,
+            plural(group.sampled_count)
+        );
+        for file in group.files.iter().take(3) {
+            let _ = writeln!(out, "  {} ({})", file.path, file.sampled_count);
+        }
+        let _ = writeln!(out, "  Next: {}", group.suggestion);
+    }
+
+    out
+}
+
+fn unresolved_callee_expression_label(
+    expression_kind: plow_types::extract::SkippedSecurityCalleeExpressionKind,
+) -> &'static str {
+    match expression_kind {
+        plow_types::extract::SkippedSecurityCalleeExpressionKind::ComputedMemberExpression => {
+            "computed-member"
+        }
+        plow_types::extract::SkippedSecurityCalleeExpressionKind::Identifier => "identifier",
+        plow_types::extract::SkippedSecurityCalleeExpressionKind::StaticMemberExpression => {
+            "member-expression"
+        }
+        plow_types::extract::SkippedSecurityCalleeExpressionKind::Other => "other",
+    }
+}
+
+fn blind_spot_suggestion(reason: plow_types::extract::SkippedSecurityCalleeReason) -> &'static str {
+    match reason {
+        plow_types::extract::SkippedSecurityCalleeReason::ComputedMember => {
+            "inspect computed property names or convert hot sinks to explicit calls."
+        }
+        plow_types::extract::SkippedSecurityCalleeReason::DynamicDispatch => {
+            "inspect dynamic dispatch targets and add a narrow wrapper or catalogue shape if the sink is real."
+        }
+        plow_types::extract::SkippedSecurityCalleeReason::UnsupportedAssignmentObject => {
+            "inspect assignment targets and simplify the object shape if security sink calls are hidden there."
+        }
     }
 }
 
@@ -2013,7 +2240,6 @@ fn push_human_next_step(out: &mut String, finding: &SecurityFinding) {
 
 fn push_human_blind_spots(out: &mut String, output: &SecurityOutput) {
     use crate::report::plural;
-    use colored::Colorize;
     use std::fmt::Write as _;
 
     if output.unresolved_edge_files > 0 {
@@ -2058,7 +2284,7 @@ fn security_finding_label(finding: &SecurityFinding) -> String {
             let title = finding
                 .category
                 .as_deref()
-                .and_then(plow_core::analyze::security_catalogue_title)
+                .and_then(security_catalogue_title)
                 .or(finding.category.as_deref())
                 .unwrap_or("tainted-sink");
             match finding.cwe {
@@ -2265,78 +2491,96 @@ fn sarif_rule_def(
 ) -> serde_json::Value {
     match finding.kind {
         SecurityFindingKind::ClientServerLeak if is_server_only_leak(finding) => {
-            let title = "Client imports server-only code";
-            serde_json::json!({
-                "id": rule_id,
-                "name": title,
-                "shortDescription": { "text": "Client imports server-only code candidate (unverified)" },
-                "fullDescription": { "text":
-                    "Unverified candidate, requires verification: a \"use client\" file \
-                     transitively imports a server-only module (one carrying a \"use server\" \
-                     directive or importing server-only code such as server-only, next/headers, \
-                     next/server, or node:fs / node:child_process). plow does not prove this \
-                     code runs on the client; a module pulled in only through \
-                     next/dynamic(..., { ssr: false }) is a false positive." },
-                "help": {
-                    "text": security_help_text(title),
-                    "markdown": security_help_markdown(title)
-                },
-                "helpUri": "https://github.com/fglogan/genesis-plow",
-                "defaultConfiguration": { "level": "note" }
-            })
+            sarif_rule_def_server_only_leak(rule_id)
         }
-        SecurityFindingKind::ClientServerLeak => {
-            let title = "Client-server secret leak";
-            serde_json::json!({
-                "id": rule_id,
-                "name": title,
-                "shortDescription": { "text": "Client-server secret leak candidate (unverified)" },
-                "fullDescription": { "text":
-                    "Unverified candidate, requires verification: a \"use client\" file \
-                     transitively imports a module that reads a non-public process.env \
-                     secret. plow does not prove the secret reaches client-bundled code." },
-                "help": {
-                    "text": security_help_text(title),
-                    "markdown": security_help_markdown(title)
-                },
-                "helpUri": "https://github.com/fglogan/genesis-plow",
-                "defaultConfiguration": { "level": "note" }
-            })
-        }
+        SecurityFindingKind::ClientServerLeak => sarif_rule_def_secret_leak(rule_id),
         SecurityFindingKind::TaintedSink => {
-            let title = finding
-                .category
-                .as_deref()
-                .and_then(plow_core::analyze::security_catalogue_title)
-                .or(finding.category.as_deref())
-                .unwrap_or("tainted-sink");
-            let mut rule = serde_json::json!({
-                "id": rule_id,
-                "name": title,
-                "shortDescription": { "text": format!("{title} candidate (unverified)") },
-                "fullDescription": { "text": format!(
-                    "Unverified candidate, requires verification: {title}. plow flags a \
-                     syntactic sink reached by a non-literal argument; it does not prove the \
-                     value is attacker-controlled or reaches the sink unsanitized."
-                ) },
-                "help": {
-                    "text": security_help_text(title),
-                    "markdown": security_help_markdown(title)
-                },
-                "helpUri": "https://github.com/fglogan/genesis-plow",
-                "defaultConfiguration": { "level": "note" }
-            });
-            if let Some(cwe) = finding.cwe {
-                rule["properties"] = serde_json::json!({
-                    "tags": [format!("external/cwe/cwe-{cwe}")]
-                });
-                if let Some(taxon_index) = cwe_taxon_index {
-                    rule["relationships"] = serde_json::json!([cwe_relationship(cwe, taxon_index)]);
-                }
-            }
-            rule
+            sarif_rule_def_tainted_sink(rule_id, finding, cwe_taxon_index)
         }
     }
+}
+
+/// SARIF rule definition for the server-only-import flavor of `ClientServerLeak`.
+fn sarif_rule_def_server_only_leak(rule_id: &str) -> serde_json::Value {
+    let title = "Client imports server-only code";
+    serde_json::json!({
+        "id": rule_id,
+        "name": title,
+        "shortDescription": { "text": "Client imports server-only code candidate (unverified)" },
+        "fullDescription": { "text":
+            "Unverified candidate, requires verification: a \"use client\" file \
+             transitively imports a server-only module (one carrying a \"use server\" \
+             directive or importing server-only code such as server-only, next/headers, \
+             next/server, or node:fs / node:child_process). plow does not prove this \
+             code runs on the client; a module pulled in only through \
+             next/dynamic(..., { ssr: false }) is a false positive." },
+        "help": {
+            "text": security_help_text(title),
+            "markdown": security_help_markdown(title)
+        },
+        "helpUri": "https://github.com/fglogan/genesis-plow",
+        "defaultConfiguration": { "level": "note" }
+    })
+}
+
+/// SARIF rule definition for the secret-leak flavor of `ClientServerLeak`.
+fn sarif_rule_def_secret_leak(rule_id: &str) -> serde_json::Value {
+    let title = "Client-server secret leak";
+    serde_json::json!({
+        "id": rule_id,
+        "name": title,
+        "shortDescription": { "text": "Client-server secret leak candidate (unverified)" },
+        "fullDescription": { "text":
+            "Unverified candidate, requires verification: a \"use client\" file \
+             transitively imports a module that reads a non-public process.env \
+             secret. plow does not prove the secret reaches client-bundled code." },
+        "help": {
+            "text": security_help_text(title),
+            "markdown": security_help_markdown(title)
+        },
+        "helpUri": "https://github.com/fglogan/genesis-plow",
+        "defaultConfiguration": { "level": "note" }
+    })
+}
+
+/// SARIF rule definition for `TaintedSink` findings, attaching CWE tags and the
+/// CWE taxonomy relationship when the finding carries a CWE id.
+fn sarif_rule_def_tainted_sink(
+    rule_id: &str,
+    finding: &SecurityFinding,
+    cwe_taxon_index: Option<usize>,
+) -> serde_json::Value {
+    let title = finding
+        .category
+        .as_deref()
+        .and_then(security_catalogue_title)
+        .or(finding.category.as_deref())
+        .unwrap_or("tainted-sink");
+    let mut rule = serde_json::json!({
+        "id": rule_id,
+        "name": title,
+        "shortDescription": { "text": format!("{title} candidate (unverified)") },
+        "fullDescription": { "text": format!(
+            "Unverified candidate, requires verification: {title}. plow flags a \
+             syntactic sink reached by a non-literal argument; it does not prove the \
+             value is attacker-controlled or reaches the sink unsanitized."
+        ) },
+        "help": {
+            "text": security_help_text(title),
+            "markdown": security_help_markdown(title)
+        },
+        "helpUri": "https://github.com/fglogan/genesis-plow",
+        "defaultConfiguration": { "level": "note" }
+    });
+    if let Some(cwe) = finding.cwe {
+        rule["properties"] = serde_json::json!({
+            "tags": [format!("external/cwe/cwe-{cwe}")]
+        });
+        if let Some(taxon_index) = cwe_taxon_index {
+            rule["relationships"] = serde_json::json!([cwe_relationship(cwe, taxon_index)]);
+        }
+    }
+    rule
 }
 
 fn hop_role_token(role: TraceHopRole) -> &'static str {
@@ -2413,6 +2657,59 @@ const fn sarif_level(severity: SecuritySeverity) -> &'static str {
     }
 }
 
+/// Build the SARIF `result` object for a single finding, composing the
+/// candidate-framed message, related locations, fingerprint, and code flows.
+fn sarif_result_for_finding(finding: &SecurityFinding) -> serde_json::Value {
+    let rule_id = sarif_rule_id(finding);
+    let mut message = dead_code_hint(finding).map_or_else(
+        || finding.evidence.clone(),
+        |hint| format!("{} Dead-code cross-link: {hint}.", finding.evidence),
+    );
+    if let Some(hint) = source_reachability_hint(finding) {
+        message.push(' ');
+        message.push_str(hint);
+    }
+    if let Some(runtime) = finding.runtime.as_ref() {
+        message.push_str(" Runtime context: ");
+        message.push_str(&runtime_hint_text(runtime));
+        message.push('.');
+    }
+    let related = sarif_related_locations(finding);
+    // Stable dedup key for GHAS: rule + anchor path + line. Without
+    // partialFingerprints, every run re-opens previously triaged alerts.
+    // Same helper as the JSON `finding_id` field so the two never drift
+    // (issue #900).
+    let mut result = serde_json::json!({
+        "ruleId": rule_id,
+        "level": sarif_level(finding.severity),
+        "message": { "text": message },
+        "locations": [sarif_location(&finding.path, finding.line, finding.col)],
+        "relatedLocations": related,
+        "partialFingerprints": { "plowSecurity/v1": security_finding_id(finding) },
+    });
+    if let Some(code_flows) = sarif_code_flows(finding) {
+        result["codeFlows"] = code_flows;
+    }
+    result
+}
+
+/// Collect one SARIF rule definition per distinct ruleId present in `findings`,
+/// in first-seen order, attaching the CWE taxonomy index when available.
+fn sarif_rule_defs(findings: &[SecurityFinding], cwes: &[u32]) -> Vec<serde_json::Value> {
+    let mut seen: Vec<String> = Vec::new();
+    let mut rules: Vec<serde_json::Value> = Vec::new();
+    for finding in findings {
+        let rule_id = sarif_rule_id(finding);
+        if seen.iter().any(|s| s == &rule_id) {
+            continue;
+        }
+        seen.push(rule_id.clone());
+        let cwe_taxon_index = finding.cwe.and_then(|cwe| cwe_index(cwes, cwe));
+        rules.push(sarif_rule_def(&rule_id, finding, cwe_taxon_index));
+    }
+    rules
+}
+
 /// SARIF output. Maps the candidate's verification-priority tier to SARIF
 /// `level` while keeping the message text candidate-framed. Each finding's ruleId is
 /// per-category (`security/<category>` for tainted-sink, `security/client-server-leak`
@@ -2425,53 +2722,9 @@ fn render_sarif(output: &SecurityOutput) -> String {
     let results: Vec<serde_json::Value> = output
         .security_findings
         .iter()
-        .map(|finding| {
-            let rule_id = sarif_rule_id(finding);
-            let mut message = dead_code_hint(finding).map_or_else(
-                || finding.evidence.clone(),
-                |hint| format!("{} Dead-code cross-link: {hint}.", finding.evidence),
-            );
-            if let Some(hint) = source_reachability_hint(finding) {
-                message.push(' ');
-                message.push_str(hint);
-            }
-            if let Some(runtime) = finding.runtime.as_ref() {
-                message.push_str(" Runtime context: ");
-                message.push_str(&runtime_hint_text(runtime));
-                message.push('.');
-            }
-            let related = sarif_related_locations(finding);
-            // Stable dedup key for GHAS: rule + anchor path + line. Without
-            // partialFingerprints, every run re-opens previously triaged alerts.
-            // Same helper as the JSON `finding_id` field so the two never drift
-            // (issue #900).
-            let mut result = serde_json::json!({
-                "ruleId": rule_id,
-                "level": sarif_level(finding.severity),
-                "message": { "text": message },
-                "locations": [sarif_location(&finding.path, finding.line, finding.col)],
-                "relatedLocations": related,
-                "partialFingerprints": { "plowSecurity/v1": security_finding_id(finding) },
-            });
-            if let Some(code_flows) = sarif_code_flows(finding) {
-                result["codeFlows"] = code_flows;
-            }
-            result
-        })
+        .map(sarif_result_for_finding)
         .collect();
-
-    // One rule definition per distinct ruleId present in the findings.
-    let mut seen: Vec<String> = Vec::new();
-    let mut rules: Vec<serde_json::Value> = Vec::new();
-    for finding in &output.security_findings {
-        let rule_id = sarif_rule_id(finding);
-        if seen.iter().any(|s| s == &rule_id) {
-            continue;
-        }
-        seen.push(rule_id.clone());
-        let cwe_taxon_index = finding.cwe.and_then(|cwe| cwe_index(&cwes, cwe));
-        rules.push(sarif_rule_def(&rule_id, finding, cwe_taxon_index));
-    }
+    let rules = sarif_rule_defs(&output.security_findings, &cwes);
 
     let mut run = serde_json::json!({
         "tool": { "driver": {
@@ -2543,7 +2796,7 @@ fn sarif_location(path: &Path, line: u32, col: u32) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plow_core::results::{
+    use plow_types::results::{
         SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink,
         SecurityDeadCodeContext, SecurityDeadCodeKind, SecurityFinding, SecurityFindingKind,
         TraceHop, TraceHopRole,
@@ -2647,6 +2900,26 @@ mod tests {
         }
     }
 
+    fn survivor_candidate_json(
+        finding_id: &str,
+        path: &str,
+        line: u32,
+        kind: SecurityFindingKind,
+        category: Option<&str>,
+    ) -> serde_json::Value {
+        let root = Path::new("/proj/root");
+        let mut finding = relativize_finding(sample_finding(root), root);
+        finding.finding_id = finding_id.to_owned();
+        finding.path = PathBuf::from(path);
+        finding.line = line;
+        finding.kind = kind;
+        finding.category = category.map(str::to_owned);
+        finding.candidate.sink.path = PathBuf::from(path);
+        finding.candidate.sink.line = line;
+        finding.candidate.sink.category = category.map(str::to_owned);
+        serde_json::to_value(finding).expect("security finding serializes")
+    }
+
     fn sample_unresolved_callee_diagnostics(root: &Path) -> SecurityUnresolvedCalleeDiagnostics {
         unresolved_callee_diagnostics(
             &[
@@ -2693,6 +2966,195 @@ mod tests {
             categories_include: None,
             categories_exclude: None,
         }
+    }
+
+    #[test]
+    fn survivors_json_keeps_survivors_and_review_candidates_by_finding_id() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let candidates = dir.path().join("candidates.json");
+        let verdicts = dir.path().join("verdicts.json");
+        std::fs::write(
+            &candidates,
+            serde_json::json!({
+                "kind": "security",
+                "security_findings": [
+                    survivor_candidate_json("sec-a", "src/a.ts", 10, SecurityFindingKind::TaintedSink, Some("ssrf")),
+                    survivor_candidate_json("sec-b", "src/b.ts", 11, SecurityFindingKind::TaintedSink, Some("redos-regex")),
+                    survivor_candidate_json("sec-c", "src/c.ts", 12, SecurityFindingKind::ClientServerLeak, None)
+                ]
+            })
+            .to_string(),
+        )
+        .expect("write candidates");
+        std::fs::write(
+            &verdicts,
+            serde_json::json!({
+                "schema_version": "plow-security-verdicts/v1",
+                "verdicts": [
+                    { "schema_version": "plow-security-verdict/v1", "finding_id": "sec-b", "verdict": "dismissed" },
+                    { "schema_version": "plow-security-verdict/v1", "finding_id": "sec-a", "verdict": "survivor", "rationale": "input controls URL" },
+                    { "schema_version": "plow-security-verdict/v1", "finding_id": "sec-c", "verdict": "needs-human-review" }
+                ]
+            })
+            .to_string(),
+        )
+        .expect("write verdicts");
+
+        let output = build_survivors_output(
+            &SecuritySurvivorsOptions {
+                output: OutputFormat::Json,
+                candidates: &candidates,
+                verdicts: &verdicts,
+                require_verdict_for_each_candidate: false,
+            },
+            Instant::now(),
+        )
+        .expect("survivors output");
+        let rendered: serde_json::Value =
+            serde_json::from_str(&render_survivors_json(&output)).expect("json");
+
+        assert_eq!(rendered["kind"], "security-survivors");
+        assert!(rendered["survivors"]["sec-a"].is_object());
+        assert!(rendered["survivors"]["sec-b"].is_null());
+        assert!(rendered["needs_human_review"]["sec-c"].is_object());
+        assert_eq!(rendered["summary"]["dismissed"], 1);
+    }
+
+    #[test]
+    fn survivors_reject_duplicate_verdicts_and_unknown_candidates() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let candidates = dir.path().join("candidates.json");
+        let verdicts = dir.path().join("verdicts.json");
+        std::fs::write(
+            &candidates,
+            serde_json::json!({
+                "security_findings": [
+                    survivor_candidate_json("sec-a", "src/a.ts", 1, SecurityFindingKind::TaintedSink, Some("ssrf"))
+                ]
+            })
+            .to_string(),
+        )
+        .expect("write candidates");
+        std::fs::write(
+            &verdicts,
+            r#"[
+                {"schema_version":"plow-security-verdict/v1","finding_id":"sec-a","verdict":"survivor"},
+                {"schema_version":"plow-security-verdict/v1","finding_id":"sec-a","verdict":"dismissed"}
+            ]"#,
+        )
+        .expect("write duplicate verdicts");
+        let duplicate = build_survivors_output(
+            &SecuritySurvivorsOptions {
+                output: OutputFormat::Json,
+                candidates: &candidates,
+                verdicts: &verdicts,
+                require_verdict_for_each_candidate: false,
+            },
+            Instant::now(),
+        )
+        .expect_err("duplicate verdict should fail");
+        assert!(duplicate.contains("duplicate verdict"));
+
+        std::fs::write(
+            &verdicts,
+            r#"[{"schema_version":"plow-security-verdict/v1","finding_id":"sec-missing","verdict":"survivor"}]"#,
+        )
+        .expect("write missing verdict");
+        let missing = build_survivors_output(
+            &SecuritySurvivorsOptions {
+                output: OutputFormat::Json,
+                candidates: &candidates,
+                verdicts: &verdicts,
+                require_verdict_for_each_candidate: false,
+            },
+            Instant::now(),
+        )
+        .expect_err("missing candidate should fail");
+        assert!(missing.contains("unknown finding_id"));
+    }
+
+    #[test]
+    fn survivors_reject_malformed_schema_versions_and_unknown_verdicts() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let candidates = dir.path().join("candidates.json");
+        let verdicts = dir.path().join("verdicts.json");
+        std::fs::write(
+            &candidates,
+            serde_json::json!({
+                "security_findings": [
+                    survivor_candidate_json("sec-a", "src/a.ts", 1, SecurityFindingKind::TaintedSink, Some("ssrf"))
+                ]
+            })
+            .to_string(),
+        )
+        .expect("write candidates");
+        std::fs::write(
+            &verdicts,
+            r#"[{"schema_version":"wrong","finding_id":"sec-a","verdict":"survivor"}]"#,
+        )
+        .expect("write bad schema");
+        let bad_schema = build_survivors_output(
+            &SecuritySurvivorsOptions {
+                output: OutputFormat::Json,
+                candidates: &candidates,
+                verdicts: &verdicts,
+                require_verdict_for_each_candidate: false,
+            },
+            Instant::now(),
+        )
+        .expect_err("bad schema should fail");
+        assert!(bad_schema.contains("schema_version"));
+
+        std::fs::write(
+            &verdicts,
+            r#"[{"schema_version":"plow-security-verdict/v1","finding_id":"sec-a","verdict":"maybe"}]"#,
+        )
+        .expect("write unknown verdict");
+        let unknown = build_survivors_output(
+            &SecuritySurvivorsOptions {
+                output: OutputFormat::Json,
+                candidates: &candidates,
+                verdicts: &verdicts,
+                require_verdict_for_each_candidate: false,
+            },
+            Instant::now(),
+        )
+        .expect_err("unknown verdict should fail");
+        assert!(unknown.contains("Failed to parse verifier verdict file"));
+    }
+
+    #[test]
+    fn blind_spots_group_existing_diagnostics_with_suggestions() {
+        let root = Path::new("/proj/root");
+        let mut output = output_with(vec![], 2);
+        output.unresolved_callee_sites = 99;
+        output.unresolved_callee_diagnostics = Some(sample_unresolved_callee_diagnostics(root));
+
+        let blind_spots = build_blind_spots_output(&output);
+        let rendered: serde_json::Value =
+            serde_json::from_str(&render_blind_spots_json(&blind_spots)).expect("json");
+
+        assert_eq!(rendered["kind"], "security-blind-spots");
+        assert_eq!(rendered["summary"]["unresolved_edge_files"], 2);
+        assert_eq!(rendered["summary"]["unresolved_callee_sites"], 3);
+        assert_eq!(rendered["groups"][0]["reason"], "dynamic-dispatch");
+        assert_eq!(rendered["groups"][0]["expression_kind"], "other");
+        assert_eq!(rendered["groups"][0]["files"][0]["path"], "src/a.ts");
+        assert!(rendered["groups"][0]["suggestion"].is_string());
+    }
+
+    #[test]
+    fn blind_spots_human_preserves_non_clean_bill_framing() {
+        let root = Path::new("/proj/root");
+        let mut output = output_with(vec![], 0);
+        output.unresolved_callee_sites = 3;
+        output.unresolved_callee_diagnostics = Some(sample_unresolved_callee_diagnostics(root));
+
+        let out = render_blind_spots_human(&build_blind_spots_output(&output));
+
+        assert!(out.contains("may have missed security candidates"));
+        assert!(out.contains("dynamic-dispatch / other"));
+        assert!(out.contains("Next: inspect dynamic dispatch targets"));
     }
 
     fn tainted_with_runtime(root: &Path, state: Option<SecurityRuntimeState>) -> SecurityFinding {
@@ -2926,7 +3388,7 @@ mod tests {
             reachable_from_entry: true,
             reachable_from_untrusted_source: true,
             // Cross-module reachability is module-level (issue #1093).
-            taint_confidence: Some(plow_core::results::TaintConfidence::ModuleLevel),
+            taint_confidence: Some(TaintConfidence::ModuleLevel),
             untrusted_source_hop_count: Some(1),
             untrusted_source_trace: vec![
                 TraceHop {
@@ -3642,27 +4104,26 @@ mod tests {
     }
 
     #[test]
-    #[expect(
-        deprecated,
-        reason = "CLI fixture test uses the same workspace path dependency boundary as `run`"
-    )]
     fn source_reachability_fixture_marks_cross_module_sink() {
         let root = source_reachability_fixture_root();
         let mut config = load_config_for_analysis(
             &root,
             &NO_CONFIG,
-            OutputFormat::Json,
-            true,
-            1,
-            None,
-            true,
+            crate::ConfigLoadOptions {
+                output: OutputFormat::Json,
+                no_cache: true,
+                threads: 1,
+                production_override: None,
+                quiet: true,
+            },
             ProductionAnalysis::DeadCode,
         )
         .expect("fixture config loads");
         config.rules.security_sink = Severity::Warn;
 
-        let results = plow_core::analyze(&config).expect("fixture analyzes");
-        let finding = results
+        let analysis = plow_engine::analyze(&config).expect("fixture analyzes");
+        let finding = analysis
+            .results
             .security_findings
             .iter()
             .find(|finding| finding.path.ends_with("src/runner.ts"))
@@ -3674,10 +4135,7 @@ mod tests {
         // Cross-module reachability is module-level: the structured discriminator
         // says so, and the source node is honestly labeled `ModuleSource`, never
         // `UntrustedSource` (which is reserved for an arg-level same-module read).
-        assert_eq!(
-            reach.taint_confidence,
-            Some(plow_core::results::TaintConfidence::ModuleLevel)
-        );
+        assert_eq!(reach.taint_confidence, Some(TaintConfidence::ModuleLevel));
         assert_eq!(
             reach
                 .untrusted_source_trace
@@ -3709,7 +4167,7 @@ mod tests {
     #[test]
     fn file_scope_keeps_security_finding_when_anchor_matches() {
         let root = Path::new("/proj/root");
-        let mut results = plow_core::results::AnalysisResults::default();
+        let mut results = AnalysisResults::default();
         results.security_findings.push(sample_finding(root));
 
         filter_to_files(&mut results, root, &[PathBuf::from("src/app.tsx")], true);
@@ -3720,7 +4178,7 @@ mod tests {
     #[test]
     fn file_scope_keeps_security_finding_when_trace_hop_matches() {
         let root = Path::new("/proj/root");
-        let mut results = plow_core::results::AnalysisResults::default();
+        let mut results = AnalysisResults::default();
         results.security_findings.push(sample_finding(root));
 
         filter_to_files(
@@ -3736,7 +4194,7 @@ mod tests {
     #[test]
     fn file_scope_drops_unrelated_security_finding() {
         let root = Path::new("/proj/root");
-        let mut results = plow_core::results::AnalysisResults::default();
+        let mut results = AnalysisResults::default();
         results.security_findings.push(sample_finding(root));
 
         filter_to_files(&mut results, root, &[PathBuf::from("src/other.ts")], true);

@@ -25,10 +25,9 @@
 
 use std::fmt::{self, Write as _};
 use std::path::Path;
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 
-use plow_config::{PlowConfig, ResolvedConfig};
-use plow_core::git_env::clear_ambient_git_env;
+use plow_config::ResolvedConfig;
 use serde::{Deserialize, Serialize};
 
 use colored::Colorize as _;
@@ -38,6 +37,7 @@ use crate::api::{
     parse_error_envelope, response_message_suffix, sanitize_network_error,
     try_api_agent_with_timeout,
 };
+use crate::coverage::upload_common;
 
 /// Log prefix used on every human-facing line from this subcommand.
 /// Matches the pattern established by sibling commands so CI log parsers can
@@ -48,9 +48,6 @@ const LOG_PREFIX: &str = "plow coverage upload-static-findings";
 /// `plow-cloud/src/routes/coverage.ts`. Validated client-side so users see a
 /// specific error before a 413 round-trip.
 const STATIC_FINDINGS_MAX: usize = 200_000;
-
-/// Server-enforced `gitSha` length cap (inclusive).
-const GIT_SHA_MAX_LEN: usize = 64;
 
 /// HTTP timeouts for the upload. The body is small (<=200k findings) but can
 /// take longer than license's 10s global cap on congested networks.
@@ -167,11 +164,8 @@ fn run_inner(args: &UploadStaticFindingsArgs, root: &Path) -> Result<(), UploadE
     enforce_clean_worktree(args, root)?;
 
     let config = load_resolved_config(root)?;
-    #[expect(
-        deprecated,
-        reason = "ADR-008 deprecates plow_core::analyze* externally; the CLI still uses the workspace path dependency"
-    )]
-    let results = plow_core::analyze(&config)
+    let results = plow_engine::analyze(&config)
+        .map(|analysis| analysis.results)
         .map_err(|err| UploadError::Validation(format!("analysis failed: {err}")))?;
     let findings = collect_findings(&config, &results);
 
@@ -210,135 +204,18 @@ fn run_inner(args: &UploadStaticFindingsArgs, root: &Path) -> Result<(), UploadE
 }
 
 fn resolve_project_id(args: &UploadStaticFindingsArgs, root: &Path) -> Result<String, UploadError> {
-    if let Some(explicit) = args.project_id.as_deref() {
-        return validate_project_id(explicit.trim()).map(str::to_owned);
-    }
-    if let Ok(github_repo) = std::env::var("GITHUB_REPOSITORY") {
-        let trimmed = github_repo.trim();
-        if !trimmed.is_empty() {
-            return validate_project_id(trimmed).map(str::to_owned);
-        }
-    }
-    if let Ok(gitlab_path) = std::env::var("CI_PROJECT_PATH") {
-        let trimmed = gitlab_path.trim();
-        if !trimmed.is_empty() {
-            return validate_project_id(trimmed).map(str::to_owned);
-        }
-    }
-    if let Some(from_remote) = git_origin_project_id(root) {
-        return Ok(from_remote);
-    }
-    Err(UploadError::Validation(
-        "could not determine project id. Pass --project-id <project-id>, or set \
-         $GITHUB_REPOSITORY / $CI_PROJECT_PATH, or ensure `git remote get-url origin` \
-         returns a recognizable URL."
-            .to_owned(),
-    ))
-}
-
-/// Validate the project identifier used as the `{repo}` URL segment.
-///
-/// The server accepts any non-empty string without path-traversal, whether
-/// bare (`plow-cloud-api`) or slash-scoped (`acme/widgets`). Keep validation
-/// minimal: reject only what the server or filesystem would reject (empty,
-/// `..`).
-fn validate_project_id(id: &str) -> Result<&str, UploadError> {
-    if id.is_empty() {
-        return Err(UploadError::Validation("project id is empty".to_owned()));
-    }
-    if id.contains("..") {
-        return Err(UploadError::Validation(
-            "project id must not contain '..' path segments".to_owned(),
-        ));
-    }
-    Ok(id)
-}
-
-fn git_origin_project_id(root: &Path) -> Option<String> {
-    let mut command = Command::new("git");
-    command
-        .args(["remote", "get-url", "origin"])
-        .current_dir(root);
-    clear_ambient_git_env(&mut command);
-    let output = command.output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    parse_git_remote_to_project_id(&url)
-}
-
-/// Parse common git remote URL shapes into `owner/repo`. Covers HTTPS
-/// (`https://github.com/owner/repo(.git)?`), SSH
-/// (`git@github.com:owner/repo(.git)?`), and `ssh://` / `git://` variants.
-fn parse_git_remote_to_project_id(url: &str) -> Option<String> {
-    let stripped_suffix = url.trim().trim_end_matches(".git");
-    if let Some((_, path)) = stripped_suffix.split_once(':')
-        && let Some(project_id) = take_last_two_segments(path)
-    {
-        return Some(project_id);
-    }
-    if let Some(path_part) = stripped_suffix.split("://").nth(1)
-        && let Some((_, tail)) = path_part.split_once('/')
-        && let Some(project_id) = take_last_two_segments(tail)
-    {
-        return Some(project_id);
-    }
-    None
-}
-
-fn take_last_two_segments(path: &str) -> Option<String> {
-    let mut parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    if parts.len() < 2 {
-        return None;
-    }
-    let repo = parts.pop()?;
-    let owner = parts.pop()?;
-    Some(format!("{owner}/{repo}"))
+    upload_common::resolve_project_id(args.project_id.as_deref(), root)
+        .map_err(UploadError::Validation)
 }
 
 fn resolve_git_sha(args: &UploadStaticFindingsArgs, root: &Path) -> Result<String, UploadError> {
-    let sha = if let Some(explicit) = args.git_sha.as_deref() {
-        explicit.trim().to_owned()
-    } else {
-        let mut command = Command::new("git");
-        command.args(["rev-parse", "HEAD"]).current_dir(root);
-        clear_ambient_git_env(&mut command);
-        let output = command.output().map_err(|err| {
-            UploadError::Validation(format!(
-                "could not resolve git SHA: {err}. Pass --git-sha <sha> explicitly."
-            ))
-        })?;
-        if !output.status.success() {
-            return Err(UploadError::Validation(
-                "`git rev-parse HEAD` failed. Pass --git-sha <sha> explicitly.".to_owned(),
-            ));
-        }
-        String::from_utf8_lossy(&output.stdout).trim().to_owned()
-    };
-
-    if sha.is_empty() {
-        return Err(UploadError::Validation("git sha is empty".to_owned()));
-    }
-    if sha.len() > GIT_SHA_MAX_LEN {
-        return Err(UploadError::Validation(format!(
-            "git sha is {} chars, server limit is {}",
-            sha.len(),
-            GIT_SHA_MAX_LEN
-        )));
-    }
-    if !sha
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-    {
-        return Err(UploadError::Validation(format!(
-            "git sha '{sha}' contains characters outside [A-Za-z0-9._-]"
-        )));
-    }
-    Ok(sha)
+    upload_common::resolve_git_sha(args.git_sha.as_deref(), root).map_err(UploadError::Validation)
 }
 
 fn enforce_clean_worktree(args: &UploadStaticFindingsArgs, root: &Path) -> Result<(), UploadError> {
+    if args.dry_run {
+        return Ok(());
+    }
     if !dirty_worktree(root) {
         return Ok(());
     }
@@ -356,34 +233,11 @@ fn enforce_clean_worktree(args: &UploadStaticFindingsArgs, root: &Path) -> Resul
 }
 
 fn dirty_worktree(root: &Path) -> bool {
-    let mut command = Command::new("git");
-    command.args(["status", "--porcelain"]).current_dir(root);
-    clear_ambient_git_env(&mut command);
-    let Ok(output) = command.output() else {
-        return false;
-    };
-    if !output.status.success() {
-        return false;
-    }
-    output.stdout.iter().any(|b| !b.is_ascii_whitespace())
+    upload_common::dirty_worktree(root)
 }
 
 fn load_resolved_config(root: &Path) -> Result<ResolvedConfig, UploadError> {
-    let user_config = match PlowConfig::find_and_load(root) {
-        Ok(Some((config, _path))) => Some(config),
-        Ok(None) => None,
-        Err(e) => return Err(UploadError::Validation(format!("config load failed: {e}"))),
-    };
-    let config = user_config.unwrap_or_default();
-    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
-    Ok(config.resolve(
-        root.to_path_buf(),
-        plow_config::OutputFormat::Human,
-        threads,
-        /* no_cache */ true,
-        /* quiet */ true,
-        /* cache_max_size_mb */ None,
-    ))
+    upload_common::load_resolved_config(root).map_err(UploadError::Validation)
 }
 
 /// Map the static analysis results into the cloud finding wire shape.
@@ -674,7 +528,7 @@ fn display_endpoint_url(override_endpoint: Option<&str>, project_id: &str) -> St
     format!("{base}/v1/coverage/{project_id}/static-findings")
 }
 
-/// A minimal view over [`plow_core::results::AnalysisResults`] that exposes
+/// A minimal view over [`plow_types::results::AnalysisResults`] that exposes
 /// only the two finding categories this command maps. Defined as a trait so
 /// the mapping in [`collect_findings`] can be unit-tested against an in-memory
 /// stub without constructing a full `AnalysisResults`.
@@ -686,7 +540,7 @@ trait AnalysisLike {
     fn unused_exports(&self) -> Vec<(&Path, String, u32)>;
 }
 
-impl AnalysisLike for plow_core::results::AnalysisResults {
+impl AnalysisLike for plow_types::results::AnalysisResults {
     fn unused_files(&self) -> Vec<&Path> {
         self.unused_files
             .iter()
@@ -711,7 +565,12 @@ impl AnalysisLike for plow_core::results::AnalysisResults {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::coverage::upload_common::{
+        GIT_SHA_MAX_LEN, parse_git_remote_to_project_id, validate_project_id,
+    };
+    use plow_config::PlowConfig;
     use std::path::PathBuf;
+    use std::process::Command;
     use tempfile::TempDir;
 
     /// In-memory analysis stub for [`collect_findings`] tests.
@@ -1031,6 +890,16 @@ mod tests {
         let repo = create_dirty_git_repo();
         let args = UploadStaticFindingsArgs {
             allow_dirty: true,
+            ..UploadStaticFindingsArgs::default()
+        };
+        assert!(enforce_clean_worktree(&args, repo.path()).is_ok());
+    }
+
+    #[test]
+    fn dry_run_skips_dirty_worktree_validation() {
+        let repo = create_dirty_git_repo();
+        let args = UploadStaticFindingsArgs {
+            dry_run: true,
             ..UploadStaticFindingsArgs::default()
         };
         assert!(enforce_clean_worktree(&args, repo.path()).is_ok());

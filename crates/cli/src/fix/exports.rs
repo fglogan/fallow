@@ -76,6 +76,18 @@ pub(super) struct ExportFix {
     enum_declaration: Option<EnumDeclarationRange>,
 }
 
+pub(super) struct ExportFixInput<'a, 'export> {
+    pub(super) root: &'a Path,
+    pub(super) exports_by_file:
+        &'a FxHashMap<PathBuf, Vec<&'export plow_types::results::UnusedExport>>,
+    pub(super) hashes: &'a CapturedHashes,
+    pub(super) unresolved_import_files: &'a FxHashSet<PathBuf>,
+    pub(super) plan: &'a mut FixPlan,
+    pub(super) output: OutputFormat,
+    pub(super) dry_run: bool,
+    pub(super) fixes: &'a mut Vec<serde_json::Value>,
+}
+
 /// Check if a line (after stripping `export `) is a named export list like `{ A, B } ...`
 fn is_export_list(after_export: &str) -> bool {
     let s = after_export.trim_start();
@@ -188,20 +200,16 @@ fn push_export_fix_json(
 /// (issue #602): the rewrite would risk breaking a consumer plow's graph
 /// cannot see. The skip is recorded on `plan` so the orchestrator surfaces
 /// it; the export stays reported by `plow dead-code`.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "per-file fixer threads root + grouped findings + the confidence-gate set + the shared plan + output mode + sink; bundling into a context struct would not reduce the irreducible inputs and hurts locality with the sibling fixers"
-)]
-pub(super) fn apply_export_fixes(
-    root: &Path,
-    exports_by_file: &FxHashMap<PathBuf, Vec<&plow_core::results::UnusedExport>>,
-    hashes: &CapturedHashes,
-    unresolved_import_files: &FxHashSet<PathBuf>,
-    plan: &mut FixPlan,
-    output: OutputFormat,
-    dry_run: bool,
-    fixes: &mut Vec<serde_json::Value>,
-) {
+pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
+    let root = input.root;
+    let exports_by_file = input.exports_by_file;
+    let hashes = input.hashes;
+    let unresolved_import_files = input.unresolved_import_files;
+    let output = input.output;
+    let dry_run = input.dry_run;
+    let plan = &mut *input.plan;
+    let fixes = &mut *input.fixes;
+
     for (path, file_exports) in exports_by_file {
         let relative = path.strip_prefix(root).unwrap_or(path);
 
@@ -226,24 +234,24 @@ pub(super) fn apply_export_fixes(
         if dry_run {
             push_dry_run_export_fixes(output, fixes, relative, path, &line_fixes);
         } else {
-            apply_grouped_export_fixes(
+            apply_grouped_export_fixes(GroupedExportFixInput {
                 plan,
                 path,
                 fixes,
                 relative,
-                &content,
-                &meta,
-                &lines,
-                &line_fixes,
-                &grouped,
-            );
+                content: &content,
+                meta: &meta,
+                lines: &lines,
+                line_fixes: &line_fixes,
+                grouped: &grouped,
+            });
         }
     }
 }
 
 fn collect_export_line_fixes(
     lines: &[&str],
-    file_exports: &[&plow_core::results::UnusedExport],
+    file_exports: &[&plow_types::results::UnusedExport],
 ) -> Vec<ExportFix> {
     file_exports
         .iter()
@@ -251,7 +259,10 @@ fn collect_export_line_fixes(
         .collect()
 }
 
-fn export_line_fix(lines: &[&str], export: &plow_core::results::UnusedExport) -> Option<ExportFix> {
+fn export_line_fix(
+    lines: &[&str],
+    export: &plow_types::results::UnusedExport,
+) -> Option<ExportFix> {
     let line_idx = export.line.saturating_sub(1) as usize;
     let line = *lines.get(line_idx)?;
     let trimmed = line.trim_start();
@@ -313,21 +324,31 @@ fn push_dry_run_export_fixes(
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "applies one prepared file rewrite using the already-read source, metadata, grouped edits, and JSON sink"
-)]
-fn apply_grouped_export_fixes(
-    plan: &mut FixPlan,
-    path: &Path,
-    fixes: &mut Vec<serde_json::Value>,
-    relative: &Path,
-    content: &str,
-    meta: &super::io::EncodingMetadata,
-    lines: &[&str],
-    line_fixes: &[ExportFix],
-    grouped: &[(usize, Vec<String>)],
-) {
+struct GroupedExportFixInput<'a> {
+    plan: &'a mut FixPlan,
+    path: &'a Path,
+    fixes: &'a mut Vec<serde_json::Value>,
+    relative: &'a Path,
+    content: &'a str,
+    meta: &'a super::io::EncodingMetadata,
+    lines: &'a [&'a str],
+    line_fixes: &'a [ExportFix],
+    grouped: &'a [(usize, Vec<String>)],
+}
+
+fn apply_grouped_export_fixes(input: GroupedExportFixInput<'_>) {
+    let GroupedExportFixInput {
+        plan,
+        path,
+        fixes,
+        relative,
+        content,
+        meta,
+        lines,
+        line_fixes,
+        grouped,
+    } = input;
+
     let mut new_lines: Vec<String> = lines.iter().map(ToString::to_string).collect();
     let mut lines_to_delete = Vec::new();
     let mut ranges_to_delete = Vec::new();
@@ -430,7 +451,33 @@ fn delete_export_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plow_core::results::UnusedExport;
+    use plow_types::results::UnusedExport;
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "test helper preserves compact fixture setup while production uses ExportFixInput"
+    )]
+    fn apply_export_fixes(
+        root: &Path,
+        exports_by_file: &FxHashMap<PathBuf, Vec<&UnusedExport>>,
+        hashes: &CapturedHashes,
+        unresolved_import_files: &FxHashSet<PathBuf>,
+        plan: &mut FixPlan,
+        output: OutputFormat,
+        dry_run: bool,
+        fixes: &mut Vec<serde_json::Value>,
+    ) {
+        super::apply_export_fixes(&mut ExportFixInput {
+            root,
+            exports_by_file,
+            hashes,
+            unresolved_import_files,
+            plan,
+            output,
+            dry_run,
+            fixes,
+        });
+    }
 
     fn make_export(path: &Path, name: &str, line: u32) -> UnusedExport {
         UnusedExport {

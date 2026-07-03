@@ -1,7 +1,7 @@
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use colored::Colorize;
@@ -11,7 +11,7 @@ use plow_config::OutputFormat;
 use rustc_hash::FxHashSet;
 
 use crate::report;
-use crate::runtime_support::load_config;
+use crate::runtime_support::{LoadConfigArgs, load_config};
 
 /// ANSI escape: clear screen + scrollback + move cursor home.
 const CLEAR_SCREEN: &str = "\x1B[2J\x1B[3J\x1B[H";
@@ -36,17 +36,13 @@ pub struct WatchOptions<'a> {
 type LoadConfigFn = fn(
     root: &Path,
     config_path: &Option<PathBuf>,
-    output: OutputFormat,
-    no_cache: bool,
-    threads: usize,
-    production: bool,
-    quiet: bool,
+    args: LoadConfigArgs,
 ) -> Result<plow_config::ResolvedConfig, ExitCode>;
 
 fn is_relevant_source(path: &Path) -> bool {
     path.extension()
         .and_then(|s| s.to_str())
-        .is_some_and(|ext| plow_core::discover::SOURCE_EXTENSIONS.contains(&ext))
+        .is_some_and(|ext| plow_engine::SOURCE_EXTENSIONS.contains(&ext))
 }
 
 fn is_relevant_config(path: &Path) -> bool {
@@ -69,15 +65,14 @@ fn has_disallowed_hidden_dir(relative: &Path) -> bool {
     relative.parent().is_some_and(|parent| {
         parent.components().any(|component| {
             let name = component.as_os_str();
-            name.to_string_lossy().starts_with('.')
-                && !plow_core::discover::is_allowed_hidden_dir(name)
+            name.to_string_lossy().starts_with('.') && !plow_engine::is_allowed_hidden_dir(name)
         })
     })
 }
 
 fn build_production_glob_set() -> Option<globset::GlobSet> {
     let mut builder = globset::GlobSetBuilder::new();
-    for pattern in plow_core::discover::PRODUCTION_EXCLUDE_PATTERNS {
+    for pattern in plow_engine::PRODUCTION_EXCLUDE_PATTERNS {
         if let Ok(glob) = globset::GlobBuilder::new(pattern)
             .literal_separator(true)
             .build()
@@ -299,17 +294,17 @@ fn print_waiting(opts: &WatchOptions<'_>) {
 
 fn analyze_and_report(config: &plow_config::ResolvedConfig, opts: &WatchOptions<'_>) -> ExitCode {
     let start = Instant::now();
-    #[expect(
-        deprecated,
-        reason = "ADR-008 deprecates plow_core::analyze externally; the CLI still uses the workspace path dependency"
-    )]
-    let results = match plow_core::analyze(config) {
-        Ok(r) => r,
+    let results = match plow_engine::analyze(config) {
+        Ok(analysis) => analysis.results,
         Err(e) => {
             eprintln!("Analysis error: {e}");
             return ExitCode::from(2);
         }
     };
+    // Note find-state for telemetry (issue #1650 follow-up): watch emits a
+    // `code_quality_review` workflow event at process exit, so each analysis
+    // cycle records its find-state (the accumulator is sticky across cycles).
+    crate::telemetry::note_result_count(results.total_issues());
     let elapsed = start.elapsed();
     let ctx = report::ReportContext {
         root: &config.root,
@@ -325,6 +320,7 @@ fn analyze_and_report(config: &plow_config::ResolvedConfig, opts: &WatchOptions<
         baseline_matched: None,
         config_fixable: crate::fix::is_config_fixable(&config.root, opts.config_path.as_ref()),
         skip_score_and_trend: false,
+        css_requested: false,
     };
     let report_code = report::print_results(&results, &ctx, config.output, None);
     if report_code != ExitCode::SUCCESS {
@@ -341,11 +337,13 @@ fn reload_config_or_keep_previous(
     match load(
         opts.root,
         opts.config_path,
-        opts.output,
-        opts.no_cache,
-        opts.threads,
-        opts.production,
-        opts.quiet,
+        LoadConfigArgs {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production: opts.production,
+            quiet: opts.quiet,
+        },
     ) {
         Ok(mut reloaded) => {
             if opts.include_entry_exports {
@@ -360,49 +358,75 @@ fn reload_config_or_keep_previous(
 }
 
 pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
-    use std::sync::mpsc;
-
     let _ = crate::signal::install_handlers();
     let _graceful = crate::signal::GracefulModeGuard::new();
 
-    let mut config = match load_config(
-        opts.root,
-        opts.config_path,
-        opts.output,
-        opts.no_cache,
-        opts.threads,
-        opts.production,
-        opts.quiet,
-    ) {
-        Ok(mut c) => {
-            if opts.include_entry_exports {
-                c.include_entry_exports = true;
-            }
-            c
-        }
+    let config = match load_watch_config(opts) {
+        Ok(config) => config,
         Err(code) => return code,
     };
+    if let Err(code) = run_initial_watch_analysis(&config, opts) {
+        return code;
+    }
 
-    let initial_status = analyze_and_report(&config, opts);
+    let mut state = match WatchLoopState::new(opts, config) {
+        Ok(state) => state,
+        Err(code) => return code,
+    };
+    run_watch_loop(opts, &mut state)
+}
+
+fn run_initial_watch_analysis(
+    config: &plow_config::ResolvedConfig,
+    opts: &WatchOptions<'_>,
+) -> Result<(), ExitCode> {
+    let initial_status = analyze_and_report(config, opts);
     if initial_status != ExitCode::SUCCESS {
-        return initial_status;
+        return Err(initial_status);
     }
     print_waiting(opts);
+    Ok(())
+}
 
-    let (tx, rx) = mpsc::channel();
-    let filter = Arc::new(Mutex::new(WatchFilter::new(&config)));
-    let mut watcher = match create_watcher(opts.root, Arc::clone(&filter), tx.clone()) {
-        Ok(w) => Some(w),
-        Err(e) => {
-            eprintln!("Failed to create file watcher: {e}");
-            return ExitCode::from(2);
-        }
-    };
+struct WatchLoopState {
+    config: plow_config::ResolvedConfig,
+    filter: Arc<Mutex<WatchFilter>>,
+    watcher: Option<RecommendedWatcher>,
+    tx: mpsc::Sender<WatchEvent>,
+    rx: mpsc::Receiver<WatchEvent>,
+    debouncer: PathDebouncer,
+    detached: bool,
+    next_root_check: Instant,
+    last_reattach_error: Option<Instant>,
+}
 
-    let mut debouncer = PathDebouncer::default();
-    let mut detached = false;
-    let mut next_root_check = Instant::now() + ROOT_POLL_INTERVAL;
-    let mut last_reattach_error = None;
+impl WatchLoopState {
+    fn new(opts: &WatchOptions<'_>, config: plow_config::ResolvedConfig) -> Result<Self, ExitCode> {
+        let (tx, rx) = mpsc::channel();
+        let filter = Arc::new(Mutex::new(WatchFilter::new(&config)));
+        let watcher = match create_watcher(opts.root, Arc::clone(&filter), tx.clone()) {
+            Ok(watcher) => Some(watcher),
+            Err(e) => {
+                eprintln!("Failed to create file watcher: {e}");
+                return Err(ExitCode::from(2));
+            }
+        };
+
+        Ok(Self {
+            config,
+            filter,
+            watcher,
+            tx,
+            rx,
+            debouncer: PathDebouncer::default(),
+            detached: false,
+            next_root_check: Instant::now() + ROOT_POLL_INTERVAL,
+            last_reattach_error: None,
+        })
+    }
+}
+
+fn run_watch_loop(opts: &WatchOptions<'_>, state: &mut WatchLoopState) -> ExitCode {
     loop {
         if crate::signal::is_shutting_down() {
             eprintln!("Watch stopped.");
@@ -410,63 +434,123 @@ pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
         }
 
         let now = Instant::now();
-        if now >= next_root_check {
-            next_root_check = now + ROOT_POLL_INTERVAL;
+        if now >= state.next_root_check {
+            state.next_root_check = now + ROOT_POLL_INTERVAL;
             handle_root_lifecycle(
                 opts,
                 RootLifecycleState {
-                    config: &mut config,
-                    filter: &filter,
-                    watcher: &mut watcher,
-                    tx: &tx,
-                    debouncer: &mut debouncer,
-                    detached: &mut detached,
-                    last_reattach_error: &mut last_reattach_error,
+                    config: &mut state.config,
+                    filter: &state.filter,
+                    watcher: &mut state.watcher,
+                    tx: &state.tx,
+                    debouncer: &mut state.debouncer,
+                    detached: &mut state.detached,
+                    last_reattach_error: &mut state.last_reattach_error,
                 },
             );
         }
 
-        match rx.recv_timeout(Duration::from_millis(200)) {
-            Ok(Ok(paths)) => {
-                if detached {
-                    continue;
-                }
-                debouncer.push_paths(paths, Instant::now());
-            }
-            Ok(Err(e)) => {
-                eprintln!("Watch error: {e:?}");
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
+        match receive_watch_event(&state.rx, &mut state.debouncer, state.detached) {
+            WatchPoll::Continue => continue,
+            WatchPoll::Disconnected => {
                 eprintln!("Channel error: notify sender disconnected");
                 return ExitCode::from(2);
             }
+            WatchPoll::Idle => {}
         }
 
-        if !detached && let Some(paths) = debouncer.drain_ready(Instant::now(), DEBOUNCE_WINDOW) {
-            let changed = display_changed_paths(paths, opts.root);
-            if changed.is_empty() {
-                continue;
-            }
-
-            if opts.clear_screen && std::io::stderr().is_terminal() {
-                eprint!("{CLEAR_SCREEN}");
-            }
-
-            for path in &changed {
-                eprintln!("{} {path}", "Changed:".dimmed());
-            }
-            eprintln!();
-
-            reload_config_or_keep_previous(&mut config, opts, load_config);
-
-            let status = analyze_and_report(&config, opts);
-            if status != ExitCode::SUCCESS {
-                eprintln!("Watch analysis failed; continuing to watch for changes");
-            }
-            print_waiting(opts);
+        if !state.detached {
+            run_ready_reanalysis(&mut state.config, opts, &mut state.debouncer);
         }
     }
+}
+
+/// Outcome of polling the watch channel for one debounce window.
+enum WatchPoll {
+    /// Skip the rest of this loop iteration (event arrived while detached).
+    Continue,
+    /// The notify sender hung up; the caller should exit.
+    Disconnected,
+    /// Nothing actionable; fall through to the debounce drain.
+    Idle,
+}
+
+/// Poll the watch channel for up to 200ms, pushing any allowed paths into the
+/// debouncer. Mirrors the original inline recv handling.
+fn receive_watch_event(
+    rx: &std::sync::mpsc::Receiver<WatchEvent>,
+    debouncer: &mut PathDebouncer,
+    detached: bool,
+) -> WatchPoll {
+    use std::sync::mpsc::RecvTimeoutError;
+
+    match rx.recv_timeout(Duration::from_millis(200)) {
+        Ok(Ok(paths)) => {
+            if detached {
+                return WatchPoll::Continue;
+            }
+            debouncer.push_paths(paths, Instant::now());
+            WatchPoll::Idle
+        }
+        Ok(Err(e)) => {
+            eprintln!("Watch error: {e:?}");
+            WatchPoll::Idle
+        }
+        Err(RecvTimeoutError::Timeout) => WatchPoll::Idle,
+        Err(RecvTimeoutError::Disconnected) => WatchPoll::Disconnected,
+    }
+}
+
+/// Load the watch config, applying the `--include-entry-exports` override.
+fn load_watch_config(opts: &WatchOptions<'_>) -> Result<plow_config::ResolvedConfig, ExitCode> {
+    let mut config = load_config(
+        opts.root,
+        opts.config_path,
+        LoadConfigArgs {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production: opts.production,
+            quiet: opts.quiet,
+        },
+    )?;
+    if opts.include_entry_exports {
+        config.include_entry_exports = true;
+    }
+    Ok(config)
+}
+
+/// Drain the debouncer; if a non-empty batch is ready, reload config and
+/// re-run the analysis. No-op when no batch is ready or all paths dedupe away.
+fn run_ready_reanalysis(
+    config: &mut plow_config::ResolvedConfig,
+    opts: &WatchOptions<'_>,
+    debouncer: &mut PathDebouncer,
+) {
+    let Some(paths) = debouncer.drain_ready(Instant::now(), DEBOUNCE_WINDOW) else {
+        return;
+    };
+    let changed = display_changed_paths(paths, opts.root);
+    if changed.is_empty() {
+        return;
+    }
+
+    if opts.clear_screen && std::io::stderr().is_terminal() {
+        eprint!("{CLEAR_SCREEN}");
+    }
+
+    for path in &changed {
+        eprintln!("{} {path}", "Changed:".dimmed());
+    }
+    eprintln!();
+
+    reload_config_or_keep_previous(config, opts, load_config);
+
+    let status = analyze_and_report(config, opts);
+    if status != ExitCode::SUCCESS {
+        eprintln!("Watch analysis failed; continuing to watch for changes");
+    }
+    print_waiting(opts);
 }
 
 type WatchEvent = Result<Vec<PathBuf>, notify::Error>;
@@ -926,6 +1010,7 @@ mod tests {
             ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
+            unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
             duplicates: plow_config::DuplicatesConfig::default(),
             health: plow_config::HealthConfig::default(),
             rules: plow_config::RulesConfig::default(),
@@ -977,13 +1062,14 @@ mod tests {
         let mut config = make_config(root, OutputFormat::Human, 1, false);
         let opts = make_watch_options(root, OutputFormat::Json, 8, true);
 
-        reload_config_or_keep_previous(
-            &mut config,
-            &opts,
-            |_root, _config_path, output, _no_cache, threads, _production, quiet| {
-                Ok(make_config(Path::new("/project"), output, threads, quiet))
-            },
-        );
+        reload_config_or_keep_previous(&mut config, &opts, |_root, _config_path, args| {
+            Ok(make_config(
+                Path::new("/project"),
+                args.output,
+                args.threads,
+                args.quiet,
+            ))
+        });
 
         assert!(matches!(config.output, OutputFormat::Json));
         assert_eq!(config.threads, 8);
@@ -999,13 +1085,14 @@ mod tests {
         let mut opts = make_watch_options(root, OutputFormat::Json, 8, true);
         opts.include_entry_exports = true;
 
-        reload_config_or_keep_previous(
-            &mut config,
-            &opts,
-            |_root, _config_path, output, _no_cache, threads, _production, quiet| {
-                Ok(make_config(Path::new("/project"), output, threads, quiet))
-            },
-        );
+        reload_config_or_keep_previous(&mut config, &opts, |_root, _config_path, args| {
+            Ok(make_config(
+                Path::new("/project"),
+                args.output,
+                args.threads,
+                args.quiet,
+            ))
+        });
 
         assert!(
             config.include_entry_exports,
@@ -1019,13 +1106,9 @@ mod tests {
         let mut config = make_config(root, OutputFormat::Human, 1, false);
         let opts = make_watch_options(root, OutputFormat::Json, 8, true);
 
-        reload_config_or_keep_previous(
-            &mut config,
-            &opts,
-            |_root, _config_path, _output, _no_cache, _threads, _production, _quiet| {
-                Err(ExitCode::from(2))
-            },
-        );
+        reload_config_or_keep_previous(&mut config, &opts, |_root, _config_path, _args| {
+            Err(ExitCode::from(2))
+        });
 
         assert!(matches!(config.output, OutputFormat::Human));
         assert_eq!(config.threads, 1);

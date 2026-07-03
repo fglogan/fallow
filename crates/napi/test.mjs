@@ -11,6 +11,7 @@ import {
   detectCircularDependencies,
   detectDeadCode,
   detectDuplication,
+  detectFeatureFlags,
 } from "./index.js";
 
 function makeFixture() {
@@ -52,6 +53,10 @@ import './cycle-a';
 import './domain/model';
 
 export function run() {
+  if (process.env.FEATURE_ALPHA) {
+    console.log('flag on');
+  }
+
   return usedThing();
 }
 
@@ -154,6 +159,7 @@ export function duplicatedTwo(items: number[]) {
     cwd: root,
     stdio: "ignore",
   });
+  execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd: root, stdio: "ignore" });
   execFileSync("git", ["add", "."], { cwd: root, stdio: "ignore" });
   execFileSync("git", ["commit", "-m", "fixture"], { cwd: root, stdio: "ignore" });
 
@@ -187,13 +193,6 @@ writeFileSync(
   assert.ok(report._meta);
   assert.ok(report.unused_exports.some((item) => item.export_name === "unusedThing"));
   console.log("  [PASS] detectDeadCode");
-}
-
-{
-  const report = await detectDeadCode({ root, legacyEnvelope: true });
-  assert.equal(report.kind, undefined);
-  assert.equal(report.schema_version, 7);
-  console.log("  [PASS] detectDeadCode legacyEnvelope");
 }
 
 {
@@ -238,6 +237,15 @@ writeFileSync(
 }
 
 {
+  const report = await detectFeatureFlags({ root, top: 1 });
+  assert.equal(report.kind, "feature-flags");
+  assert.equal(report.total_flags, 1);
+  assert.equal(report.feature_flags.length, 1);
+  assert.equal(report.feature_flags[0].flag_name, "FEATURE_ALPHA");
+  console.log("  [PASS] detectFeatureFlags");
+}
+
+{
   const report = await computeComplexity({
     root,
     complexity: true,
@@ -275,7 +283,7 @@ writeFileSync(
   assert.equal(error.exitCode, 2);
   assert.equal(error.code, "PLOW_INVALID_ROOT");
   assert.equal(error.context, "analysis.root");
-  assert.match(error.message, /analysis root does not exist/);
+  assert.match(error.message, /invalid root path/);
   console.log("  [PASS] structured errors");
 }
 

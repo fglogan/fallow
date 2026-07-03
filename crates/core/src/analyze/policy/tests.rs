@@ -2,10 +2,12 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
 use plow_config::{
-    ConfigOverride, OutputFormat, PartialRulesConfig, PlowConfig, ResolvedConfig, RulePackDef,
-    RulePackRule, RulePackRuleKind, RulesConfig, Severity,
+    ConfigOverride, EffectKind, OutputFormat, PartialRulesConfig, PlowConfig, ResolvedConfig,
+    RulePackDef, RulePackRule, RulePackRuleKind, RulesConfig, Severity,
 };
-use plow_types::extract::{CalleeUse, ImportInfo, ImportedName, ModuleInfo, ReExportInfo};
+use plow_types::extract::{
+    CalleeUse, ImportInfo, ImportedName, ModuleInfo, ReExportInfo, RequireCallInfo,
+};
 use plow_types::results::{PolicyRuleKind, PolicyViolationSeverity, SuppressionOrigin};
 
 use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
@@ -13,7 +15,7 @@ use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use crate::suppress::SuppressionContext;
 
-use super::find_policy_violations;
+use super::find_policy_violations as find_policy_violations_raw;
 
 fn rule(id: &str, kind: RulePackRuleKind) -> RulePackRule {
     RulePackRule {
@@ -21,6 +23,7 @@ fn rule(id: &str, kind: RulePackRuleKind) -> RulePackRule {
         kind,
         callees: Vec::new(),
         specifiers: Vec::new(),
+        effects: Vec::new(),
         ignore_type_only: false,
         files: Vec::new(),
         exclude: Vec::new(),
@@ -40,6 +43,13 @@ fn banned_import(id: &str, specifiers: &[&str]) -> RulePackRule {
     RulePackRule {
         specifiers: specifiers.iter().map(ToString::to_string).collect(),
         ..rule(id, RulePackRuleKind::BannedImport)
+    }
+}
+
+fn banned_effect(id: &str, effects: &[EffectKind]) -> RulePackRule {
+    RulePackRule {
+        effects: effects.to_vec(),
+        ..rule(id, RulePackRuleKind::BannedEffect)
     }
 }
 
@@ -98,13 +108,15 @@ fn build_graph(root: &std::path::Path, file_names: &[&str]) -> ModuleGraph {
             resolved_dynamic_imports: vec![],
             resolved_dynamic_patterns: vec![],
             member_accesses: vec![],
-            whole_object_uses: vec![],
+            semantic_facts: Box::default(),
+            whole_object_uses: Box::default(),
             has_cjs_exports: false,
             has_angular_component_template_url: false,
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
+            exported_factory_returns: Box::default(),
         })
         .collect();
 
@@ -120,9 +132,10 @@ fn module(file_id: u32, callee_uses: Vec<CalleeUse>, imports: Vec<ImportInfo>) -
         dynamic_imports: Vec::new(),
         dynamic_import_patterns: Vec::new(),
         require_calls: Vec::new(),
-        package_path_references: Vec::new(),
+        package_path_references: Box::default(),
         member_accesses: Vec::new(),
-        whole_object_uses: Vec::new(),
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         content_hash: 0,
@@ -135,6 +148,7 @@ fn module(file_id: u32, callee_uses: Vec<CalleeUse>, imports: Vec<ImportInfo>) -
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: Vec::new(),
+        exported_factory_returns: Box::default(),
         injection_tokens: Vec::new(),
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
@@ -152,6 +166,7 @@ fn module(file_id: u32, callee_uses: Vec<CalleeUse>, imports: Vec<ImportInfo>) -
         security_control_sites: Vec::new(),
         callee_uses,
         misplaced_directives: Vec::new(),
+        inline_server_action_exports: Vec::new(),
         di_key_sites: Vec::new(),
         has_dynamic_provide: false,
         referenced_import_bindings: Vec::new(),
@@ -161,9 +176,28 @@ fn module(file_id: u32, callee_uses: Vec<CalleeUse>, imports: Vec<ImportInfo>) -
         has_define_model: false,
         has_unharvestable_props: false,
         component_emits: Vec::new(),
+        angular_inputs: Vec::new(),
+        angular_outputs: Vec::new(),
         has_unharvestable_emits: false,
         has_dynamic_emit: false,
         has_emit_whole_object_use: false,
+        load_return_keys: Vec::new(),
+        has_unharvestable_load: false,
+        has_load_data_whole_use: false,
+        has_page_data_store_whole_use: false,
+        component_functions: Vec::new(),
+        react_props: Vec::new(),
+        hook_uses: Vec::new(),
+        render_edges: Vec::new(),
+        svelte_dispatched_events: Vec::new(),
+        svelte_listened_events: Vec::new(),
+        angular_component_selectors: Vec::new(),
+        registered_custom_elements: Vec::new(),
+        used_custom_element_tags: Vec::new(),
+        angular_used_selectors: Vec::new(),
+        angular_entry_component_refs: Vec::new(),
+        has_dynamic_component_render: false,
+        has_dynamic_dispatch: false,
     }
 }
 
@@ -184,6 +218,33 @@ fn import(source: &str, imported: ImportedName, local: &str, is_type_only: bool)
         span: oxc_span::Span::new(0, 10),
         source_span: oxc_span::Span::new(0, 10),
     }
+}
+
+fn require_call(source: &str, local: Option<&str>, destructured: &[&str]) -> RequireCallInfo {
+    RequireCallInfo {
+        source: source.to_string(),
+        span: oxc_span::Span::new(0, 10),
+        source_span: oxc_span::Span::new(0, 10),
+        destructured_names: destructured.iter().map(ToString::to_string).collect(),
+        local_name: local.map(ToString::to_string),
+    }
+}
+
+fn find_policy_violations(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    config: &ResolvedConfig,
+    suppressions: &SuppressionContext<'_>,
+    line_offsets_by_file: &super::super::LineOffsetsMap<'_>,
+) -> Vec<plow_types::results::PolicyViolation> {
+    find_policy_violations_raw(
+        graph,
+        modules,
+        config,
+        &FxHashSet::default(),
+        suppressions,
+        line_offsets_by_file,
+    )
 }
 
 #[test]
@@ -243,6 +304,146 @@ fn banned_call_matches_import_resolved_canonical_path() {
         find_policy_violations(&graph, &modules, &config, &suppressions, &line_offsets);
     assert_eq!(violations.len(), 1);
     assert_eq!(violations[0].matched, "execSync");
+}
+
+#[test]
+fn banned_effect_matches_catalogue_effect() {
+    let root = PathBuf::from("/tmp/policy-test");
+    let config = make_config(
+        root.clone(),
+        vec![pack(vec![banned_effect(
+            "no-network",
+            &[EffectKind::Network],
+        )])],
+        Severity::Warn,
+    );
+    let graph = build_graph(&root, &["src/app.ts"]);
+    let modules = vec![module(0, vec![callee("fetch", 0)], Vec::new())];
+    let suppressions = SuppressionContext::empty();
+    let line_offsets = FxHashMap::default();
+
+    let violations =
+        find_policy_violations(&graph, &modules, &config, &suppressions, &line_offsets);
+
+    assert_eq!(violations.len(), 1);
+    assert_eq!(violations[0].kind, PolicyRuleKind::BannedEffect);
+    assert_eq!(violations[0].matched, "network: fetch");
+}
+
+#[test]
+fn banned_effect_honors_catalogue_enabler() {
+    let root = PathBuf::from("/tmp/policy-test");
+    let config = make_config(
+        root.clone(),
+        vec![pack(vec![banned_effect("no-dom", &[EffectKind::Dom])])],
+        Severity::Warn,
+    );
+    let graph = build_graph(&root, &["src/app.ts"]);
+    let modules = vec![module(
+        0,
+        vec![callee("BrowserWindow", 0)],
+        vec![import(
+            "electron",
+            ImportedName::Named("BrowserWindow".to_string()),
+            "BrowserWindow",
+            false,
+        )],
+    )];
+    let suppressions = SuppressionContext::empty();
+    let line_offsets = FxHashMap::default();
+
+    let without_electron = find_policy_violations_raw(
+        &graph,
+        &modules,
+        &config,
+        &FxHashSet::default(),
+        &suppressions,
+        &line_offsets,
+    );
+    assert!(without_electron.is_empty());
+
+    let declared_deps = FxHashSet::from_iter(["electron".to_string()]);
+    let with_electron = find_policy_violations_raw(
+        &graph,
+        &modules,
+        &config,
+        &declared_deps,
+        &suppressions,
+        &line_offsets,
+    );
+    assert_eq!(with_electron.len(), 1);
+    assert_eq!(with_electron[0].matched, "dom: BrowserWindow");
+}
+
+#[test]
+fn banned_effect_honors_catalogue_import_provenance() {
+    let root = PathBuf::from("/tmp/policy-test");
+    let config = make_config(
+        root.clone(),
+        vec![pack(vec![banned_effect(
+            "no-crypto",
+            &[EffectKind::Crypto],
+        )])],
+        Severity::Warn,
+    );
+    let graph = build_graph(&root, &["src/app.ts"]);
+    let suppressions = SuppressionContext::empty();
+    let line_offsets = FxHashMap::default();
+
+    let crypto_module = module(
+        0,
+        vec![callee("crypto.verify", 0)],
+        vec![import(
+            "node:crypto",
+            ImportedName::Namespace,
+            "crypto",
+            false,
+        )],
+    );
+    let crypto_violations = find_policy_violations(
+        &graph,
+        &[crypto_module],
+        &config,
+        &suppressions,
+        &line_offsets,
+    );
+    assert!(crypto_violations.is_empty());
+
+    let jwt_module = module(
+        0,
+        vec![callee("jwt.verify", 0)],
+        vec![import("jsonwebtoken", ImportedName::Default, "jwt", false)],
+    );
+    let jwt_violations =
+        find_policy_violations(&graph, &[jwt_module], &config, &suppressions, &line_offsets);
+    assert_eq!(jwt_violations.len(), 1);
+    assert_eq!(jwt_violations[0].matched, "crypto: jwt.verify");
+}
+
+#[test]
+fn banned_effect_honors_commonjs_import_provenance() {
+    let root = PathBuf::from("/tmp/policy-test");
+    let config = make_config(
+        root.clone(),
+        vec![pack(vec![banned_effect(
+            "no-crypto",
+            &[EffectKind::Crypto],
+        )])],
+        Severity::Warn,
+    );
+    let graph = build_graph(&root, &["src/app.cjs"]);
+    let suppressions = SuppressionContext::empty();
+    let line_offsets = FxHashMap::default();
+    let mut module = module(0, vec![callee("crypto.createHash", 0)], Vec::new());
+    module
+        .require_calls
+        .push(require_call("node:crypto", Some("crypto"), &[]));
+
+    let violations =
+        find_policy_violations(&graph, &[module], &config, &suppressions, &line_offsets);
+
+    assert_eq!(violations.len(), 1);
+    assert_eq!(violations[0].matched, "crypto: crypto.createHash");
 }
 
 #[test]
@@ -645,6 +846,7 @@ fn stale_scoped_policy_suppression_preserves_full_token() {
             issue_kind: Some(token),
             is_file_level: true,
             kind_known: true,
+            ..
         } if token == "policy-violation:team-policy/removed-rule"
     ));
 }

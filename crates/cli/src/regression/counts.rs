@@ -1,4 +1,4 @@
-use plow_core::results::AnalysisResults;
+use plow_types::results::AnalysisResults;
 
 /// Regression baseline: stores issue counts per type for comparison.
 ///
@@ -67,7 +67,15 @@ pub struct CheckCounts {
     #[serde(default)]
     pub unused_component_emits: usize,
     #[serde(default)]
+    pub unused_component_inputs: usize,
+    #[serde(default)]
+    pub unused_component_outputs: usize,
+    #[serde(default)]
+    pub unused_svelte_events: usize,
+    #[serde(default)]
     pub unused_server_actions: usize,
+    #[serde(default)]
+    pub unused_load_data_keys: usize,
     #[serde(default)]
     pub unresolved_imports: usize,
     #[serde(default)]
@@ -110,7 +118,11 @@ impl CheckCounts {
             unrendered_components: results.unrendered_components.len(),
             unused_component_props: results.unused_component_props.len(),
             unused_component_emits: results.unused_component_emits.len(),
+            unused_component_inputs: results.unused_component_inputs.len(),
+            unused_component_outputs: results.unused_component_outputs.len(),
+            unused_svelte_events: results.unused_svelte_events.len(),
             unused_server_actions: results.unused_server_actions.len(),
+            unused_load_data_keys: results.unused_load_data_keys.len(),
             unresolved_imports: results.unresolved_imports.len(),
             unlisted_dependencies: results.unlisted_dependencies.len(),
             duplicate_exports: results.duplicate_exports.len(),
@@ -153,9 +165,21 @@ impl CheckCounts {
             // `plow_config::RegressionBaseline` has no `unused_component_emits`
             // field; default to 0 until the config baseline schema gains one.
             unused_component_emits: 0,
+            // `plow_config::RegressionBaseline` has no `unused_component_inputs`
+            // field; default to 0 until the config baseline schema gains one.
+            unused_component_inputs: 0,
+            // `plow_config::RegressionBaseline` has no `unused_component_outputs`
+            // field; default to 0 until the config baseline schema gains one.
+            unused_component_outputs: 0,
+            // `plow_config::RegressionBaseline` has no `unused_svelte_events`
+            // field; default to 0 until the config baseline schema gains one.
+            unused_svelte_events: 0,
             // `plow_config::RegressionBaseline` has no `unused_server_actions`
             // field; default to 0 until the config baseline schema gains one.
             unused_server_actions: 0,
+            // `plow_config::RegressionBaseline` has no `unused_load_data_keys`
+            // field; default to 0 until the config baseline schema gains one.
+            unused_load_data_keys: 0,
             unresolved_imports: b.unresolved_imports,
             unlisted_dependencies: b.unlisted_dependencies,
             duplicate_exports: b.duplicate_exports,
@@ -219,7 +243,11 @@ impl CheckCounts {
         push_delta!(unrendered_components);
         push_delta!(unused_component_props);
         push_delta!(unused_component_emits);
+        push_delta!(unused_component_inputs);
+        push_delta!(unused_component_outputs);
+        push_delta!(unused_svelte_events);
         push_delta!(unused_server_actions);
+        push_delta!(unused_load_data_keys);
         push_delta!(unresolved_imports);
         push_delta!(unlisted_dependencies);
         push_delta!(duplicate_exports);
@@ -259,7 +287,8 @@ pub struct DupesCounts {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plow_core::results::*;
+    use plow_types::output_dead_code::*;
+    use plow_types::results::*;
     use std::path::PathBuf;
 
     #[test]
@@ -305,7 +334,11 @@ mod tests {
             unrendered_components: 0,
             unused_component_props: 0,
             unused_component_emits: 0,
+            unused_component_inputs: 0,
+            unused_component_outputs: 0,
+            unused_svelte_events: 0,
             unused_server_actions: 0,
+            unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
@@ -352,7 +385,11 @@ mod tests {
                 unrendered_components: 0,
                 unused_component_props: 0,
                 unused_component_emits: 0,
+                unused_component_inputs: 0,
+                unused_component_outputs: 0,
+                unused_svelte_events: 0,
                 unused_server_actions: 0,
+                unused_load_data_keys: 0,
                 unresolved_imports: 0,
                 unlisted_dependencies: 1,
                 duplicate_exports: 0,
@@ -394,7 +431,11 @@ mod tests {
             unrendered_components: 0,
             unused_component_props: 0,
             unused_component_emits: 0,
+            unused_component_inputs: 0,
+            unused_component_outputs: 0,
+            unused_svelte_events: 0,
             unused_server_actions: 0,
+            unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 1,
             duplicate_exports: 0,
@@ -443,7 +484,11 @@ mod tests {
             unrendered_components: 0,
             unused_component_props: 0,
             unused_component_emits: 0,
+            unused_component_inputs: 0,
+            unused_component_outputs: 0,
+            unused_svelte_events: 0,
             unused_server_actions: 0,
+            unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
@@ -479,7 +524,11 @@ mod tests {
             unrendered_components: 0,
             unused_component_props: 0,
             unused_component_emits: 0,
+            unused_component_inputs: 0,
+            unused_component_outputs: 0,
+            unused_svelte_events: 0,
             unused_server_actions: 0,
+            unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
@@ -513,7 +562,11 @@ mod tests {
             unrendered_components: 0,
             unused_component_props: 0,
             unused_component_emits: 0,
+            unused_component_inputs: 0,
+            unused_component_outputs: 0,
+            unused_svelte_events: 0,
             unused_server_actions: 0,
+            unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,
@@ -541,7 +594,11 @@ mod tests {
             unrendered_components: 1,
             unused_component_props: 0,
             unused_component_emits: 0,
+            unused_component_inputs: 0,
+            unused_component_outputs: 0,
+            unused_svelte_events: 0,
             unused_server_actions: 0,
+            unused_load_data_keys: 0,
             unresolved_imports: 1,
             unlisted_dependencies: 1,
             duplicate_exports: 1,
@@ -578,7 +635,11 @@ mod tests {
             unrendered_components: 0,
             unused_component_props: 0,
             unused_component_emits: 0,
+            unused_component_inputs: 0,
+            unused_component_outputs: 0,
+            unused_svelte_events: 0,
             unused_server_actions: 0,
+            unused_load_data_keys: 0,
             unresolved_imports: 0,
             unlisted_dependencies: 0,
             duplicate_exports: 0,

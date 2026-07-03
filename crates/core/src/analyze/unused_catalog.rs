@@ -1,9 +1,13 @@
-//! Detection of unused pnpm catalog entries and unresolved catalog references
+//! Detection of unused package manager catalog entries and unresolved references
 //! in workspace `package.json` files.
 //!
-//! pnpm 9+ supports two catalog forms:
+//! pnpm 9+ supports two catalog forms in `pnpm-workspace.yaml`:
 //! - the top-level `catalog:` map ("default" catalog)
 //! - the top-level `catalogs:` map of named catalogs
+//!
+//! Bun supports matching catalog forms in root `package.json`, either under
+//! `workspaces.catalog` / `workspaces.catalogs` or top-level `catalog` /
+//! `catalogs`.
 //!
 //! Workspace packages reference catalog versions from their `dependencies` /
 //! `devDependencies` / `peerDependencies` / `optionalDependencies` via the
@@ -20,8 +24,8 @@
 //! 2. **`unresolved-catalog-references`**: the inverse. A `package.json`
 //!    references a `catalog:` or `catalog:<name>` that does not declare the
 //!    consumed package. `pnpm install` errors with
-//!    `ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL`; plow surfaces
-//!    this statically before any install runs. Each finding carries
+//!    the package manager install; plow surfaces this statically before any
+//!    install runs. Each finding carries
 //!    `available_in_catalogs`: other catalogs in the same workspace that DO
 //!    declare the package, so consumers can flip the reference instead of
 //!    adding a new catalog entry. Suppression: `ignoreCatalogReferences`
@@ -35,42 +39,60 @@ use std::path::{Path, PathBuf};
 
 use plow_config::{
     CompiledIgnoreCatalogReferenceRule, PackageJson, PnpmCatalogData, ResolvedConfig,
-    WorkspaceInfo, parse_pnpm_catalog_data,
+    WorkspaceInfo, parse_package_json_catalog_data, parse_pnpm_catalog_data,
 };
 use plow_types::results::{EmptyCatalogGroup, UnresolvedCatalogReference, UnusedCatalogEntry};
 use rustc_hash::FxHashSet;
 
 const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
+const PACKAGE_JSON_FILE: &str = "package.json";
 
-/// Catalog analysis state: parsed YAML data and walked consumer references.
+/// Catalog analysis state: parsed catalog data and walked consumer references.
 /// Built once per analysis run so both detectors share parsing cost.
 pub struct PnpmCatalogState {
     data: PnpmCatalogData,
     consumers: CatalogConsumers,
+    source_path: PathBuf,
 }
 
-/// Read `pnpm-workspace.yaml` and walk workspace `package.json` files to build
-/// shared catalog analysis state. Returns `None` when the YAML file is missing
-/// or unreadable; callers should skip both catalog detectors in that case.
+/// Read catalog declarations and walk workspace `package.json` files to build
+/// shared catalog analysis state. `pnpm-workspace.yaml` stays the preferred
+/// source when present; otherwise Bun-style root `package.json` catalogs are
+/// read from `workspaces.catalog` / `workspaces.catalogs`.
 pub fn gather_pnpm_catalog_state(
     config: &ResolvedConfig,
     workspaces: &[WorkspaceInfo],
 ) -> Option<PnpmCatalogState> {
     let yaml_path = config.root.join(PNPM_WORKSPACE_FILE);
-    let yaml_source = std::fs::read_to_string(&yaml_path).ok()?;
-
-    let data = parse_pnpm_catalog_data(&yaml_source);
+    let (data, source_path) = if let Ok(yaml_source) = std::fs::read_to_string(&yaml_path) {
+        (
+            parse_pnpm_catalog_data(&yaml_source),
+            PathBuf::from(PNPM_WORKSPACE_FILE),
+        )
+    } else {
+        let package_json_path = config.root.join(PACKAGE_JSON_FILE);
+        let package_json_source = std::fs::read_to_string(&package_json_path).ok()?;
+        let data = parse_package_json_catalog_data(&package_json_source);
+        if data.catalogs.is_empty() && data.empty_named_catalog_groups.is_empty() {
+            return None;
+        }
+        (data, PathBuf::from(PACKAGE_JSON_FILE))
+    };
     let consumer_pkg_paths = collect_consumer_pkg_paths(config, workspaces);
     let consumers = collect_catalog_consumers(&consumer_pkg_paths, &config.root);
 
-    Some(PnpmCatalogState { data, consumers })
+    Some(PnpmCatalogState {
+        data,
+        consumers,
+        source_path,
+    })
 }
 
 /// Emit one `UnusedCatalogEntry` for every catalog entry not referenced by any
 /// workspace `package.json` via the `catalog:` protocol.
 #[deprecated(
     since = "2.76.0",
-    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/plow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_api::run_dead_code for typed output; serialize with plow_api::serialize_dead_code_programmatic_json for JSON output. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn find_unused_catalog_entries(state: &PnpmCatalogState) -> Vec<UnusedCatalogEntry> {
     if state.data.catalogs.is_empty() {
@@ -99,7 +121,7 @@ pub fn find_unused_catalog_entries(state: &PnpmCatalogState) -> Vec<UnusedCatalo
             findings.push(UnusedCatalogEntry {
                 entry_name: entry.package_name.clone(),
                 catalog_name: catalog.name.clone(),
-                path: PathBuf::from(PNPM_WORKSPACE_FILE),
+                path: state.source_path.clone(),
                 line: entry.line,
                 hardcoded_consumers,
             });
@@ -114,7 +136,7 @@ pub fn find_unused_catalog_entries(state: &PnpmCatalogState) -> Vec<UnusedCatalo
 /// intentionally ignored.
 #[deprecated(
     since = "2.76.0",
-    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/plow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_api::run_dead_code for typed output; serialize with plow_api::serialize_dead_code_programmatic_json for JSON output. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn find_empty_catalog_groups(state: &PnpmCatalogState) -> Vec<EmptyCatalogGroup> {
     state
@@ -123,7 +145,7 @@ pub fn find_empty_catalog_groups(state: &PnpmCatalogState) -> Vec<EmptyCatalogGr
         .iter()
         .map(|group| EmptyCatalogGroup {
             catalog_name: group.name.clone(),
-            path: PathBuf::from(PNPM_WORKSPACE_FILE),
+            path: state.source_path.clone(),
             line: group.line,
         })
         .collect()
@@ -140,7 +162,7 @@ pub fn find_empty_catalog_groups(state: &PnpmCatalogState) -> Vec<EmptyCatalogGr
 /// Findings matching any rule in `ignore_rules` are suppressed.
 #[deprecated(
     since = "2.76.0",
-    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/plow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_api::run_dead_code for typed output; serialize with plow_api::serialize_dead_code_programmatic_json for JSON output. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn find_unresolved_catalog_references(
     state: &PnpmCatalogState,
@@ -285,53 +307,81 @@ impl ConsumerKey<'_> {
 fn collect_catalog_consumers(pkg_paths: &[PathBuf], root: &Path) -> CatalogConsumers {
     let mut consumers = CatalogConsumers::default();
     for pkg_path in pkg_paths {
-        let Ok(raw_source) = std::fs::read_to_string(pkg_path) else {
-            continue;
-        };
-        let Ok(pkg) = serde_json::from_str::<PackageJson>(&raw_source) else {
-            continue;
-        };
-        let relative_path = pkg_path
-            .strip_prefix(root)
-            .map_or_else(|_| pkg_path.clone(), Path::to_path_buf);
-        let absolute_path = pkg_path.clone();
-
-        let line_map = scan_dep_lines(&raw_source);
-
-        for (section, deps) in [
-            (DepSection::Dependencies, pkg.dependencies.as_ref()),
-            (DepSection::DevDependencies, pkg.dev_dependencies.as_ref()),
-            (DepSection::PeerDependencies, pkg.peer_dependencies.as_ref()),
-            (
-                DepSection::OptionalDependencies,
-                pkg.optional_dependencies.as_ref(),
-            ),
-        ] {
-            let Some(deps) = deps else {
-                continue;
-            };
-            for (name, version) in deps {
-                if let Some(catalog) = parse_catalog_reference(version) {
-                    consumers.references.insert(OwnedConsumerKey {
-                        package_name: name.clone(),
-                        catalog_name: catalog.to_string(),
-                    });
-                    let line = line_map.line_for(section, name).unwrap_or(1);
-                    consumers.referenced_with_locations.push(ConsumerReference {
-                        package_name: name.clone(),
-                        catalog_name: catalog.to_string(),
-                        consumer_path: absolute_path.clone(),
-                        line,
-                    });
-                } else if is_hardcoded_version(version) {
-                    consumers
-                        .hardcoded
-                        .push((name.clone(), relative_path.clone()));
-                }
-            }
-        }
+        collect_catalog_consumers_from_package(pkg_path, root, &mut consumers);
     }
     consumers
+}
+
+fn collect_catalog_consumers_from_package(
+    pkg_path: &Path,
+    root: &Path,
+    consumers: &mut CatalogConsumers,
+) {
+    let Ok(raw_source) = std::fs::read_to_string(pkg_path) else {
+        return;
+    };
+    let Ok(pkg) = serde_json::from_str::<PackageJson>(&raw_source) else {
+        return;
+    };
+    let relative_path = pkg_path
+        .strip_prefix(root)
+        .map_or_else(|_| pkg_path.to_path_buf(), Path::to_path_buf);
+    let line_map = scan_dep_lines(&raw_source);
+    let ctx = CatalogConsumerContext {
+        line_map: &line_map,
+        absolute_path: pkg_path,
+        relative_path: &relative_path,
+    };
+
+    for (section, deps) in [
+        (DepSection::Dependencies, pkg.dependencies.as_ref()),
+        (DepSection::DevDependencies, pkg.dev_dependencies.as_ref()),
+        (DepSection::PeerDependencies, pkg.peer_dependencies.as_ref()),
+        (
+            DepSection::OptionalDependencies,
+            pkg.optional_dependencies.as_ref(),
+        ),
+    ] {
+        let Some(deps) = deps else {
+            continue;
+        };
+        for (name, version) in deps {
+            collect_catalog_consumer_dependency(consumers, name, version, section, &ctx);
+        }
+    }
+}
+
+/// Per-package location context for catalog consumer attribution.
+struct CatalogConsumerContext<'a> {
+    line_map: &'a DepLineMap,
+    absolute_path: &'a Path,
+    relative_path: &'a Path,
+}
+
+fn collect_catalog_consumer_dependency(
+    consumers: &mut CatalogConsumers,
+    name: &str,
+    version: &str,
+    section: DepSection,
+    ctx: &CatalogConsumerContext<'_>,
+) {
+    if let Some(catalog) = parse_catalog_reference(version) {
+        consumers.references.insert(OwnedConsumerKey {
+            package_name: name.to_string(),
+            catalog_name: catalog.to_string(),
+        });
+        let line = ctx.line_map.line_for(section, name).unwrap_or(1);
+        consumers.referenced_with_locations.push(ConsumerReference {
+            package_name: name.to_string(),
+            catalog_name: catalog.to_string(),
+            consumer_path: ctx.absolute_path.to_path_buf(),
+            line,
+        });
+    } else if is_hardcoded_version(version) {
+        consumers
+            .hardcoded
+            .push((name.to_string(), ctx.relative_path.to_path_buf()));
+    }
 }
 
 /// Parse a `catalog:` protocol value. Returns the catalog name (`"default"`
@@ -368,6 +418,13 @@ enum DepSection {
     PeerDependencies,
     OptionalDependencies,
 }
+
+const DEP_SECTIONS: &[DepSection] = &[
+    DepSection::Dependencies,
+    DepSection::DevDependencies,
+    DepSection::PeerDependencies,
+    DepSection::OptionalDependencies,
+];
 
 impl DepSection {
     const fn json_key(self) -> &'static str {
@@ -406,75 +463,108 @@ impl DepLineMap {
 /// Plain JSON: no comments, no trailing commas. A package.json with comments
 /// would fail `serde_json::from_str` upstream and never reach this scanner.
 fn scan_dep_lines(source: &str) -> DepLineMap {
-    let mut entries = Vec::new();
-    let mut current_section: Option<DepSection> = None;
-    let mut section_depth_at_open: u32 = 0;
-    let mut current_depth: u32 = 0;
-
+    let mut scanner = DepLineScanner::default();
     for (idx, raw_line) in source.lines().enumerate() {
+        scanner.scan_line(idx, raw_line);
+    }
+    scanner.finish()
+}
+
+#[derive(Default)]
+struct DepLineScanner {
+    entries: Vec<((DepSection, String), u32)>,
+    current_section: Option<DepSection>,
+    section_depth_at_open: u32,
+    current_depth: u32,
+}
+
+impl DepLineScanner {
+    fn scan_line(&mut self, idx: usize, raw_line: &str) {
         let line_no = u32::try_from(idx).unwrap_or(u32::MAX).saturating_add(1);
         let trimmed = raw_line.trim();
+        self.enter_section_if_opened(trimmed, raw_line);
 
-        if current_section.is_none() {
-            for section in [
-                DepSection::Dependencies,
-                DepSection::DevDependencies,
-                DepSection::PeerDependencies,
-                DepSection::OptionalDependencies,
-            ] {
-                let needle = format!("\"{}\"", section.json_key());
-                if trimmed.starts_with(&needle) && raw_line.contains('{') {
-                    current_section = Some(section);
-                    section_depth_at_open = current_depth.saturating_add(1);
-                    break;
-                }
-            }
+        let depth_before = self.current_depth;
+        let delta = brace_delta_outside_strings(raw_line);
+        self.record_dep_key_if_in_section(depth_before, trimmed, line_no);
+        self.current_depth = depth_before
+            .saturating_add(delta.opens)
+            .saturating_sub(delta.closes);
+        self.leave_section_if_closed();
+    }
+
+    fn enter_section_if_opened(&mut self, trimmed: &str, raw_line: &str) {
+        if self.current_section.is_some() {
+            return;
         }
 
-        let mut opens: u32 = 0;
-        let mut closes: u32 = 0;
-        let mut in_string = false;
-        let mut escaped = false;
-        for ch in raw_line.chars() {
-            if escaped {
-                escaped = false;
-                continue;
+        for section in DEP_SECTIONS {
+            let needle = format!("\"{}\"", section.json_key());
+            if trimmed.starts_with(&needle) && raw_line.contains('{') {
+                self.current_section = Some(*section);
+                self.section_depth_at_open = self.current_depth.saturating_add(1);
+                break;
             }
-            if ch == '\\' {
-                escaped = true;
-                continue;
-            }
-            if ch == '"' {
-                in_string = !in_string;
-                continue;
-            }
-            if in_string {
-                continue;
-            }
-            match ch {
-                '{' => opens = opens.saturating_add(1),
-                '}' => closes = closes.saturating_add(1),
-                _ => {}
-            }
-        }
-
-        let depth_before = current_depth;
-        let depth_after_opens = depth_before.saturating_add(opens);
-        if let Some(section) = current_section
-            && depth_before == section_depth_at_open
-            && let Some(name) = parse_json_key(trimmed)
-        {
-            entries.push(((section, name), line_no));
-        }
-
-        current_depth = depth_after_opens.saturating_sub(closes);
-
-        if current_section.is_some() && current_depth < section_depth_at_open {
-            current_section = None;
         }
     }
 
-    DepLineMap { entries }
+    fn record_dep_key_if_in_section(&mut self, depth_before: u32, trimmed: &str, line_no: u32) {
+        if let Some(section) = self.current_section
+            && depth_before == self.section_depth_at_open
+            && let Some(name) = parse_json_key(trimmed)
+        {
+            self.entries.push(((section, name), line_no));
+        }
+    }
+
+    fn leave_section_if_closed(&mut self) {
+        if self.current_section.is_some() && self.current_depth < self.section_depth_at_open {
+            self.current_section = None;
+        }
+    }
+
+    fn finish(self) -> DepLineMap {
+        DepLineMap {
+            entries: self.entries,
+        }
+    }
+}
+
+#[derive(Default)]
+struct BraceDelta {
+    opens: u32,
+    closes: u32,
+}
+
+fn brace_delta_outside_strings(raw_line: &str) -> BraceDelta {
+    let mut delta = BraceDelta::default();
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for ch in raw_line.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if in_string {
+            continue;
+        }
+        match ch {
+            '{' => delta.opens = delta.opens.saturating_add(1),
+            '}' => delta.closes = delta.closes.saturating_add(1),
+            _ => {}
+        }
+    }
+
+    delta
 }
 
 /// Parse a JSON object key from a trimmed line of the form `"key": value,?`.
